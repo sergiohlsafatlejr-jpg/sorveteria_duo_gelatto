@@ -1,0 +1,116 @@
+# Sistema de Gestão Sorveteria Duo Gelatto — TODO
+
+## Banco de Dados / Schema
+- [x] Tabela de clientes (customers)
+- [x] Tabela de transações de pontos (points_transactions)
+- [x] Tabela de regras de pontos (points_rules)
+- [x] Tabela de produtos/mercadorias (products)
+- [x] Tabela de categorias de produtos (product_categories)
+- [x] Tabela de movimentações de estoque (stock_movements)
+- [x] Tabela de vendas (sales)
+- [x] Tabela de itens de venda (sale_items)
+- [x] Tabela de permissões de usuário (user_permissions)
+- [x] Tabela de log de auditoria (audit_logs)
+- [x] Tabela de configurações do conector externo (external_connectors)
+- [x] Tabela de notificações agendadas (scheduled_notifications)
+- [x] Tabela de templates de notificação (notification_templates)
+- [x] Migração executada com sucesso (pnpm db:push)
+
+## Backend - Routers tRPC
+- [x] Router de clientes (customers): CRUD completo
+- [x] Router de pontos (points): adicionar, consultar, resgatar
+- [x] Router de regras de pontos (pointsRules): configurar regras
+- [x] Router de produtos (products): CRUD completo
+- [x] Router de estoque (stock): movimentações, alertas
+- [x] Router de vendas (sales): registrar, listar, relatórios
+- [x] Router financeiro (finance): faturamento, análise
+- [x] Router de usuários (users): CRUD, permissões
+- [x] Router de permissões (permissions): gestão de roles
+- [x] Router de conector externo (connector): sincronização MySQL externo
+- [x] Router de notificações (notifications): templates, logs, envio WhatsApp/Instagram/Meta
+- [x] Router de dashboard (dashboard): métricas e KPIs
+- [x] Router de log de auditoria (auditLog)
+- [x] Controle de acesso por função (admin, manager, attendant, user)
+- [x] Correção de queries SQL compatíveis com only_full_group_by
+
+## Frontend - Layout e Navegação
+- [x] DashboardLayout com sidebar para sistema de gestão
+- [x] Tema visual: cores da marca Duo Gelatto (roxo/rosa/laranja)
+- [x] Navegação com controle de permissões por role
+- [x] Página de acesso negado
+
+## Frontend - Módulo de Clientes
+- [x] Listagem de clientes com busca e filtros
+- [x] Formulário de cadastro/edição de cliente
+- [x] Campos: nome, data nascimento, CEP, telefone, valor compra
+- [x] Visualização de pontos do cliente
+- [x] Histórico de transações de pontos
+- [x] Indicador de aniversariantes do dia/mês
+
+## Frontend - Programa de Pontos
+- [x] Configuração de regras de pontos
+- [x] Adicionar pontos manualmente
+- [x] Resgatar pontos
+- [x] Histórico de pontos por cliente
+
+## Frontend - Módulo de Estoque
+- [x] Listagem de produtos com filtros
+- [x] Formulário de cadastro/edição de produto
+- [x] Controle de estoque (entrada/saída)
+- [x] Alertas de estoque baixo
+- [x] Relatório de movimentações
+
+## Frontend - Módulo Financeiro
+- [x] Registro de vendas
+- [x] Relatório de faturamento por período
+- [x] Análise de desempenho (gráficos)
+
+## Frontend - Gestão de Usuários e Permissões
+- [x] Listagem de usuários do sistema
+- [x] Formulário de criação/edição de usuário
+- [x] Atribuição de roles: admin, gerente, atendente
+- [x] Log de auditoria de permissões
+- [x] Notificação de acesso negado
+
+## Frontend - Conector Banco Externo
+- [x] Configuração de conexão MySQL externo
+- [x] Sincronização manual de dados
+- [x] Status da conexão
+- [x] Log de sincronizações
+
+## Frontend - Notificações WhatsApp/Instagram/Meta
+- [x] Configuração de templates de mensagem
+- [x] Envio automático de aniversário
+- [x] Notificação de pontos acumulados
+- [x] Envio de promoções
+- [x] Histórico de notificações enviadas
+
+## Frontend - Dashboard e Métricas
+- [x] KPIs principais (vendas, clientes, estoque)
+- [x] Gráfico de vendas por período
+- [x] Gráfico de clientes ativos
+- [x] Produtos mais vendidos
+- [x] Clientes com mais pontos
+
+## Frontend - Relatórios
+- [x] Página de relatórios com análises completas
+- [x] Gráficos de vendas, produtos, clientes e estoque
+
+## Testes
+- [x] Testes de autenticação (logout, me)
+- [x] Testes de controle de acesso por função
+- [x] Testes de programa de pontos
+- [x] Testes de produtos
+- [x] Testes de clientes
+- [x] Testes de dashboard
+- [x] Testes de notificações
+- [x] Testes de conector externo
+- [x] 23/23 testes passando
+
+## Pendente (futuras iterações)
+- [ ] Integração real com API WhatsApp Business (requer chave de API)
+- [ ] Integração real com Instagram Graph API (requer chave de API)
+- [ ] Integração real com Meta Ads API (requer chave de API)
+- [ ] Sincronização automática agendada com banco externo
+- [ ] Exportação de relatórios em PDF/Excel
+- [ ] App mobile para atendentes
