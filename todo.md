@@ -200,3 +200,14 @@
 - [x] Rota e menu lateral atualizados
 - [x] Exportação CSV do fluxo de caixa
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Previsão de Faturamento com Calendário Inteligente (19/03)
+- [x] API Open-Meteo (gratuita, sem chave) para Goiânia/GO
+- [x] API BrasilAPI para feriados nacionais do ano
+- [x] Endpoint backend: fin.forecastCalendar.getCalendar
+- [x] Configuração de médias por tipo de dia (slider ajustável)
+- [x] Fator de ajuste por clima: sol 100%, nublado -10%, chuva -30%, tempestade -44%
+- [x] Tela de calendário visual com cores, ícones de clima e tooltip detalhado
+- [x] Painel de KPIs com projeção total e contagem por tipo de dia
+- [x] Tabela de resumo por semana
+- [x] TypeScript 0 erros, 23/23 testes passando

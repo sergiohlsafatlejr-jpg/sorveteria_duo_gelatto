@@ -556,6 +556,137 @@ export const finRouter = router({
       .mutation(({ ctx, input }) => deleteFinRevenueForecast(input.id, ctx.user.id)),
   }),
 
+  // ─── Forecast Calendar ────────────────────────────────────────────────────────────────────────────
+  forecastCalendar: router({
+    getCalendar: protectedProcedure
+      .input(z.object({
+        year: z.number().int().min(2020).max(2030),
+        month: z.number().int().min(1).max(12),
+        /** Configurações de média por tipo de dia */
+        avgWeekday: z.number().default(2000),
+        avgSaturday: z.number().default(5300),
+        avgSundayHoliday: z.number().default(8300),
+        /** Fator de redução por chuva (0-1, default 0.7 = reduz 30%) */
+        rainFactor: z.number().min(0).max(1).default(0.7),
+      }))
+      .query(async ({ input }) => {
+        const { year, month, avgWeekday, avgSaturday, avgSundayHoliday, rainFactor } = input;
+
+        // 1. Buscar feriados nacionais
+        let holidays: { date: string; name: string }[] = [];
+        try {
+          const res = await fetch(`https://brasilapi.com.br/api/feriados/v1/${year}`);
+          if (res.ok) holidays = await res.json();
+        } catch { /* ignora erros de rede */ }
+        const holidayDates = new Set(holidays.map(h => h.date));
+        const holidayNames = new Map(holidays.map(h => [h.date, h.name]));
+
+        // 2. Buscar previsão do tempo (Open-Meteo, Goiânia)
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
+        const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+        type WeatherDay = { code: number; tempMax: number; precip: number; precipProb: number };
+        const weatherMap = new Map<string, WeatherDay>();
+        try {
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=-16.6864&longitude=-49.2643&daily=weathercode,temperature_2m_max,precipitation_sum,precipitation_probability_max&timezone=America%2FSao_Paulo&start_date=${dateFrom}&end_date=${dateTo}`;
+          const res = await fetch(url);
+          if (res.ok) {
+            const data = await res.json();
+            const { time, weathercode, temperature_2m_max, precipitation_sum, precipitation_probability_max } = data.daily;
+            time.forEach((d: string, i: number) => {
+              weatherMap.set(d, {
+                code: weathercode[i],
+                tempMax: temperature_2m_max[i],
+                precip: precipitation_sum[i] ?? 0,
+                precipProb: precipitation_probability_max[i] ?? 0,
+              });
+            });
+          }
+        } catch { /* ignora erros de rede */ }
+
+        // 3. Montar os dias do mês
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const days = Array.from({ length: daysInMonth }, (_, i) => {
+          const day = i + 1;
+          const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const date = new Date(year, month - 1, day);
+          const weekday = date.getDay(); // 0=Dom, 6=Sáb
+          const isHoliday = holidayDates.has(dateStr);
+          const holidayName = holidayNames.get(dateStr);
+          const isSunday = weekday === 0;
+          const isSaturday = weekday === 6;
+          const isPast = date < today;
+          const isToday = date.getTime() === today.getTime();
+
+          // Tipo do dia
+          let dayType: "weekday" | "saturday" | "sunday" | "holiday";
+          if (isHoliday) dayType = "holiday";
+          else if (isSunday) dayType = "sunday";
+          else if (isSaturday) dayType = "saturday";
+          else dayType = "weekday";
+
+          // Média base
+          let baseAvg = dayType === "weekday" ? avgWeekday
+            : dayType === "saturday" ? avgSaturday
+            : avgSundayHoliday;
+
+          // Ajuste por clima
+          const weather = weatherMap.get(dateStr);
+          let weatherLabel: "sun" | "cloud" | "rain" | "storm" | "unknown" = "unknown";
+          let projectedAmount = baseAvg;
+          if (weather) {
+            const { code, precip, precipProb } = weather;
+            // WMO codes: 0=claro, 1-3=nublado, 45-48=neblina, 51-67=chuviscos, 71-86=neve, 80-99=chuva/trovoada
+            if (code === 0) weatherLabel = "sun";
+            else if (code <= 3) weatherLabel = "cloud";
+            else if (code <= 67 || (code >= 80 && code <= 84)) {
+              weatherLabel = precip > 5 || precipProb > 60 ? "rain" : "cloud";
+            }
+            else if (code >= 85 || code >= 95) weatherLabel = "storm";
+            else weatherLabel = "cloud";
+
+            if (weatherLabel === "rain") projectedAmount = baseAvg * rainFactor;
+            else if (weatherLabel === "storm") projectedAmount = baseAvg * (rainFactor * 0.8);
+            else if (weatherLabel === "cloud") projectedAmount = baseAvg * 0.9;
+          }
+
+          return {
+            date: dateStr,
+            day,
+            weekday,
+            dayType,
+            isHoliday,
+            holidayName: holidayName ?? null,
+            isPast,
+            isToday,
+            weather: weather ? {
+              label: weatherLabel,
+              code: weather.code,
+              tempMax: weather.tempMax,
+              precip: weather.precip,
+              precipProb: weather.precipProb,
+            } : null,
+            baseAvg,
+            projectedAmount: Math.round(projectedAmount),
+          };
+        });
+
+        const totalProjected = days.reduce((s, d) => s + d.projectedAmount, 0);
+        const totalBase = days.reduce((s, d) => s + d.baseAvg, 0);
+        const weekdayCount = days.filter(d => d.dayType === "weekday").length;
+        const saturdayCount = days.filter(d => d.dayType === "saturday").length;
+        const sundayHolidayCount = days.filter(d => d.dayType === "sunday" || d.dayType === "holiday").length;
+
+        return {
+          year, month, daysInMonth,
+          days,
+          summary: { totalProjected, totalBase, weekdayCount, saturdayCount, sundayHolidayCount },
+        };
+      }),
+  }),
+
   // ─── Cashflow Monthly ────────────────────────────────────────────────────────────────────────────
   cashflow: router({
     monthly: protectedProcedure
