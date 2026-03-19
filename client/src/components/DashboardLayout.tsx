@@ -27,6 +27,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
+import { trpc } from "@/lib/trpc";
 import {
   BarChart3,
   Bell,
@@ -58,8 +59,8 @@ import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
 
 // ─── Menu structure ──────────────────────────────────────────────────────────
-type MenuItem = { icon: React.ElementType; label: string; path: string };
-type MenuGroup = { icon: React.ElementType; label: string; items: MenuItem[] };
+type MenuItem = { icon: React.ElementType; label: string; path: string; badgeKey?: string };
+type MenuGroup = { icon: React.ElementType; label: string; badgeKey?: string; items: MenuItem[] };
 type TopItem = { icon: React.ElementType; label: string; path: string };
 
 const topItems: TopItem[] = [
@@ -70,9 +71,10 @@ const menuGroups: MenuGroup[] = [
   {
     icon: Package,
     label: "Estoque",
+    badgeKey: "lowStock",
     items: [
       { icon: Package, label: "Cadastro de Produtos", path: "/products-register" },
-      { icon: Package, label: "Estoque", path: "/products" },
+      { icon: Package, label: "Estoque", path: "/products", badgeKey: "lowStock" },
       { icon: BarChart3, label: "Relatórios de Estoque", path: "/reports" },
     ],
   },
@@ -96,10 +98,11 @@ const menuGroups: MenuGroup[] = [
   {
     icon: DollarSign,
     label: "Financeiro",
+    badgeKey: "totalFinancial",
     items: [
       { icon: DollarSign, label: "Painel Financeiro", path: "/fin/dashboard" },
-      { icon: Receipt, label: "Contas a Pagar", path: "/fin/payables" },
-      { icon: Wallet, label: "Contas a Receber", path: "/fin/receivables" },
+      { icon: Receipt, label: "Contas a Pagar", path: "/fin/payables", badgeKey: "overduePayables" },
+      { icon: Wallet, label: "Contas a Receber", path: "/fin/receivables", badgeKey: "overdueReceivables" },
       { icon: Building2, label: "Extratos Bancários", path: "/fin/bank-statements" },
       { icon: PiggyBank, label: "Custos", path: "/fin/costs" },
       { icon: BookOpen, label: "DRE", path: "/fin/dre" },
@@ -172,6 +175,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   );
 }
 
+// ─── Alert badge component ────────────────────────────────────────────────────
+function AlertBadge({ count, variant = "destructive" }: { count: number; variant?: "destructive" | "warning" }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className={`inline-flex items-center justify-center rounded-full text-[10px] font-bold leading-none min-w-[18px] h-[18px] px-1 shrink-0 ${
+        variant === "warning"
+          ? "bg-orange-500 text-white"
+          : "bg-destructive text-destructive-foreground"
+      }`}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 function DashboardLayoutContent({
   children,
   setSidebarWidth,
@@ -186,6 +205,20 @@ function DashboardLayoutContent({
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+
+  // Fetch alert counts with polling every 60 seconds
+  const { data: alertCounts } = trpc.alerts.counts.useQuery(undefined, {
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  // Map badge keys to counts
+  const badgeValues: Record<string, number> = {
+    lowStock: alertCounts?.lowStock ?? 0,
+    overduePayables: alertCounts?.overduePayables ?? 0,
+    overdueReceivables: alertCounts?.overdueReceivables ?? 0,
+    totalFinancial: alertCounts?.totalFinancial ?? 0,
+  };
 
   // Track which groups are open — default open the group containing the current route
   const getDefaultOpenGroups = () => {
@@ -254,6 +287,10 @@ function DashboardLayoutContent({
                   <p className="text-xs text-sidebar-foreground/60 leading-tight">Sistema de Gestão</p>
                 </div>
               )}
+              {/* Total alert indicator when collapsed */}
+              {isCollapsed && (alertCounts?.total ?? 0) > 0 && (
+                <AlertBadge count={alertCounts?.total ?? 0} />
+              )}
             </div>
           </SidebarHeader>
 
@@ -285,6 +322,8 @@ function DashboardLayoutContent({
                   (item) => location === item.path || (item.path !== "/" && location.startsWith(item.path))
                 );
                 const isOpen = openGroups[group.label] ?? false;
+                const groupBadgeCount = group.badgeKey ? (badgeValues[group.badgeKey] ?? 0) : 0;
+                const isFinancialGroup = group.badgeKey === "totalFinancial";
 
                 return (
                   <Collapsible
@@ -304,6 +343,13 @@ function DashboardLayoutContent({
                           <span className={`flex-1 ${isGroupActive ? "text-sidebar-foreground font-medium" : "text-sidebar-foreground/80"}`}>
                             {group.label}
                           </span>
+                          {/* Badge on group header */}
+                          {groupBadgeCount > 0 && (
+                            <AlertBadge
+                              count={groupBadgeCount}
+                              variant={isFinancialGroup ? "destructive" : "warning"}
+                            />
+                          )}
                           <ChevronRight
                             className={`h-3.5 w-3.5 shrink-0 text-sidebar-foreground/50 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
                           />
@@ -314,6 +360,8 @@ function DashboardLayoutContent({
                         <SidebarMenuSub className="ml-1 border-l border-sidebar-border/50 pl-2 mt-0.5 mb-0.5">
                           {group.items.map((item) => {
                             const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
+                            const itemBadgeCount = item.badgeKey ? (badgeValues[item.badgeKey] ?? 0) : 0;
+                            const isItemFinancial = item.badgeKey === "overduePayables" || item.badgeKey === "overdueReceivables";
                             return (
                               <SidebarMenuSubItem key={item.path + item.label}>
                                 <SidebarMenuSubButton
@@ -322,9 +370,16 @@ function DashboardLayoutContent({
                                   className="h-8 rounded-md transition-all cursor-pointer"
                                 >
                                   <item.icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-sidebar-primary" : "text-sidebar-foreground/60"}`} />
-                                  <span className={`text-xs ${isActive ? "text-sidebar-foreground font-medium" : "text-sidebar-foreground/75"}`}>
+                                  <span className={`text-xs flex-1 ${isActive ? "text-sidebar-foreground font-medium" : "text-sidebar-foreground/75"}`}>
                                     {item.label}
                                   </span>
+                                  {/* Badge on sub-item */}
+                                  {itemBadgeCount > 0 && (
+                                    <AlertBadge
+                                      count={itemBadgeCount}
+                                      variant={isItemFinancial ? "destructive" : "warning"}
+                                    />
+                                  )}
                                 </SidebarMenuSubButton>
                               </SidebarMenuSubItem>
                             );
@@ -398,6 +453,10 @@ function DashboardLayoutContent({
               <IceCream className="h-5 w-5 text-primary" />
               <span className="font-semibold text-sm">Duo Gelatto</span>
             </div>
+            {/* Mobile total alert badge */}
+            {(alertCounts?.total ?? 0) > 0 && (
+              <AlertBadge count={alertCounts?.total ?? 0} />
+            )}
           </div>
         )}
         <main className="flex-1 p-4 md:p-6">{children}</main>

@@ -155,3 +155,14 @@
 - [x] Grupo Vendas: Vendas, Notificações
 - [x] Grupo Financeiro: Painel, Contas a Pagar, Contas a Receber, Extratos, Custos, DRE, Previsão, Categorias, Bancos, Cadastro de Custos
 - [x] Grupo Administração: Usuários, Conector Externo
+
+## Badges de Notificação no Menu Lateral
+- [x] Endpoint tRPC: alerts.counts — retorna overduePayables, overdueReceivables, lowStock, totalFinancial, total
+- [x] Badge vermelho no grupo Financeiro com total de contas vencidas (pagar + receber)
+- [x] Badge laranja no grupo Estoque com total de produtos com estoque baixo
+- [x] Badge vermelho no sub-item "Contas a Pagar" com contagem específica
+- [x] Badge vermelho no sub-item "Contas a Receber" com contagem específica
+- [x] Badge laranja no sub-item "Estoque" com contagem específica
+- [x] Badge total no cabeçalho quando sidebar colapsada
+- [x] Badge total na barra mobile
+- [x] Polling automático a cada 60 segundos para atualizar contagens

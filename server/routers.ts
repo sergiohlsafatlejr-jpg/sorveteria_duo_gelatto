@@ -6,6 +6,9 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { finRouter } from "./routers/fin";
+import { getDb } from "./db";
+import { finTransactions, finReceivables, products } from "../drizzle/schema";
+import { and, eq, lt, lte, sql } from "drizzle-orm";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function requireRole(role: "admin" | "manager", ctx: { user: { role: string } }) {
@@ -677,7 +680,55 @@ export const appRouter = router({
   dashboard: dashboardRouter,
   connector: connectorRouter,
   notifications: notificationsRouter,
-  fin: finRouter,
+   fin: finRouter,
+  alerts: router({
+    counts: protectedProcedure.query(async ({ ctx }) => {
+      const dbInstance = await getDb();
+      if (!dbInstance) return { overduePayables: 0, overdueReceivables: 0, lowStock: 0, total: 0 };
+      const now = new Date();
+      // Contas a pagar vencidas (não pagas e com dueDate < hoje)
+      const [overduePayablesResult] = await dbInstance
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(finTransactions)
+        .where(
+          and(
+            eq(finTransactions.userId, ctx.user.id),
+            eq(finTransactions.isPaid, false),
+            lt(finTransactions.dueDate, now)
+          )
+        );
+      // Contas a receber vencidas (não recebidas e com dueDate < hoje)
+      const [overdueReceivablesResult] = await dbInstance
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(finReceivables)
+        .where(
+          and(
+            eq(finReceivables.userId, ctx.user.id),
+            eq(finReceivables.isReceived, false),
+            lt(finReceivables.dueDate, now)
+          )
+        );
+      // Produtos com estoque baixo (currentStock <= minStock e ativo)
+      const [lowStockResult] = await dbInstance
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(products)
+        .where(
+          and(
+            eq(products.active, true),
+            lte(products.currentStock, products.minStock)
+          )
+        );
+      const overduePayables = Number(overduePayablesResult?.count ?? 0);
+      const overdueReceivables = Number(overdueReceivablesResult?.count ?? 0);
+      const lowStock = Number(lowStockResult?.count ?? 0);
+      return {
+        overduePayables,
+        overdueReceivables,
+        lowStock,
+        totalFinancial: overduePayables + overdueReceivables,
+        total: overduePayables + overdueReceivables + lowStock,
+      };
+    }),
+  }),
 });
-
 export type AppRouter = typeof appRouter;
