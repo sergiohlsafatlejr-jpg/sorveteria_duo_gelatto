@@ -27,6 +27,7 @@ import FinSettings from "./pages/fin/FinSettings";
 import FinCategories from "./pages/fin/FinCategories";
 import FinBanks from "./pages/fin/FinBanks";
 import FinCostsRegister from "./pages/fin/FinCostsRegister";
+import FinCashflow from "./pages/fin/FinCashflow";
 import ProductsRegister from "./pages/ProductsRegister";
 
 function Router() {
@@ -55,6 +56,7 @@ function Router() {
       <Route path="/fin/categories" component={FinCategories} />
       <Route path="/fin/banks" component={FinBanks} />
       <Route path="/fin/costs-register" component={FinCostsRegister} />
+      <Route path="/fin/cashflow" component={FinCashflow} />
       <Route path="/products-register" component={ProductsRegister} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

@@ -191,3 +191,12 @@
 - [x] BackButton adicionado em 21 telas: Customers, Dashboard, Finance, Notifications, Points, Products, ProductsRegister, Reports, Sales, Users, Connector
 - [x] BackButton adicionado nas telas financeiras: FinPayables, FinReceivables, FinBankStatements, FinCosts, FinCostsRegister, FinDRE, FinSettings, FinanceDashboard, FinCategories, FinBanks
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Filtro Mês/Ano e Fluxo de Caixa (19/03)
+- [x] Filtro de mês/ano nas Contas a Pagar (frontend + backend)
+- [x] Filtro de mês/ano nas Contas a Receber (frontend + backend)
+- [x] Endpoint tRPC: fin.cashflow.monthly — projeção mensal cruzando pagar/receber
+- [x] Tela Fluxo de Caixa (/fin/cashflow) com gráfico de barras + linha + tabela mensal
+- [x] Rota e menu lateral atualizados
+- [x] Exportação CSV do fluxo de caixa
+- [x] TypeScript 0 erros, 23/23 testes passando

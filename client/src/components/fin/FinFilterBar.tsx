@@ -10,6 +10,8 @@ export interface FinFilters {
   status?: "all" | "paid" | "pending" | "overdue";
   dateFrom?: string;
   dateTo?: string;
+  /** Filtro rápido de mês/ano: "YYYY-MM" */
+  monthYear?: string;
 }
 
 interface FinFilterBarProps {
@@ -20,15 +22,37 @@ interface FinFilterBarProps {
   showStatus?: boolean;
   showBank?: boolean;
   showSearch?: boolean;
+  showMonthYear?: boolean;
 }
 
 export function FinFilterBar({
   filters, onChange, categories = [], banks = [],
-  showStatus = true, showBank = true, showSearch = true,
+  showStatus = true, showBank = true, showSearch = true, showMonthYear = true,
 }: FinFilterBarProps) {
-  const hasFilters = filters.categoryId || filters.bankId || (filters.status && filters.status !== "all") || filters.dateFrom || filters.dateTo || filters.search;
+  const hasFilters =
+    filters.categoryId || filters.bankId ||
+    (filters.status && filters.status !== "all") ||
+    filters.dateFrom || filters.dateTo ||
+    filters.search || filters.monthYear;
 
   const clear = () => onChange({ status: "all" });
+
+  /** Quando o usuário escolhe mês/ano, preenche dateFrom/dateTo automaticamente */
+  function handleMonthYear(val: string) {
+    if (!val) {
+      onChange({ ...filters, monthYear: undefined, dateFrom: undefined, dateTo: undefined });
+      return;
+    }
+    const [year, month] = val.split("-").map(Number);
+    const to = new Date(year, month, 0);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    onChange({
+      ...filters,
+      monthYear: val,
+      dateFrom: `${year}-${pad(month)}-01`,
+      dateTo: `${year}-${pad(month)}-${pad(to.getDate())}`,
+    });
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-card/30 border border-border/30">
@@ -46,20 +70,36 @@ export function FinFilterBar({
         />
       )}
 
-      <Input
-        type="date"
-        value={filters.dateFrom ?? ""}
-        onChange={e => onChange({ ...filters, dateFrom: e.target.value })}
-        className="h-8 w-36 text-xs"
-        placeholder="De"
-      />
-      <Input
-        type="date"
-        value={filters.dateTo ?? ""}
-        onChange={e => onChange({ ...filters, dateTo: e.target.value })}
-        className="h-8 w-36 text-xs"
-        placeholder="Até"
-      />
+      {/* Filtro rápido Mês/Ano */}
+      {showMonthYear && (
+        <Input
+          type="month"
+          value={filters.monthYear ?? ""}
+          onChange={e => handleMonthYear(e.target.value)}
+          className="h-8 w-36 text-xs"
+          title="Filtrar por mês/ano"
+        />
+      )}
+
+      {/* Filtro de intervalo de datas (oculto quando mês/ano está ativo) */}
+      {!filters.monthYear && (
+        <>
+          <Input
+            type="date"
+            value={filters.dateFrom ?? ""}
+            onChange={e => onChange({ ...filters, dateFrom: e.target.value })}
+            className="h-8 w-36 text-xs"
+            placeholder="De"
+          />
+          <Input
+            type="date"
+            value={filters.dateTo ?? ""}
+            onChange={e => onChange({ ...filters, dateTo: e.target.value })}
+            className="h-8 w-36 text-xs"
+            placeholder="Até"
+          />
+        </>
+      )}
 
       {categories.length > 0 && (
         <Select

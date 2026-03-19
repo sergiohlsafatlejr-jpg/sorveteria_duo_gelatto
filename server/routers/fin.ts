@@ -28,6 +28,7 @@ import {
   getFinReceivableTypes,
   getFinReceivables,
   getFinRevenueForecasts,
+  getCashflowMonthly,
   getFinTransactions,
   getTransactionsByCost,
   getUnlinkedTransactions,
@@ -553,5 +554,17 @@ export const finRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ ctx, input }) => deleteFinRevenueForecast(input.id, ctx.user.id)),
+  }),
+
+  // ─── Cashflow Monthly ────────────────────────────────────────────────────────────────────────────
+  cashflow: router({
+    monthly: protectedProcedure
+      .input(z.object({
+        monthsBack: z.number().min(0).max(24).default(3),
+        monthsAhead: z.number().min(0).max(24).default(6),
+      }).optional())
+      .query(({ ctx, input }) =>
+        getCashflowMonthly(ctx.user.id, input?.monthsBack ?? 3, input?.monthsAhead ?? 6)
+      ),
   }),
 });

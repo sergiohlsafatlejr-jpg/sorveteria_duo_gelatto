@@ -366,3 +366,71 @@ export async function getFinDashboardKPIs(userId: number) {
     })),
   };
 }
+
+// ─── Cashflow Monthly ─────────────────────────────────────────────────────────
+export interface CashflowMonth {
+  month: string;
+  label: string;
+  totalPayable: number;
+  totalPaid: number;
+  totalReceivable: number;
+  totalReceived: number;
+  projectedBalance: number;
+  realizedBalance: number;
+  pendingPayable: number;
+  pendingReceivable: number;
+}
+
+export async function getCashflowMonthly(
+  userId: number,
+  monthsBack = 3,
+  monthsAhead = 6,
+): Promise<CashflowMonth[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const [allTransactions, allReceivables] = await Promise.all([
+    db.select().from(finTransactions).where(eq(finTransactions.userId, userId)),
+    db.select().from(finReceivables).where(eq(finReceivables.userId, userId)),
+  ]);
+
+  const now = new Date();
+  const result: CashflowMonth[] = [];
+
+  for (let i = -monthsBack; i <= monthsAhead; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const mStart = new Date(d.getFullYear(), d.getMonth(), 1);
+    const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const rawLabel = d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" });
+    const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
+
+    const inRange = (date: Date) => date >= mStart && date <= mEnd;
+
+    const monthTx = allTransactions.filter(t => inRange(new Date(t.dueDate)));
+    const monthRx = allReceivables.filter(r => inRange(new Date(r.dueDate)));
+
+    const totalPayable = monthTx.reduce((s, t) => s + Number(t.amount), 0);
+    const totalPaid = monthTx.filter(t => t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
+    const pendingPayable = monthTx.filter(t => !t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
+
+    const totalReceivable = monthRx.reduce((s, r) => s + Number(r.amount), 0);
+    const totalReceived = monthRx.filter(r => r.isReceived).reduce((s, r) => s + Number(r.amount), 0);
+    const pendingReceivable = monthRx.filter(r => !r.isReceived).reduce((s, r) => s + Number(r.amount), 0);
+
+    result.push({
+      month: monthKey,
+      label,
+      totalPayable,
+      totalPaid,
+      totalReceivable,
+      totalReceived,
+      projectedBalance: totalReceivable - totalPayable,
+      realizedBalance: totalReceived - totalPaid,
+      pendingPayable,
+      pendingReceivable,
+    });
+  }
+
+  return result;
+}

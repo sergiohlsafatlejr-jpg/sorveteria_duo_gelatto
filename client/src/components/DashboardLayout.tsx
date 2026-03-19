@@ -29,6 +29,7 @@ import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
 import {
+  Activity,
   BarChart3,
   Bell,
   BookOpen,
@@ -110,6 +111,7 @@ const menuGroups: MenuGroup[] = [
       { icon: Tag, label: "Categorias", path: "/fin/categories" },
       { icon: Landmark, label: "Bancos / Caixas", path: "/fin/banks" },
       { icon: PiggyBank, label: "Cadastro de Custos", path: "/fin/costs-register" },
+      { icon: Activity, label: "Fluxo de Caixa", path: "/fin/cashflow" },
       { icon: Settings, label: "Config. Financeiras", path: "/fin/settings" },
     ],
   },
