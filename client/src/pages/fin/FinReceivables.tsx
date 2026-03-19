@@ -235,10 +235,10 @@ export default function FinReceivables() {
             </div>
             <div className="space-y-2">
               <Label>Tipo</Label>
-              <Select value={watch("typeId")} onValueChange={v => setValue("typeId", v)}>
+              <Select value={watch("typeId") || "none"} onValueChange={v => setValue("typeId", v === "none" ? "" : v)}>
                 <SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sem tipo</SelectItem>
+                  <SelectItem value="none">Sem tipo</SelectItem>
                   {types.map(t => <SelectItem key={t.id} value={t.id.toString()}>{t.description}</SelectItem>)}
                 </SelectContent>
               </Select>

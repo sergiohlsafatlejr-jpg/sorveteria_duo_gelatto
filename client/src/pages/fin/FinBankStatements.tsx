@@ -273,10 +273,10 @@ export default function FinBankStatements() {
               </div>
               <div className="space-y-2">
                 <Label>Forma de Pagamento</Label>
-                <Select value={watch("paymentMethod")} onValueChange={v => setValue("paymentMethod", v)}>
+                <Select value={watch("paymentMethod") || "none"} onValueChange={v => setValue("paymentMethod", v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Não informado</SelectItem>
+                    <SelectItem value="none">Não informado</SelectItem>
                     {PAYMENT_METHODS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -285,20 +285,20 @@ export default function FinBankStatements() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Banco</Label>
-                <Select value={watch("bankId")} onValueChange={v => setValue("bankId", v)}>
+                <Select value={watch("bankId") || "none"} onValueChange={v => setValue("bankId", v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Sem banco</SelectItem>
+                    <SelectItem value="none">Sem banco</SelectItem>
                     {banks.map(b => <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label>Categoria</Label>
-                <Select value={watch("categoryId")} onValueChange={v => setValue("categoryId", v)}>
+                <Select value={watch("categoryId") || "none"} onValueChange={v => setValue("categoryId", v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Sem categoria</SelectItem>
+                    <SelectItem value="none">Sem categoria</SelectItem>
                     {categories.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
                   </SelectContent>
                 </Select>

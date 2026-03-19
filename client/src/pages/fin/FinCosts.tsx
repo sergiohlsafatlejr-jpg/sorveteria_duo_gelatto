@@ -218,10 +218,10 @@ export default function FinCosts() {
             </div>
             <div className="space-y-2">
               <Label>Categoria</Label>
-              <Select value={watch("categoryId")} onValueChange={v => setValue("categoryId", v)}>
+              <Select value={watch("categoryId") || "none"} onValueChange={v => setValue("categoryId", v === "none" ? "" : v)}>
                 <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sem categoria</SelectItem>
+                  <SelectItem value="none">Sem categoria</SelectItem>
                   {categories.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
                 </SelectContent>
               </Select>
