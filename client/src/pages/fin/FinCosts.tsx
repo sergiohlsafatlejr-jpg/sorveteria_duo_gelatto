@@ -1,4 +1,5 @@
 import { useState } from "react";
+import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -83,6 +84,8 @@ export default function FinCosts() {
 
   return (
     <div className="p-6 space-y-5">
+        <BackButton to="/fin/dashboard" />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Gestão de Custos</h1>

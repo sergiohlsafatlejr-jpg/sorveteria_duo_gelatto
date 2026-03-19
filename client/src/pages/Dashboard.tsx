@@ -1,4 +1,5 @@
 import DashboardLayout from "@/components/DashboardLayout";
+import BackButton from "@/components/BackButton";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
@@ -75,6 +76,8 @@ export default function Dashboard() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        <BackButton to="/dashboard" />
+
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">

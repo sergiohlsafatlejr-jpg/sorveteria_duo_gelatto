@@ -185,3 +185,9 @@
 - [x] Endpoint de importação de Excel no backend (fin.transactions.importExcel)
 - [x] Campo costCategory adicionado ao schema e migrado (pnpm db:push)
 - [x] 23/23 testes passando
+
+## Botões de Voltar (19/03)
+- [x] Componente BackButton reutilizável criado (client/src/components/BackButton.tsx)
+- [x] BackButton adicionado em 21 telas: Customers, Dashboard, Finance, Notifications, Points, Products, ProductsRegister, Reports, Sales, Users, Connector
+- [x] BackButton adicionado nas telas financeiras: FinPayables, FinReceivables, FinBankStatements, FinCosts, FinCostsRegister, FinDRE, FinSettings, FinanceDashboard, FinCategories, FinBanks
+- [x] TypeScript 0 erros, 23/23 testes passando

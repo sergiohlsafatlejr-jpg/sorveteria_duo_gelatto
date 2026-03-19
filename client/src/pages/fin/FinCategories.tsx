@@ -1,4 +1,5 @@
 import { useState } from "react";
+import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -78,6 +79,8 @@ export default function FinCategories() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        <BackButton to="/fin/settings" />
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

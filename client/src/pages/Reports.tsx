@@ -1,4 +1,5 @@
 import DashboardLayout from "@/components/DashboardLayout";
+import BackButton from "@/components/BackButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -63,6 +64,8 @@ export default function Reports() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        <BackButton to="/dashboard" />
+
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">

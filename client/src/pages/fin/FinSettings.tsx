@@ -1,4 +1,5 @@
 import { useState } from "react";
+import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +70,8 @@ export default function FinSettings() {
 
   return (
     <div className="p-6 space-y-5">
+        <BackButton to="/fin/dashboard" />
+
       <div>
         <h1 className="text-2xl font-bold">Configurações Financeiras</h1>
         <p className="text-sm text-muted-foreground">Gerencie categorias, bancos e tipos de lançamento</p>

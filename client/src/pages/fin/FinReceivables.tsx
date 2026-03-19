@@ -1,4 +1,5 @@
 import { useState } from "react";
+import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { FinFilterBar, FinFilters } from "@/components/fin/FinFilterBar";
 import { Button } from "@/components/ui/button";
@@ -109,6 +110,8 @@ export default function FinReceivables() {
 
   return (
     <div className="p-6 space-y-5">
+        <BackButton to="/fin/dashboard" />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Contas a Receber</h1>
