@@ -224,3 +224,14 @@
 - [x] Gráfico de acurácia: barras previsto vs realizado por mês (painel Acurácia)
 - [x] Card de alerta de chuva no Dashboard Financeiro com impacto estimado
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Programa de Pontos — Melhorias (19/03)
+- [x] Tela dedicada de Regras de Pontos (/points-rules) separada dos Clientes
+- [x] Campo "ativo" já existia na tabela pointsRules (sem migração necessária)
+- [x] Botão inativar/reativar regra na tela de Regras de Pontos
+- [x] Botão excluir regra com diálogo de confirmação
+- [x] Badge visual: regra ativa (verde) / inativa (cinza + riscado)
+- [x] Menu lateral: "Regras de Pontos" agora aponta para /points-rules
+- [x] Dashboard: card "Clientes com Pontos" — top 8 com ranking e total de clientes com saldo
+- [x] Endpoints: getAllRules, deleteRule, toggleRuleActive, topCustomersByPoints, customersWithPointsCount
+- [x] TypeScript 0 erros, 23/23 testes passando

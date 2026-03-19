@@ -116,6 +116,13 @@ const customersRouter = router({
 // ─── Points Router ────────────────────────────────────────────────────────────
 const pointsRouter = router({
   getRules: protectedProcedure.query(() => db.getPointsRules()),
+  getAllRules: managerProcedure.query(() => db.getAllPointsRules()),
+  deleteRule: managerProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(({ input }) => db.deletePointsRule(input.id)),
+  toggleRuleActive: managerProcedure
+    .input(z.object({ id: z.number(), active: z.boolean() }))
+    .mutation(({ input }) => db.togglePointsRuleActive(input.id, input.active)),
 
   createRule: managerProcedure
     .input(
@@ -487,6 +494,10 @@ const dashboardRouter = router({
     .query(({ input }) => db.getTopProducts(input.limit)),
   birthdays: protectedProcedure.query(() => db.getBirthdayCustomers()),
   lowStock: protectedProcedure.query(() => db.getLowStockProducts()),
+  topCustomersByPoints: protectedProcedure
+    .input(z.object({ limit: z.number().default(10) }).optional())
+    .query(({ input }) => db.getTopCustomersByPoints(input?.limit ?? 10)),
+  customersWithPointsCount: protectedProcedure.query(() => db.getCustomersWithPointsCount()),
 });
 
 // ─── Connector Router ─────────────────────────────────────────────────────────

@@ -12,6 +12,8 @@ import {
   ShoppingCart,
   TrendingUp,
   Users,
+  Star,
+  Trophy,
 } from "lucide-react";
 import {
   Area,
@@ -66,6 +68,8 @@ export default function Dashboard() {
   const { data: topProducts } = trpc.dashboard.topProducts.useQuery({ limit: 5 });
   const { data: birthdays } = trpc.dashboard.birthdays.useQuery();
   const { data: lowStock } = trpc.dashboard.lowStock.useQuery();
+  const { data: topPointsCustomers = [] } = trpc.dashboard.topCustomersByPoints.useQuery({ limit: 8 });
+  const { data: pointsCount = 0 } = trpc.dashboard.customersWithPointsCount.useQuery();
 
   const salesChart = (chartData ?? []).map((d) => ({
     date: new Date(d.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
@@ -199,6 +203,53 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Top Customers by Points */}
+        {topPointsCustomers.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Trophy className="h-4 w-4 text-amber-500" />
+                  Clientes com Pontos
+                </span>
+                <Badge variant="secondary" className="text-xs font-normal">
+                  {pointsCount} cliente{pointsCount !== 1 ? "s" : ""} com saldo
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {topPointsCustomers.map((c, idx) => (
+                  <div key={c.id} className="flex items-center gap-3 py-1.5 border-b last:border-0">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                      idx === 0 ? "bg-amber-500/20 text-amber-600" :
+                      idx === 1 ? "bg-slate-400/20 text-slate-500" :
+                      idx === 2 ? "bg-orange-400/20 text-orange-500" :
+                      "bg-muted/50 text-muted-foreground"
+                    }`}>
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{c.fullName}</p>
+                      <p className="text-xs text-muted-foreground">{c.phone}</p>
+                    </div>
+                    <Badge
+                      className={`text-xs shrink-0 ${
+                        c.totalPoints >= 100 ? "bg-amber-500/15 text-amber-600 border-amber-500/30" :
+                        c.totalPoints >= 50 ? "bg-violet-500/15 text-violet-600 border-violet-500/30" :
+                        "bg-muted/50 text-muted-foreground"
+                      }`}
+                    >
+                      <Star className="h-2.5 w-2.5 mr-1" />
+                      {c.totalPoints} pts
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Birthdays & Low Stock */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

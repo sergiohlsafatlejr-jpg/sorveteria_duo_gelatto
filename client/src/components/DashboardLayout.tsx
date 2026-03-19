@@ -85,7 +85,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { icon: Users, label: "Cadastro de Clientes", path: "/customers" },
       { icon: Gift, label: "Programa de Pontos", path: "/points" },
-      { icon: TrendingUp, label: "Regras de Pontos", path: "/points" },
+      { icon: Settings, label: "Regras de Pontos", path: "/points-rules" },
     ],
   },
   {

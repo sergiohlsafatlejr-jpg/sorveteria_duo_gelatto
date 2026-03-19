@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Customers from "./pages/Customers";
 import Points from "./pages/Points";
+import PointsRules from "./pages/PointsRules";
 import Products from "./pages/Products";
 import Sales from "./pages/Sales";
 import Finance from "./pages/Finance";
@@ -37,6 +38,7 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/customers" component={Customers} />
       <Route path="/points" component={Points} />
+      <Route path="/points-rules" component={PointsRules} />
       <Route path="/products" component={Products} />
       <Route path="/sales" component={Sales} />
       <Route path="/finance" component={Finance} />

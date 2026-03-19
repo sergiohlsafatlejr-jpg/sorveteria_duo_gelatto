@@ -149,6 +149,25 @@ export async function getAuditLogs(limit = 100): Promise<AuditLog[]> {
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
+export async function getTopCustomersByPoints(limit = 10): Promise<Customer[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(customers)
+    .where(sql`${customers.totalPoints} > 0 AND ${customers.active} = 1`)
+    .orderBy(desc(customers.totalPoints))
+    .limit(limit);
+}
+export async function getCustomersWithPointsCount(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const [result] = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(customers)
+    .where(sql`${customers.totalPoints} > 0 AND ${customers.active} = 1`);
+  return result?.count ?? 0;
+}
 export async function getCustomers(search?: string): Promise<Customer[]> {
   const db = await getDb();
   if (!db) return [];
@@ -217,6 +236,21 @@ export async function getPointsRules(): Promise<PointsRule[]> {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(pointsRules).where(eq(pointsRules.active, true));
+}
+export async function getAllPointsRules(): Promise<PointsRule[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(pointsRules).orderBy(desc(pointsRules.createdAt));
+}
+export async function deletePointsRule(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(pointsRules).where(eq(pointsRules.id, id));
+}
+export async function togglePointsRuleActive(id: number, active: boolean): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(pointsRules).set({ active }).where(eq(pointsRules.id, id));
 }
 
 export async function createPointsRule(data: InsertPointsRule): Promise<void> {
