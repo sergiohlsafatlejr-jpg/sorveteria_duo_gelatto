@@ -4,12 +4,15 @@ import BackButton from "@/components/BackButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
 import {
   Sun, Cloud, CloudRain, CloudLightning, HelpCircle,
   TrendingUp, CalendarDays, DollarSign, Umbrella, Settings2,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, CheckCircle2, BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -37,8 +40,9 @@ function WeatherIcon({ label, size = 14 }: { label: WeatherLabel; size?: number 
   return <HelpCircle size={size} style={{ color: "#6b7280" }} className="shrink-0" />;
 }
 
-function dayTypeColor(type: string, isPast: boolean, isToday: boolean) {
+function dayTypeColor(type: string, isPast: boolean, isToday: boolean, hasReal: boolean) {
   if (isToday) return "ring-2 ring-primary bg-primary/10";
+  if (hasReal && isPast) return "bg-emerald-500/10 border border-emerald-500/40";
   if (isPast) return "opacity-55 bg-muted/20 border border-border/20";
   if (type === "holiday") return "bg-amber-500/15 border border-amber-500/40";
   if (type === "sunday") return "bg-rose-500/10 border border-rose-400/30";
@@ -53,25 +57,106 @@ function dayTypeInfo(type: string) {
   return { label: "Semana", color: "text-muted-foreground" };
 }
 
+// Gráfico de barras simples inline
+function AccuracyBar({ projected, real, label }: { projected: number; real: number; label: string }) {
+  const max = Math.max(projected, real, 1);
+  const projPct = (projected / max) * 100;
+  const realPct = (real / max) * 100;
+  const accuracy = projected > 0 && real > 0 ? Math.round((real / projected) * 100) : null;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <span className="font-medium text-foreground">{label}</span>
+        {accuracy !== null && (
+          <span className={cn(
+            "font-bold text-xs",
+            accuracy >= 95 ? "text-emerald-400" : accuracy >= 75 ? "text-amber-400" : "text-rose-400"
+          )}>
+            {accuracy}%
+          </span>
+        )}
+      </div>
+      <div className="space-y-0.5">
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] text-muted-foreground w-10 text-right">Prev.</span>
+          <div className="flex-1 h-2 bg-muted/30 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500/60 rounded-full transition-all" style={{ width: `${projPct}%` }} />
+          </div>
+          <span className="text-[9px] text-muted-foreground w-14 text-right">{fmtBRLShort(projected)}</span>
+        </div>
+        {real > 0 && (
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] text-muted-foreground w-10 text-right">Real</span>
+            <div className="flex-1 h-2 bg-muted/30 rounded-full overflow-hidden">
+              <div className="h-full bg-emerald-500/70 rounded-full transition-all" style={{ width: `${realPct}%` }} />
+            </div>
+            <span className="text-[9px] text-muted-foreground w-14 text-right">{fmtBRLShort(real)}</span>
+          </div>
+        )}
+        {real === 0 && (
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] text-muted-foreground w-10 text-right">Real</span>
+            <div className="flex-1 h-2 bg-muted/20 rounded-full">
+              <div className="h-full w-0" />
+            </div>
+            <span className="text-[9px] text-muted-foreground/50 w-14 text-right italic">sem dados</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function FinRevenueForecast() {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [showSettings, setShowSettings] = useState(false);
+  const [showAccuracy, setShowAccuracy] = useState(false);
 
   const [avgWeekday, setAvgWeekday] = useState(2000);
   const [avgSaturday, setAvgSaturday] = useState(5300);
   const [avgSundayHoliday, setAvgSundayHoliday] = useState(8300);
   const [rainFactor, setRainFactor] = useState(0.7);
 
+  // Modal de lançamento real
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<{ date: string; projected: number; label: string } | null>(null);
+  const [realAmount, setRealAmount] = useState("");
+  const [realNote, setRealNote] = useState("");
+
+  const utils = trpc.useUtils();
+
   const { data, isLoading } = trpc.fin.forecastCalendar.getCalendar.useQuery({
-    year,
-    month,
-    avgWeekday,
-    avgSaturday,
-    avgSundayHoliday,
-    rainFactor,
+    year, month, avgWeekday, avgSaturday, avgSundayHoliday, rainFactor,
   });
+
+  const { data: realRevenues = [] } = trpc.fin.forecastCalendar.getRealRevenues.useQuery({
+    year, month,
+  });
+
+  const { data: accuracyHistory = [] } = trpc.fin.forecastCalendar.getAccuracyHistory.useQuery({
+    avgWeekday, avgSaturday, avgSundayHoliday, rainFactor, months: 6,
+  });
+
+  const saveRealMut = trpc.fin.forecastCalendar.saveRealRevenue.useMutation({
+    onSuccess: () => {
+      utils.fin.forecastCalendar.getRealRevenues.invalidate();
+      utils.fin.forecastCalendar.getAccuracyHistory.invalidate();
+      toast.success("Faturamento real salvo!");
+      setModalOpen(false);
+      setRealAmount("");
+      setRealNote("");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  // Mapa de faturamento real por data
+  const realMap = useMemo(() => {
+    const m = new Map<string, number>();
+    realRevenues.forEach(r => m.set(r.revenueDate, Number(r.realAmount)));
+    return m;
+  }, [realRevenues]);
 
   const firstDayOffset = useMemo(
     () => new Date(year, month - 1, 1).getDay(),
@@ -87,6 +172,17 @@ export default function FinRevenueForecast() {
     else setMonth(m => m + 1);
   }
 
+  function openModal(d: { date: string; projectedAmount: number; day: number; dayType: string }) {
+    const existing = realMap.get(d.date);
+    const dateLabel = new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR", {
+      weekday: "long", day: "numeric", month: "long",
+    });
+    setSelectedDay({ date: d.date, projected: d.projectedAmount, label: dateLabel });
+    setRealAmount(existing !== undefined ? String(existing) : "");
+    setRealNote("");
+    setModalOpen(true);
+  }
+
   const weatherSummary = useMemo(() => {
     if (!data) return null;
     const w = data.days.filter(d => d.weather !== null);
@@ -97,13 +193,11 @@ export default function FinRevenueForecast() {
     };
   }, [data]);
 
-  // Calcular semanas para a tabela de resumo
   const weeks = useMemo(() => {
     if (!data) return [];
-    const result: { label: string; start: string; end: string; total: number; days: number }[] = [];
+    const result: { label: string; start: string; end: string; total: number; totalReal: number; days: number }[] = [];
     let num = 1;
     let remaining = [...data.days];
-    // Primeira semana pode ser incompleta
     const firstChunkSize = 7 - firstDayOffset;
     const firstChunk = remaining.splice(0, firstChunkSize);
     if (firstChunk.length > 0) {
@@ -112,6 +206,7 @@ export default function FinRevenueForecast() {
         start: firstChunk[0].date,
         end: firstChunk[firstChunk.length - 1].date,
         total: firstChunk.reduce((s, d) => s + d.projectedAmount, 0),
+        totalReal: firstChunk.reduce((s, d) => s + (realMap.get(d.date) ?? 0), 0),
         days: firstChunk.length,
       });
     }
@@ -122,11 +217,18 @@ export default function FinRevenueForecast() {
         start: chunk[0].date,
         end: chunk[chunk.length - 1].date,
         total: chunk.reduce((s, d) => s + d.projectedAmount, 0),
+        totalReal: chunk.reduce((s, d) => s + (realMap.get(d.date) ?? 0), 0),
         days: chunk.length,
       });
     }
     return result;
-  }, [data, firstDayOffset]);
+  }, [data, firstDayOffset, realMap]);
+
+  // Totais do mês com real
+  const totalReal = useMemo(() => realRevenues.reduce((s, r) => s + Number(r.realAmount), 0), [realRevenues]);
+  const accuracy = data && totalReal > 0
+    ? Math.round((totalReal / data.summary.totalProjected) * 100)
+    : null;
 
   return (
     <TooltipProvider>
@@ -145,14 +247,24 @@ export default function FinRevenueForecast() {
               </p>
             </div>
           </div>
-          <Button
-            variant="outline" size="sm"
-            onClick={() => setShowSettings(s => !s)}
-            className={cn("gap-2 h-8 text-xs", showSettings && "bg-primary/10 border-primary/40")}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            Configurar Médias
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline" size="sm"
+              onClick={() => setShowAccuracy(s => !s)}
+              className={cn("gap-2 h-8 text-xs", showAccuracy && "bg-emerald-500/10 border-emerald-500/40")}
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              Acurácia
+            </Button>
+            <Button
+              variant="outline" size="sm"
+              onClick={() => setShowSettings(s => !s)}
+              className={cn("gap-2 h-8 text-xs", showSettings && "bg-primary/10 border-primary/40")}
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Médias
+            </Button>
+          </div>
         </div>
 
         {/* Painel de configurações */}
@@ -172,58 +284,81 @@ export default function FinRevenueForecast() {
                 <div key={label} className="space-y-2">
                   <Label className="text-xs text-muted-foreground">{label}</Label>
                   <p className="text-sm font-bold text-primary">{fmtBRL(value)}</p>
-                  <Slider
-                    min={500} max={max} step={100}
-                    value={[value]}
-                    onValueChange={([v]) => set(v)}
-                  />
+                  <Slider min={500} max={max} step={100} value={[value]} onValueChange={([v]) => set(v)} />
                 </div>
               ))}
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Umbrella className="h-3 w-3" />
-                  Fator Chuva
+                  <Umbrella className="h-3 w-3" /> Fator Chuva
                 </Label>
                 <p className="text-sm font-bold text-blue-400">
-                  {Math.round(rainFactor * 100)}% da média
-                  <span className="text-xs text-muted-foreground font-normal ml-1">
-                    (−{Math.round((1 - rainFactor) * 100)}%)
-                  </span>
+                  {Math.round(rainFactor * 100)}%
+                  <span className="text-xs text-muted-foreground font-normal ml-1">(−{Math.round((1 - rainFactor) * 100)}%)</span>
                 </p>
-                <Slider
-                  min={0.3} max={1} step={0.05}
-                  value={[rainFactor]}
-                  onValueChange={([v]) => setRainFactor(v)}
-                />
+                <Slider min={0.3} max={1} step={0.05} value={[rainFactor]} onValueChange={([v]) => setRainFactor(v)} />
               </div>
             </CardContent>
           </Card>
         )}
 
+        {/* Painel de acurácia histórica */}
+        {showAccuracy && (
+          <Card className="border-emerald-500/30 bg-emerald-500/5">
+            <CardHeader className="pb-2 pt-4">
+              <CardTitle className="text-sm font-semibold text-emerald-400 flex items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Histórico de Acurácia — Últimos 6 Meses
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 md:grid-cols-3 gap-4 pb-5">
+              {accuracyHistory.map(h => (
+                <AccuracyBar
+                  key={h.month}
+                  label={h.label}
+                  projected={h.totalProjected}
+                  real={h.totalReal}
+                />
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
         {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-border/50">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <Card className="border-border/50 md:col-span-1">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-muted-foreground">Projeção do Mês</span>
+                <span className="text-xs text-muted-foreground">Projeção</span>
                 <TrendingUp className="h-4 w-4 text-primary" />
               </div>
-              <p className="text-lg font-bold text-primary">
+              <p className="text-base font-bold text-primary">
                 {isLoading ? "..." : fmtBRLShort(data?.summary.totalProjected ?? 0)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Sem ajuste clima: {isLoading ? "..." : fmtBRLShort(data?.summary.totalBase ?? 0)}
               </p>
             </CardContent>
           </Card>
-          <Card className="border-border/50">
+          <Card className="border-border/50 md:col-span-1">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-muted-foreground">Dias de Semana</span>
-                <DollarSign className="h-4 w-4 text-blue-400" />
+                <span className="text-xs text-muted-foreground">Real lançado</span>
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
               </div>
-              <p className="text-lg font-bold text-blue-400">{data?.summary.weekdayCount ?? "..."}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Média {fmtBRL(avgWeekday)}/dia</p>
+              <p className="text-base font-bold text-emerald-400">{fmtBRLShort(totalReal)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{realRevenues.length} dias</p>
+            </CardContent>
+          </Card>
+          <Card className="border-border/50 md:col-span-1">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-muted-foreground">Acurácia</span>
+                <BarChart3 className="h-4 w-4 text-amber-400" />
+              </div>
+              <p className={cn(
+                "text-base font-bold",
+                accuracy === null ? "text-muted-foreground" :
+                accuracy >= 95 ? "text-emerald-400" : accuracy >= 75 ? "text-amber-400" : "text-rose-400"
+              )}>
+                {accuracy !== null ? `${accuracy}%` : "—"}
+              </p>
             </CardContent>
           </Card>
           <Card className="border-border/50">
@@ -232,18 +367,16 @@ export default function FinRevenueForecast() {
                 <span className="text-xs text-muted-foreground">Sábados</span>
                 <DollarSign className="h-4 w-4 text-violet-400" />
               </div>
-              <p className="text-lg font-bold text-violet-400">{data?.summary.saturdayCount ?? "..."}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Média {fmtBRL(avgSaturday)}/dia</p>
+              <p className="text-base font-bold text-violet-400">{data?.summary.saturdayCount ?? "..."}</p>
             </CardContent>
           </Card>
           <Card className="border-border/50">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-muted-foreground">Dom / Feriados</span>
+                <span className="text-xs text-muted-foreground">Dom/Feriados</span>
                 <DollarSign className="h-4 w-4 text-amber-400" />
               </div>
-              <p className="text-lg font-bold text-amber-400">{data?.summary.sundayHolidayCount ?? "..."}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Média {fmtBRL(avgSundayHoliday)}/dia</p>
+              <p className="text-base font-bold text-amber-400">{data?.summary.sundayHolidayCount ?? "..."}</p>
             </CardContent>
           </Card>
         </div>
@@ -259,15 +392,9 @@ export default function FinRevenueForecast() {
                 <h2 className="font-bold text-base">{MONTHS[month - 1]} {year}</h2>
                 {weatherSummary && (
                   <div className="flex items-center justify-center gap-3 mt-1 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Sun size={12} className="text-yellow-400" /> {weatherSummary.sunny} sol
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Cloud size={12} className="text-slate-400" /> {weatherSummary.cloudy} nublado
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <CloudRain size={12} className="text-blue-400" /> {weatherSummary.rainy} chuva
-                    </span>
+                    <span className="flex items-center gap-1"><Sun size={12} className="text-yellow-400" /> {weatherSummary.sunny}</span>
+                    <span className="flex items-center gap-1"><Cloud size={12} className="text-slate-400" /> {weatherSummary.cloudy}</span>
+                    <span className="flex items-center gap-1"><CloudRain size={12} className="text-blue-400" /> {weatherSummary.rainy}</span>
                   </div>
                 )}
               </div>
@@ -277,7 +404,6 @@ export default function FinRevenueForecast() {
             </div>
           </CardHeader>
           <CardContent className="px-3 pb-4">
-            {/* Cabeçalho dias da semana */}
             <div className="grid grid-cols-7 mb-2">
               {WEEKDAYS_HEADER.map((d, i) => (
                 <div key={d} className={cn(
@@ -289,33 +415,37 @@ export default function FinRevenueForecast() {
               ))}
             </div>
 
-            {/* Grid dias */}
             {isLoading ? (
               <div className="grid grid-cols-7 gap-1.5">
                 {Array.from({ length: 35 }).map((_, i) => (
-                  <div key={i} className="h-[84px] bg-muted/30 animate-pulse rounded-lg" />
+                  <div key={i} className="h-[90px] bg-muted/30 animate-pulse rounded-lg" />
                 ))}
               </div>
             ) : (
               <div className="grid grid-cols-7 gap-1.5">
-                {Array.from({ length: firstDayOffset }).map((_, i) => (
-                  <div key={`e${i}`} />
-                ))}
+                {Array.from({ length: firstDayOffset }).map((_, i) => <div key={`e${i}`} />)}
                 {data?.days.map(d => {
                   const info = dayTypeInfo(d.dayType);
-                  const colorClass = dayTypeColor(d.dayType, d.isPast, d.isToday);
-                  const weatherReduced = d.weather &&
-                    (d.weather.label === "rain" || d.weather.label === "storm");
+                  const realVal = realMap.get(d.date);
+                  const hasReal = realVal !== undefined;
+                  const colorClass = dayTypeColor(d.dayType, d.isPast, d.isToday, hasReal);
+                  const weatherReduced = d.weather && (d.weather.label === "rain" || d.weather.label === "storm");
+                  const accuracyDay = hasReal && d.projectedAmount > 0
+                    ? Math.round((realVal! / d.projectedAmount) * 100)
+                    : null;
 
                   return (
                     <Tooltip key={d.date}>
                       <TooltipTrigger asChild>
-                        <div className={cn(
-                          "rounded-lg p-1.5 flex flex-col gap-0.5 cursor-default",
-                          "transition-all hover:scale-[1.03] hover:shadow-md min-h-[84px]",
-                          colorClass
-                        )}>
-                          {/* Linha superior: número + ícone clima */}
+                        <div
+                          onClick={() => openModal(d)}
+                          className={cn(
+                            "rounded-lg p-1.5 flex flex-col gap-0.5 cursor-pointer",
+                            "transition-all hover:scale-[1.04] hover:shadow-md min-h-[90px]",
+                            colorClass
+                          )}
+                        >
+                          {/* Número + clima */}
                           <div className="flex items-center justify-between">
                             <span className={cn(
                               "text-xs font-bold leading-none",
@@ -323,28 +453,41 @@ export default function FinRevenueForecast() {
                             )}>
                               {d.day}
                             </span>
-                            {d.weather && (
-                              <WeatherIcon label={d.weather.label as WeatherLabel} size={11} />
-                            )}
+                            <div className="flex items-center gap-0.5">
+                              {hasReal && <CheckCircle2 size={9} className="text-emerald-400" />}
+                              {d.weather && <WeatherIcon label={d.weather.label as WeatherLabel} size={10} />}
+                            </div>
                           </div>
 
-                          {/* Tipo do dia */}
+                          {/* Tipo */}
                           <span className={cn("text-[9px] leading-none font-medium", info.color)}>
-                            {d.isHoliday ? "🎉 Feriado" : info.label}
+                            {d.isHoliday ? "🎉" : info.label}
                           </span>
 
-                          {/* Valor projetado */}
-                          <div className="mt-auto">
+                          {/* Valores */}
+                          <div className="mt-auto space-y-0.5">
                             <span className={cn(
                               "text-[10px] font-bold leading-none block",
-                              weatherReduced ? "text-blue-400" : "text-foreground"
+                              weatherReduced ? "text-blue-400" : "text-muted-foreground"
                             )}>
                               {fmtBRLShort(d.projectedAmount)}
                             </span>
-                            {weatherReduced && (
-                              <span className="text-[8px] text-blue-400 leading-none">↓ chuva</span>
+                            {hasReal && (
+                              <span className="text-[10px] font-bold leading-none block text-emerald-400">
+                                {fmtBRLShort(realVal!)}
+                              </span>
                             )}
                           </div>
+
+                          {/* Acurácia do dia */}
+                          {accuracyDay !== null && (
+                            <span className={cn(
+                              "text-[8px] leading-none font-bold",
+                              accuracyDay >= 95 ? "text-emerald-400" : accuracyDay >= 75 ? "text-amber-400" : "text-rose-400"
+                            )}>
+                              {accuracyDay}%
+                            </span>
+                          )}
 
                           {/* Temperatura */}
                           {d.weather && (
@@ -354,19 +497,32 @@ export default function FinRevenueForecast() {
                           )}
                         </div>
                       </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-[210px]">
+                      <TooltipContent side="top" className="max-w-[220px]">
                         <div className="space-y-1 text-xs">
                           <p className="font-semibold">
                             {new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR", {
                               weekday: "long", day: "numeric", month: "long"
                             })}
                           </p>
-                          {d.isHoliday && (
-                            <p className="text-amber-400">🎉 {d.holidayName}</p>
-                          )}
-                          <p>Tipo: <span className="font-medium">{info.label}</span></p>
-                          <p>Média base: <span className="font-medium">{fmtBRL(d.baseAvg)}</span></p>
+                          {d.isHoliday && <p className="text-amber-400">🎉 {d.holidayName}</p>}
                           <p>Projeção: <span className="font-bold text-primary">{fmtBRL(d.projectedAmount)}</span></p>
+                          {hasReal && (
+                            <>
+                              <p>Real: <span className="font-bold text-emerald-400">{fmtBRL(realVal!)}</span></p>
+                              {accuracyDay !== null && (
+                                <p>Acurácia: <span className={cn(
+                                  "font-bold",
+                                  accuracyDay >= 95 ? "text-emerald-400" : accuracyDay >= 75 ? "text-amber-400" : "text-rose-400"
+                                )}>{accuracyDay}%</span></p>
+                              )}
+                            </>
+                          )}
+                          {!hasReal && d.isPast && (
+                            <p className="text-muted-foreground italic text-[10px]">Clique para lançar o real</p>
+                          )}
+                          {!d.isPast && !d.isToday && (
+                            <p className="text-muted-foreground italic text-[10px]">Clique para lançar antecipado</p>
+                          )}
                           {d.weather && (
                             <>
                               <hr className="border-border/50 my-1" />
@@ -380,18 +536,7 @@ export default function FinRevenueForecast() {
                               </p>
                               <p>Temp. máx: {d.weather.tempMax.toFixed(1)}°C</p>
                               <p>Precipitação: {d.weather.precip.toFixed(1)} mm</p>
-                              <p>Prob. chuva: {d.weather.precipProb}%</p>
-                              {weatherReduced && (
-                                <p className="text-blue-400">
-                                  Fator chuva: {Math.round(rainFactor * 100)}% da média
-                                </p>
-                              )}
                             </>
-                          )}
-                          {!d.weather && (
-                            <p className="text-muted-foreground italic text-[10px]">
-                              Previsão indisponível para esta data
-                            </p>
                           )}
                         </div>
                       </TooltipContent>
@@ -405,30 +550,13 @@ export default function FinRevenueForecast() {
 
         {/* Legenda */}
         <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-card border border-border/40" /> Dia de semana
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-violet-500/20 border border-violet-400/40" /> Sábado
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-rose-500/15 border border-rose-400/30" /> Domingo
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-amber-500/20 border border-amber-500/40" /> Feriado
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Sun size={12} className="text-yellow-400" /> Sol (100%)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Cloud size={12} className="text-slate-400" /> Nublado (−10%)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <CloudRain size={12} className="text-blue-400" /> Chuva (−{Math.round((1 - rainFactor) * 100)}%)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <CloudLightning size={12} className="text-purple-400" /> Tempestade (−{Math.round((1 - rainFactor * 0.8) * 100)}%)
-          </span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-card border border-border/40" /> Dia de semana</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-violet-500/20 border border-violet-400/40" /> Sábado</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-500/15 border border-rose-400/30" /> Domingo</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-500/20 border border-amber-500/40" /> Feriado</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-500/15 border border-emerald-500/40" /> Real lançado</span>
+          <span className="flex items-center gap-1.5"><CheckCircle2 size={12} className="text-emerald-400" /> Real registrado</span>
+          <span className="flex items-center gap-1.5"><CloudRain size={12} className="text-blue-400" /> Chuva (−{Math.round((1 - rainFactor) * 100)}%)</span>
         </div>
 
         {/* Tabela de resumo por semana */}
@@ -444,32 +572,58 @@ export default function FinRevenueForecast() {
                     <tr className="border-b border-border/50 bg-muted/30">
                       <th className="text-left px-4 py-2 font-medium text-muted-foreground">Semana</th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Período</th>
-                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Dias</th>
-                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">Projeção</th>
+                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Projeção</th>
+                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">Real</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {weeks.map((w, i) => (
-                      <tr key={i} className={cn("border-b border-border/30", i % 2 === 0 && "bg-muted/10")}>
-                        <td className="px-4 py-2 font-medium">{w.label}</td>
-                        <td className="px-3 py-2 text-muted-foreground">
-                          {new Date(w.start + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
-                          {" – "}
-                          {new Date(w.end + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
-                        </td>
-                        <td className="px-3 py-2 text-right text-muted-foreground">{w.days} dias</td>
-                        <td className="px-4 py-2 text-right font-bold text-primary">{fmtBRL(w.total)}</td>
-                      </tr>
-                    ))}
+                    {weeks.map((w, i) => {
+                      const wAccuracy = w.total > 0 && w.totalReal > 0
+                        ? Math.round((w.totalReal / w.total) * 100) : null;
+                      return (
+                        <tr key={i} className={cn("border-b border-border/30", i % 2 === 0 && "bg-muted/10")}>
+                          <td className="px-4 py-2 font-medium">
+                            {w.label}
+                            {wAccuracy !== null && (
+                              <span className={cn(
+                                "ml-2 text-[10px] font-bold",
+                                wAccuracy >= 95 ? "text-emerald-400" : wAccuracy >= 75 ? "text-amber-400" : "text-rose-400"
+                              )}>
+                                {wAccuracy}%
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">
+                            {new Date(w.start + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+                            {" – "}
+                            {new Date(w.end + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+                          </td>
+                          <td className="px-3 py-2 text-right font-bold text-primary">{fmtBRL(w.total)}</td>
+                          <td className="px-4 py-2 text-right font-bold text-emerald-400">
+                            {w.totalReal > 0 ? fmtBRL(w.totalReal) : <span className="text-muted-foreground/40 font-normal italic">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-border bg-muted/20 font-bold">
-                      <td className="px-4 py-2.5 text-xs" colSpan={2}>Total do Mês</td>
-                      <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
-                        {data.daysInMonth} dias
+                      <td className="px-4 py-2.5 text-xs" colSpan={2}>
+                        Total do Mês
+                        {accuracy !== null && (
+                          <span className={cn(
+                            "ml-2 text-[10px]",
+                            accuracy >= 95 ? "text-emerald-400" : accuracy >= 75 ? "text-amber-400" : "text-rose-400"
+                          )}>
+                            {accuracy}% acurácia
+                          </span>
+                        )}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-xs text-primary">
+                      <td className="px-3 py-2.5 text-right text-xs text-primary">
                         {fmtBRL(data.summary.totalProjected)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-xs text-emerald-400">
+                        {totalReal > 0 ? fmtBRL(totalReal) : <span className="text-muted-foreground/40 font-normal italic">—</span>}
                       </td>
                     </tr>
                   </tfoot>
@@ -479,6 +633,73 @@ export default function FinRevenueForecast() {
           </Card>
         )}
       </div>
+
+      {/* Modal de lançamento real */}
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">
+              Lançar Faturamento Real
+            </DialogTitle>
+          </DialogHeader>
+          {selectedDay && (
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground capitalize">{selectedDay.label}</p>
+              <div className="rounded-lg bg-muted/20 border border-border/40 p-3 text-xs">
+                <span className="text-muted-foreground">Projeção do dia: </span>
+                <span className="font-bold text-primary">{fmtBRL(selectedDay.projected)}</span>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Valor Real Faturado (R$) *</Label>
+                <Input
+                  type="number" step="0.01" min="0" placeholder="0,00"
+                  value={realAmount}
+                  onChange={e => setRealAmount(e.target.value)}
+                  autoFocus
+                />
+                {realAmount && selectedDay.projected > 0 && (
+                  <p className={cn(
+                    "text-xs font-medium",
+                    Number(realAmount) / selectedDay.projected >= 0.95 ? "text-emerald-400"
+                    : Number(realAmount) / selectedDay.projected >= 0.75 ? "text-amber-400"
+                    : "text-rose-400"
+                  )}>
+                    Acurácia: {Math.round((Number(realAmount) / selectedDay.projected) * 100)}%
+                    {Number(realAmount) >= selectedDay.projected ? " ✓ Acima da meta!" : ""}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Observação (opcional)</Label>
+                <Input
+                  placeholder="Ex: Chuva forte à tarde..."
+                  value={realNote}
+                  onChange={e => setRealNote(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" onClick={() => setModalOpen(false)} className="flex-1 h-8 text-xs">
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!selectedDay || !realAmount) return;
+                    saveRealMut.mutate({
+                      revenueDate: selectedDay.date,
+                      realAmount: Number(realAmount),
+                      note: realNote || undefined,
+                    });
+                  }}
+                  disabled={!realAmount || saveRealMut.isPending}
+                  className="flex-1 h-8 text-xs"
+                >
+                  {saveRealMut.isPending ? "Salvando..." : "Salvar"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }

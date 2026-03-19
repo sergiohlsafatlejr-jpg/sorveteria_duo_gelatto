@@ -50,6 +50,13 @@
       "when": 1773929105626,
       "tag": "0006_tired_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1773933590594,
+      "tag": "0007_stale_vance_astro",
+      "breakpoints": true
     }
   ]
 }

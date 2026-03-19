@@ -27,6 +27,7 @@ import {
   finReceivables,
   finRevenueForecasts,
   finTransactions,
+  finDailyRevenue,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 
@@ -433,4 +434,197 @@ export async function getCashflowMonthly(
   }
 
   return result;
+}
+
+// ─── Daily Revenue (Faturamento Real por Dia) ─────────────────────────────────
+export async function saveDailyRevenue(
+  userId: number,
+  revenueDate: string,
+  realAmount: number,
+  note: string | null,
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(finDailyRevenue)
+    .where(and(eq(finDailyRevenue.userId, userId), eq(finDailyRevenue.revenueDate, revenueDate)))
+    .limit(1);
+  if (existing.length > 0) {
+    await db.update(finDailyRevenue)
+      .set({ realAmount: String(realAmount), note, updatedAt: new Date() })
+      .where(and(eq(finDailyRevenue.userId, userId), eq(finDailyRevenue.revenueDate, revenueDate)));
+  } else {
+    await db.insert(finDailyRevenue).values({ userId, revenueDate, realAmount: String(realAmount), note });
+  }
+}
+
+export async function getDailyRevenues(userId: number, year: number, month: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+  return db.select().from(finDailyRevenue)
+    .where(and(
+      eq(finDailyRevenue.userId, userId),
+      gte(finDailyRevenue.revenueDate, dateFrom),
+      lte(finDailyRevenue.revenueDate, dateTo),
+    ))
+    .orderBy(finDailyRevenue.revenueDate);
+}
+
+// Histórico de acurácia: compara faturamento real vs projetado por mês
+export async function getAccuracyHistory(
+  userId: number,
+  avgWeekday: number,
+  avgSaturday: number,
+  avgSundayHoliday: number,
+  rainFactor: number,
+  months: number,
+) {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Buscar feriados do ano atual e anterior
+  let holidays: { date: string }[] = [];
+  try {
+    const now = new Date();
+    const [r1, r2] = await Promise.all([
+      fetch(`https://brasilapi.com.br/api/feriados/v1/${now.getFullYear()}`),
+      fetch(`https://brasilapi.com.br/api/feriados/v1/${now.getFullYear() - 1}`),
+    ]);
+    const [h1, h2] = await Promise.all([r1.ok ? r1.json() : [], r2.ok ? r2.json() : []]);
+    holidays = [...h1, ...h2];
+  } catch { /* ignora */ }
+  const holidayDates = new Set(holidays.map((h: { date: string }) => h.date));
+
+  const result = [];
+  const now = new Date();
+
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
+    const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+    const monthLabel = d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" });
+
+    // Calcular projeção base (sem clima pois não temos histórico de clima)
+    let totalProjected = 0;
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const weekday = new Date(year, month - 1, day).getDay();
+      const isHoliday = holidayDates.has(dateStr);
+      if (isHoliday || weekday === 0) totalProjected += avgSundayHoliday;
+      else if (weekday === 6) totalProjected += avgSaturday;
+      else totalProjected += avgWeekday;
+    }
+
+    // Buscar faturamento real do mês
+    const realRows = await db.select().from(finDailyRevenue)
+      .where(and(
+        eq(finDailyRevenue.userId, userId),
+        gte(finDailyRevenue.revenueDate, dateFrom),
+        lte(finDailyRevenue.revenueDate, dateTo),
+      ));
+    const totalReal = realRows.reduce((s, r) => s + Number(r.realAmount), 0);
+    const daysWithData = realRows.length;
+    const accuracy = totalProjected > 0 && totalReal > 0
+      ? Math.round((totalReal / totalProjected) * 100)
+      : null;
+
+    result.push({
+      month: `${year}-${String(month).padStart(2, "0")}`,
+      label: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1),
+      totalProjected: Math.round(totalProjected),
+      totalReal,
+      daysWithData,
+      daysInMonth,
+      accuracy,
+    });
+  }
+
+  return result;
+}
+
+// Alerta de chuva para os próximos 2 dias
+export async function getRainAlert(
+  avgWeekday: number,
+  avgSaturday: number,
+  avgSundayHoliday: number,
+  rainFactor: number,
+) {
+  const alerts: {
+    date: string;
+    label: string;
+    weatherLabel: string;
+    tempMax: number;
+    precip: number;
+    precipProb: number;
+    baseAmount: number;
+    projectedAmount: number;
+    impact: number;
+  }[] = [];
+
+  try {
+    const now = new Date();
+    const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+    const dayAfter = new Date(now); dayAfter.setDate(now.getDate() + 2);
+
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const dateFrom = fmt(tomorrow);
+    const dateTo = fmt(dayAfter);
+
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=-16.6864&longitude=-49.2643&daily=weathercode,temperature_2m_max,precipitation_sum,precipitation_probability_max&timezone=America%2FSao_Paulo&start_date=${dateFrom}&end_date=${dateTo}`;
+    const res = await fetch(url);
+    if (!res.ok) return alerts;
+
+    const data = await res.json();
+    const { time, weathercode, temperature_2m_max, precipitation_sum, precipitation_probability_max } = data.daily;
+
+    // Feriados
+    let holidayDates = new Set<string>();
+    try {
+      const hr = await fetch(`https://brasilapi.com.br/api/feriados/v1/${now.getFullYear()}`);
+      if (hr.ok) {
+        const hs: { date: string }[] = await hr.json();
+        holidayDates = new Set(hs.map(h => h.date));
+      }
+    } catch { /* ignora */ }
+
+    time.forEach((dateStr: string, i: number) => {
+      const code = weathercode[i];
+      const tempMax = temperature_2m_max[i];
+      const precip = precipitation_sum[i] ?? 0;
+      const precipProb = precipitation_probability_max[i] ?? 0;
+
+      let weatherLabel = "sun";
+      if (code === 0) weatherLabel = "sun";
+      else if (code <= 3) weatherLabel = "cloud";
+      else if (code <= 67 || (code >= 80 && code <= 84)) {
+        weatherLabel = precip > 5 || precipProb > 60 ? "rain" : "cloud";
+      } else if (code >= 85 || code >= 95) weatherLabel = "storm";
+      else weatherLabel = "cloud";
+
+      if (weatherLabel !== "rain" && weatherLabel !== "storm") return; // Só alertas de chuva
+
+      const date = new Date(dateStr + "T12:00:00");
+      const weekday = date.getDay();
+      const isHoliday = holidayDates.has(dateStr);
+      let baseAmount = isHoliday || weekday === 0 ? avgSundayHoliday
+        : weekday === 6 ? avgSaturday
+        : avgWeekday;
+
+      const projectedAmount = weatherLabel === "storm"
+        ? Math.round(baseAmount * rainFactor * 0.8)
+        : Math.round(baseAmount * rainFactor);
+
+      const impact = baseAmount - projectedAmount;
+      const dayLabel = date.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
+
+      alerts.push({ date: dateStr, label: dayLabel, weatherLabel, tempMax, precip, precipProb, baseAmount, projectedAmount, impact });
+    });
+  } catch { /* ignora erros de rede */ }
+
+  return alerts;
 }

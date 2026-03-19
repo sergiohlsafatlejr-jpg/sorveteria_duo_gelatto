@@ -211,3 +211,16 @@
 - [x] Painel de KPIs com projeção total e contagem por tipo de dia
 - [x] Tabela de resumo por semana
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Faturamento Real + Acurácia + Alerta Chuva (19/03)
+- [x] Tabela fin_daily_revenue no schema (data, realAmount, note, userId)
+- [x] Migração pnpm db:push executada com sucesso
+- [x] Endpoint: fin.forecastCalendar.saveRealRevenue (upsert por data)
+- [x] Endpoint: fin.forecastCalendar.getRealRevenues (por mês)
+- [x] Endpoint: fin.forecastCalendar.getAccuracyHistory (últimos 6 meses)
+- [x] Endpoint: fin.forecastCalendar.getRainAlert (próximos 2 dias com chuva + impacto)
+- [x] Modal de lançamento real no calendário (click no dia) com acurácia instantânea
+- [x] Indicador visual de dias com real lançado (check verde no calendário)
+- [x] Gráfico de acurácia: barras previsto vs realizado por mês (painel Acurácia)
+- [x] Card de alerta de chuva no Dashboard Financeiro com impacto estimado
+- [x] TypeScript 0 erros, 23/23 testes passando

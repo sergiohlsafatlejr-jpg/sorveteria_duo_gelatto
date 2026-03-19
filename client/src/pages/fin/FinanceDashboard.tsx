@@ -5,6 +5,7 @@ import { FinMonthlyEvolutionChart, FinCategoryChart } from "@/components/fin/Fin
 import {
   AlertTriangle, ArrowDownCircle, ArrowUpCircle, Banknote, Calendar,
   CheckCircle2, Clock, TrendingDown, TrendingUp, Wallet,
+  CloudRain, CloudLightning,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -18,6 +19,7 @@ export default function FinanceDashboard() {
   const { data: kpis, isLoading } = trpc.fin.dashboard.useQuery();
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
   const { data: transactions = [] } = trpc.fin.transactions.list.useQuery();
+  const { data: rainAlerts = [] } = trpc.fin.forecastCalendar.getRainAlert.useQuery();
 
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
 
@@ -197,6 +199,46 @@ export default function FinanceDashboard() {
         </div>
       )}
 
+      {/* Alerta de Chuva */}
+      {rainAlerts.length > 0 && (
+        <div className="rounded-xl border border-blue-500/40 bg-blue-500/5 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <CloudRain className="h-4 w-4 text-blue-400" />
+            <h3 className="font-semibold text-sm text-blue-300">Alerta de Chuva — Impacto no Faturamento</h3>
+            <span className="ml-auto text-xs text-muted-foreground">Goiânia/GO · Próximos 2 dias</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {rainAlerts.map((alert) => (
+              <div key={alert.date} className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3 flex items-start gap-3">
+                {alert.weatherLabel === "storm"
+                  ? <CloudLightning className="h-5 w-5 text-violet-400 shrink-0 mt-0.5" />
+                  : <CloudRain className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold capitalize text-foreground">{alert.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {alert.weatherLabel === "storm" ? "Tempestade" : "Chuva"} · {alert.tempMax.toFixed(0)}°C · {alert.precipProb}% prob. · {alert.precip.toFixed(1)} mm
+                  </p>
+                  <div className="flex items-center gap-4 mt-2">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Sem chuva</p>
+                      <p className="text-xs font-bold text-foreground">{fmtBRL(alert.baseAmount)}</p>
+                    </div>
+                    <TrendingDown className="h-3 w-3 text-rose-400" />
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Com chuva</p>
+                      <p className="text-xs font-bold text-blue-300">{fmtBRL(alert.projectedAmount)}</p>
+                    </div>
+                    <div className="ml-auto text-right">
+                      <p className="text-[10px] text-muted-foreground">Impacto</p>
+                      <p className="text-xs font-bold text-rose-400">−{fmtBRL(alert.impact)}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Balance Card */}
       <div className="rounded-xl border border-border/50 bg-gradient-to-br from-primary/5 to-violet-500/5 p-5">
         <div className="flex items-center gap-3 mb-4">

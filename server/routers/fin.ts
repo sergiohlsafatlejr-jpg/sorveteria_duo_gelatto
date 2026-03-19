@@ -42,6 +42,10 @@ import {
   updateFinReceivable,
   updateFinTransaction,
   upsertFinRevenueForecast,
+  saveDailyRevenue,
+  getDailyRevenues,
+  getAccuracyHistory,
+  getRainAlert,
 } from "../db.fin";
 import { protectedProcedure, router } from "../_core/trpc";
 
@@ -685,9 +689,50 @@ export const finRouter = router({
           summary: { totalProjected, totalBase, weekdayCount, saturdayCount, sundayHolidayCount },
         };
       }),
+    saveRealRevenue: protectedProcedure
+      .input(z.object({
+        revenueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        realAmount: z.number().min(0),
+        note: z.string().max(255).optional(),
+      }))
+      .mutation(({ ctx, input }) => saveDailyRevenue(ctx.user.id, input.revenueDate, input.realAmount, input.note ?? null)),
+    getRealRevenues: protectedProcedure
+      .input(z.object({
+        year: z.number().int(),
+        month: z.number().int().min(1).max(12),
+      }))
+      .query(({ ctx, input }) => getDailyRevenues(ctx.user.id, input.year, input.month)),
+    getAccuracyHistory: protectedProcedure
+      .input(z.object({
+        avgWeekday: z.number().default(2000),
+        avgSaturday: z.number().default(5300),
+        avgSundayHoliday: z.number().default(8300),
+        rainFactor: z.number().min(0).max(1).default(0.7),
+        months: z.number().int().min(1).max(12).default(6),
+      }).optional())
+      .query(({ ctx, input }) => getAccuracyHistory(
+        ctx.user.id,
+        input?.avgWeekday ?? 2000,
+        input?.avgSaturday ?? 5300,
+        input?.avgSundayHoliday ?? 8300,
+        input?.rainFactor ?? 0.7,
+        input?.months ?? 6,
+      )),
+    getRainAlert: protectedProcedure
+      .input(z.object({
+        avgWeekday: z.number().default(2000),
+        avgSaturday: z.number().default(5300),
+        avgSundayHoliday: z.number().default(8300),
+        rainFactor: z.number().min(0).max(1).default(0.7),
+      }).optional())
+      .query(({ input }) => getRainAlert(
+        input?.avgWeekday ?? 2000,
+        input?.avgSaturday ?? 5300,
+        input?.avgSundayHoliday ?? 8300,
+        input?.rainFactor ?? 0.7,
+      )),
   }),
-
-  // ─── Cashflow Monthly ────────────────────────────────────────────────────────────────────────────
+  // ─── Cashflow Monthlyy ────────────────────────────────────────────────────────────────────────────
   cashflow: router({
     monthly: protectedProcedure
       .input(z.object({

@@ -389,3 +389,16 @@ export const finRevenueForecasts = mysqlTable("fin_revenue_forecasts", {
 });
 export type FinRevenueForecast = typeof finRevenueForecasts.$inferSelect;
 export type InsertFinRevenueForecast = typeof finRevenueForecasts.$inferInsert;
+
+// Faturamento real diário (lançado manualmente no calendário)
+export const finDailyRevenue = mysqlTable("fin_daily_revenue", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  revenueDate: varchar("revenueDate", { length: 10 }).notNull(), // YYYY-MM-DD
+  realAmount: decimal("realAmount", { precision: 12, scale: 2 }).notNull(),
+  note: varchar("note", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FinDailyRevenue = typeof finDailyRevenue.$inferSelect;
+export type InsertFinDailyRevenue = typeof finDailyRevenue.$inferInsert;
