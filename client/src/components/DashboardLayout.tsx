@@ -34,6 +34,7 @@ import {
   Bell,
   BookOpen,
   MessageSquare,
+  Instagram,
   Building2,
   CalendarDays,
   ChevronRight,
@@ -88,6 +89,7 @@ const menuGroups: MenuGroup[] = [
       { icon: Gift, label: "Programa de Pontos", path: "/points" },
       { icon: Settings, label: "Regras de Pontos", path: "/points-rules" },
       { icon: MessageSquare, label: "WhatsApp", path: "/whatsapp" },
+      { icon: Instagram, label: "Instagram", path: "/instagram" },
     ],
   },
   {

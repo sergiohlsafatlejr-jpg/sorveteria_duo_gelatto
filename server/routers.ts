@@ -7,6 +7,7 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { finRouter } from "./routers/fin";
 import { whatsappRouter } from "./routers/whatsapp";
+import { instagramRouter } from "./routers/instagram";
 import { getDb } from "./db";
 import { finTransactions, finReceivables, products } from "../drizzle/schema";
 import { and, eq, lt, lte, sql } from "drizzle-orm";
@@ -760,6 +761,7 @@ export const appRouter = router({
   notifications: notificationsRouter,
    fin: finRouter,
   whatsapp: whatsappRouter,
+  instagram: instagramRouter,
   alerts: router({
     counts: protectedProcedure.query(async ({ ctx }) => {
       const dbInstance = await getDb();

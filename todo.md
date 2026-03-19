@@ -247,3 +247,18 @@
 - [x] Mensagens personalizadas com variáveis: {{nome}}, {{pontos}}, {{saldo}}, {{meta}}, {{faltam}}, {{recompensa}}
 - [x] Item WhatsApp no menu lateral (grupo Pontos)
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Integração Instagram (19/03)
+- [x] Tabela instagram_posts no schema e migrada (pnpm db:push)
+- [x] Router instagramRouter com 8 endpoints: getAccountInfo, getRecentPosts, getPosts, createDraft, publishPost, deleteDraft, getPostInsights, syncMetrics
+- [x] Integração via MCP do Instagram (manus-mcp-cli)
+- [x] Tela Instagram (/instagram) com 3 abas: Feed, Rascunhos e Métricas
+- [x] Card de conta conectada com seguidores e número de posts
+- [x] Grid de posts recentes com hover de métricas e link para o Instagram
+- [x] Modal de criação de rascunho com preview de imagem
+- [x] Publicação via MCP com atualização de status no banco
+- [x] Suporte a post, story e reels
+- [x] KPIs totais: curtidas, alcance, impressões e comentários
+- [x] Sincronização de métricas via botão
+- [x] Item Instagram no menu lateral (grupo Pontos)
+- [x] TypeScript 0 erros, 23/23 testes passando

@@ -460,3 +460,28 @@ export const whatsappLogs = mysqlTable("whatsapp_logs", {
 });
 export type WhatsappLog = typeof whatsappLogs.$inferSelect;
 export type InsertWhatsappLog = typeof whatsappLogs.$inferInsert;
+
+// ─── Instagram ──────────────────────────────────────────────────────────────
+export const instagramPosts = mysqlTable("instagram_posts", {
+  id: int("id").autoincrement().primaryKey(),
+  // Type: 'post' | 'story' | 'reels'
+  type: varchar("type", { length: 20 }).default("post").notNull(),
+  caption: text("caption"),
+  imageUrl: text("imageUrl"),
+  // Status: 'draft' | 'published' | 'failed'
+  status: varchar("status", { length: 20 }).default("draft").notNull(),
+  instagramPostId: varchar("instagramPostId", { length: 100 }),
+  // Metrics (updated after publish)
+  likes: int("likes").default(0),
+  reach: int("reach").default(0),
+  impressions: int("impressions").default(0),
+  comments: int("comments").default(0),
+  promotionTitle: varchar("promotionTitle", { length: 200 }),
+  errorMessage: text("errorMessage"),
+  publishedAt: timestamp("publishedAt"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type InstagramPost = typeof instagramPosts.$inferSelect;
+export type InsertInstagramPost = typeof instagramPosts.$inferInsert;
