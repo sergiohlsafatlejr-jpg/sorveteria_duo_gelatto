@@ -320,3 +320,7 @@
 - [x] Tela de importação NF-e XML com upload drag-and-drop
 - [x] Revisão dos itens: tabela mostrando produto NF-e → produto cadastrado → qtd caixas → qtd unidades
 - [x] Confirmar importação dá entrada automática no estoque com purchaseDate da NF-e
+
+## Criação Automática de Produtos na Importação NF-e (19/03)
+- [x] Backend: criar produto automaticamente se não encontrado na NF-e
+- [x] Frontend: mostrar quais produtos serão criados vs vinculados antes de confirmar

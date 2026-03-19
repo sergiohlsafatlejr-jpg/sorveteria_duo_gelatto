@@ -18,9 +18,9 @@ import {
   FileText,
   Link2,
   Package,
+  Plus,
   RefreshCw,
   Upload,
-  XCircle,
 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -37,6 +37,7 @@ type ParsedItem = {
   vProd: number;
   matchedProductId: number | null;
   matchedProductName: string | null;
+  isNew: boolean;
   stockUnit: string;
   conversionFactor: number;
   stockQty: number;
@@ -59,6 +60,7 @@ export default function NfeImport() {
   const [nfeInfo, setNfeInfo] = useState<NfeInfo | null>(null);
   const [items, setItems] = useState<ParsedItem[]>([]);
   const [step, setStep] = useState<"upload" | "review" | "done">("upload");
+  const [doneResult, setDoneResult] = useState<{ imported: number; created: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: productsList } = trpc.nfe.productsList.useQuery();
@@ -73,7 +75,8 @@ export default function NfeImport() {
 
   const confirmMutation = trpc.nfe.confirm.useMutation({
     onSuccess: (data) => {
-      toast.success(`${data.imported} produto(s) importado(s) com sucesso!`);
+      toast.success(`${data.imported} produto(s) importado(s)${data.created > 0 ? `, ${data.created} criado(s) automaticamente` : ""}!`);
+      setDoneResult(data);
       setStep("done");
     },
     onError: (e) => toast.error(`Erro ao importar: ${e.message}`),
@@ -116,22 +119,19 @@ export default function NfeImport() {
   }
 
   function handleConfirm() {
-    const linked = items.filter((i) => i.matchedProductId !== null);
-    if (linked.length === 0) {
-      toast.error("Nenhum produto vinculado. Vincule ao menos um produto antes de confirmar.");
-      return;
-    }
     confirmMutation.mutate({
       nfeDate: nfeInfo!.dhEmi,
       supplier: nfeInfo!.emitNome,
-      items: linked.map((i) => ({
-        productId: i.matchedProductId!,
+      items: items.map((i) => ({
+        productId: i.matchedProductId,
+        isNew: i.isNew,
         qCom: i.qCom,
         conversionFactor: i.conversionFactor,
         stockQty: i.stockQty,
         vUnCom: i.vUnCom,
         xProd: i.xProd,
         cProd: i.cProd,
+        uCom: i.uCom,
       })),
     });
   }
@@ -139,10 +139,9 @@ export default function NfeImport() {
   const fmt = (v: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
-  const linkedCount = items.filter((i) => i.matchedProductId !== null).length;
-  const totalUnits = items
-    .filter((i) => i.matchedProductId !== null)
-    .reduce((s, i) => s + i.stockQty, 0);
+  const newCount = items.filter((i) => i.isNew).length;
+  const linkedCount = items.filter((i) => !i.isNew && i.matchedProductId !== null).length;
+  const totalUnits = items.reduce((s, i) => s + i.stockQty, 0);
 
   return (
     <DashboardLayout>
@@ -232,7 +231,7 @@ export default function NfeImport() {
             </Card>
 
             {/* Resumo */}
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-4 gap-4">
               <Card>
                 <CardContent className="p-4 text-center">
                   <p className="text-2xl font-bold">{items.length}</p>
@@ -242,7 +241,13 @@ export default function NfeImport() {
               <Card>
                 <CardContent className="p-4 text-center">
                   <p className="text-2xl font-bold text-green-600">{linkedCount}</p>
-                  <p className="text-xs text-muted-foreground">vinculados</p>
+                  <p className="text-xs text-muted-foreground">já cadastrados</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4 text-center">
+                  <p className="text-2xl font-bold text-blue-600">{newCount}</p>
+                  <p className="text-xs text-muted-foreground">serão criados</p>
                 </CardContent>
               </Card>
               <Card>
@@ -253,15 +258,30 @@ export default function NfeImport() {
               </Card>
             </div>
 
+            {/* Aviso sobre criação automática */}
+            {newCount > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+                <Plus className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-blue-700 text-sm">
+                    {newCount} produto(s) serão criados automaticamente
+                  </p>
+                  <p className="text-xs text-blue-600 mt-0.5">
+                    Os itens marcados com <span className="font-semibold">Novo</span> não estão cadastrados e serão criados com o nome, código do fornecedor, fator de conversão e custo unitário da NF-e. Você pode editar os detalhes depois no Estoque.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Tabela de itens */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Link2 className="h-4 w-4" />
-                  Vincular Itens da NF-e com Produtos Cadastrados
+                  Itens da NF-e
                 </CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  O sistema tentou vincular automaticamente. Corrija os vínculos e o fator de conversão se necessário.
+                  Revise os vínculos e o fator de conversão antes de confirmar. Itens marcados como <strong>Novo</strong> serão criados automaticamente.
                 </p>
               </CardHeader>
               <CardContent className="p-0">
@@ -279,7 +299,14 @@ export default function NfeImport() {
                     </thead>
                     <tbody>
                       {items.map((item, idx) => (
-                        <tr key={idx} className={`border-b ${item.matchedProductId ? "hover:bg-muted/10" : "bg-amber-50/50"}`}>
+                        <tr
+                          key={idx}
+                          className={`border-b ${
+                            item.isNew
+                              ? "bg-blue-50/40 hover:bg-blue-50/60"
+                              : "hover:bg-muted/10"
+                          }`}
+                        >
                           <td className="p-3">
                             <p className="font-medium text-xs leading-tight">{item.xProd}</p>
                             <p className="text-xs text-muted-foreground">Cód: {item.cProd}</p>
@@ -299,12 +326,22 @@ export default function NfeImport() {
                             <p className="text-xs text-muted-foreground mt-0.5">un/cx</p>
                           </td>
                           <td className="p-3 text-center">
-                            <Badge variant={item.matchedProductId ? "default" : "secondary"} className="text-xs">
+                            <Badge
+                              variant={item.isNew ? "secondary" : "default"}
+                              className={`text-xs ${item.isNew ? "bg-blue-100 text-blue-700 border-blue-200" : ""}`}
+                            >
                               {item.stockQty} un
                             </Badge>
                           </td>
                           <td className="p-3 min-w-[200px]">
-                            {item.matchedProductId ? (
+                            {item.isNew ? (
+                              <div className="flex items-center gap-2">
+                                <Badge className="bg-blue-600 text-white text-xs shrink-0">Novo</Badge>
+                                <span className="text-xs text-blue-700 font-medium truncate">
+                                  Será criado automaticamente
+                                </span>
+                              </div>
+                            ) : (
                               <div className="flex items-center gap-2">
                                 <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
                                 <Select
@@ -314,6 +351,7 @@ export default function NfeImport() {
                                     updateItem(idx, {
                                       matchedProductId: parseInt(v),
                                       matchedProductName: prod?.name ?? null,
+                                      isNew: false,
                                       stockUnit: prod?.unit ?? "un",
                                       conversionFactor: prod?.conversionFactor ?? item.conversionFactor,
                                       stockQty: Math.round(item.qCom * (prod?.conversionFactor ?? item.conversionFactor)),
@@ -322,34 +360,6 @@ export default function NfeImport() {
                                 >
                                   <SelectTrigger className="h-7 text-xs">
                                     <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {productsList?.map((p) => (
-                                      <SelectItem key={p.id} value={String(p.id)} className="text-xs">
-                                        {p.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-                                <Select
-                                  value=""
-                                  onValueChange={(v) => {
-                                    const prod = productsList?.find((p) => p.id === parseInt(v));
-                                    updateItem(idx, {
-                                      matchedProductId: parseInt(v),
-                                      matchedProductName: prod?.name ?? null,
-                                      stockUnit: prod?.unit ?? "un",
-                                      conversionFactor: prod?.conversionFactor ?? item.conversionFactor,
-                                      stockQty: Math.round(item.qCom * (prod?.conversionFactor ?? item.conversionFactor)),
-                                    });
-                                  }}
-                                >
-                                  <SelectTrigger className="h-7 text-xs border-amber-300">
-                                    <SelectValue placeholder="Vincular produto..." />
                                   </SelectTrigger>
                                   <SelectContent>
                                     {productsList?.map((p) => (
@@ -381,49 +391,57 @@ export default function NfeImport() {
               >
                 Carregar outro XML
               </Button>
-              <div className="flex items-center gap-3">
-                {items.length - linkedCount > 0 && (
-                  <p className="text-xs text-amber-600 flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3" />
-                    {items.length - linkedCount} item(s) sem vínculo serão ignorados
-                  </p>
+              <Button
+                onClick={handleConfirm}
+                disabled={confirmMutation.isPending || items.length === 0}
+                className="gap-2"
+              >
+                {confirmMutation.isPending ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Package className="h-4 w-4" />
                 )}
-                <Button
-                  onClick={handleConfirm}
-                  disabled={confirmMutation.isPending || linkedCount === 0}
-                  className="gap-2"
-                >
-                  {confirmMutation.isPending ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Package className="h-4 w-4" />
-                  )}
-                  Confirmar Entrada ({linkedCount} produto{linkedCount !== 1 ? "s" : ""}, {totalUnits} un)
-                </Button>
-              </div>
+                Confirmar Importação ({items.length} itens, {totalUnits} un)
+              </Button>
             </div>
           </>
         )}
 
         {/* ── Step 3: Concluído ── */}
-        {step === "done" && (
+        {step === "done" && doneResult && (
           <Card>
             <CardContent className="flex flex-col items-center py-16 text-center gap-4">
               <CheckCircle2 className="h-16 w-16 text-green-500" />
               <div>
                 <h2 className="text-xl font-bold">Importação concluída!</h2>
                 <p className="text-muted-foreground mt-1">
-                  O estoque foi atualizado com os produtos da NF-e.
+                  {doneResult.imported} produto(s) com entrada no estoque.
+                  {doneResult.created > 0 && (
+                    <span className="text-blue-600 font-medium">
+                      {" "}{doneResult.created} produto(s) criado(s) automaticamente.
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex gap-3 mt-2">
                 <Button
                   variant="outline"
-                  onClick={() => { setStep("upload"); setItems([]); setNfeInfo(null); utils.products.list.invalidate(); }}
+                  onClick={() => {
+                    setStep("upload");
+                    setItems([]);
+                    setNfeInfo(null);
+                    setDoneResult(null);
+                    utils.products.list.invalidate();
+                  }}
                 >
                   Importar outra NF-e
                 </Button>
-                <Button onClick={() => { utils.products.list.invalidate(); navigate("/products"); }}>
+                <Button
+                  onClick={() => {
+                    utils.products.list.invalidate();
+                    navigate("/products");
+                  }}
+                >
                   Ver Estoque
                 </Button>
               </div>

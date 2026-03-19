@@ -3,7 +3,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import * as db from "../db";
 import { products, stockMovements } from "../../drizzle/schema";
-import { eq, or, like, and } from "drizzle-orm";
+import { eq, like, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -31,7 +31,6 @@ export type NfeInfo = {
 
 // ─── Parser de NF-e XML ───────────────────────────────────────────────────────
 function parseNfeXml(xmlContent: string): { info: NfeInfo; items: NfeItem[] } {
-  // Remove namespace prefixes for easier parsing
   const clean = xmlContent.replace(/<\/?nfe:/g, "<").replace(/xmlns[^"]*"[^"]*"/g, "");
 
   function getTag(xml: string, tag: string): string {
@@ -49,7 +48,6 @@ function parseNfeXml(xmlContent: string): { info: NfeInfo; items: NfeItem[] } {
     return results;
   }
 
-  // Info da NF
   const ideMatch = clean.match(/<ide>([\s\S]*?)<\/ide>/);
   const ideXml = ideMatch ? ideMatch[1] : "";
   const emitMatch = clean.match(/<emit>([\s\S]*?)<\/emit>/);
@@ -69,7 +67,6 @@ function parseNfeXml(xmlContent: string): { info: NfeInfo; items: NfeItem[] } {
     vNF: parseFloat(getTag(totalXml, "vNF") || "0"),
   };
 
-  // Itens
   const detBlocks = getAllTags(clean, "det");
   const items: NfeItem[] = detBlocks.map((det, i) => {
     const prodMatch = det.match(/<prod>([\s\S]*?)<\/prod>/);
@@ -92,59 +89,78 @@ function parseNfeXml(xmlContent: string): { info: NfeInfo; items: NfeItem[] } {
 
 // ─── Extrai fator de conversão do nome do produto ─────────────────────────────
 function extractConversionFromName(xProd: string): number {
-  // Ex: "LIMAO 30 UND - FRUTA" → 30
-  // Ex: "ACAI 24 UND - SP" → 24
-  // Ex: "DUOBLITO 26 UND - PREMIUM" → 26
   const match = xProd.match(/\b(\d+)\s+UND\b/i);
   if (match) return parseInt(match[1]);
-  // Ex: "PACK 4 UND." → 4
   const match2 = xProd.match(/PACK\s+(\d+)\s+UND/i);
   if (match2) return parseInt(match2[1]);
   return 1;
 }
 
+// ─── Formata nome do produto para cadastro ────────────────────────────────────
+function formatProductName(xProd: string): string {
+  // Converte "LIMAO 30 UND - FRUTA" → "Limão 30 Und - Fruta"
+  return xProd
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/\bUnd\b/g, "und")
+    .replace(/\bCx\b/g, "cx");
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 export const nfeRouter = router({
-  // Parse do XML e retorna os itens com sugestão de vínculo com produtos cadastrados
+  // Parse do XML e retorna os itens com sugestão de vínculo (ou criação automática)
   parse: protectedProcedure
     .input(z.object({ xmlContent: z.string() }))
     .mutation(async ({ input }) => {
       const { info, items } = parseNfeXml(input.xmlContent);
       const dbInstance = await getDb();
-      if (!dbInstance) return { info, items: items.map((item) => ({ ...item, matchedProductId: null, matchedProductName: null, stockUnit: "un", conversionFactor: 1, stockQty: item.qCom })) };
+      if (!dbInstance) {
+        return {
+          info,
+          items: items.map((item) => ({
+            ...item,
+            matchedProductId: null,
+            matchedProductName: null,
+            isNew: true,
+            stockUnit: "un",
+            conversionFactor: extractConversionFromName(item.xProd),
+            stockQty: item.qCom * extractConversionFromName(item.xProd),
+          })),
+        };
+      }
 
-      // Para cada item, tenta encontrar produto cadastrado por supplierCode ou nome similar
       const enriched = await Promise.all(
         items.map(async (item) => {
-          // Busca por supplierCode primeiro
+          const suggestedFactor = extractConversionFromName(item.xProd);
+
+          // 1. Busca por supplierCode
           const byCode = await dbInstance
-            .select({ id: products.id, name: products.name, unit: products.unit, purchaseUnit: products.purchaseUnit, conversionFactor: products.conversionFactor })
+            .select({ id: products.id, name: products.name, unit: products.unit, conversionFactor: products.conversionFactor })
             .from(products)
             .where(eq(products.supplierCode, item.cProd))
             .limit(1);
 
           if (byCode.length > 0) {
             const p = byCode[0];
-            const factor = p.conversionFactor ?? 1;
+            const factor = p.conversionFactor ?? suggestedFactor;
             return {
               ...item,
               matchedProductId: p.id,
               matchedProductName: p.name,
+              isNew: false,
               stockUnit: p.unit,
               conversionFactor: factor,
-              stockQty: item.qCom * factor,
+              stockQty: Math.round(item.qCom * factor),
             };
           }
 
-          // Busca por nome similar (primeiras palavras)
+          // 2. Busca por nome similar
           const firstWord = item.xProd.split(" ")[0];
           const byName = await dbInstance
-            .select({ id: products.id, name: products.name, unit: products.unit, purchaseUnit: products.purchaseUnit, conversionFactor: products.conversionFactor })
+            .select({ id: products.id, name: products.name, unit: products.unit, conversionFactor: products.conversionFactor })
             .from(products)
             .where(like(products.name, `%${firstWord}%`))
             .limit(1);
-
-          const suggestedFactor = extractConversionFromName(item.xProd);
 
           if (byName.length > 0) {
             const p = byName[0];
@@ -153,19 +169,22 @@ export const nfeRouter = router({
               ...item,
               matchedProductId: p.id,
               matchedProductName: p.name,
+              isNew: false,
               stockUnit: p.unit,
               conversionFactor: factor,
-              stockQty: item.qCom * factor,
+              stockQty: Math.round(item.qCom * factor),
             };
           }
 
+          // 3. Não encontrado → será criado automaticamente
           return {
             ...item,
             matchedProductId: null,
             matchedProductName: null,
+            isNew: true,
             stockUnit: "un",
             conversionFactor: suggestedFactor,
-            stockQty: item.qCom * suggestedFactor,
+            stockQty: Math.round(item.qCom * suggestedFactor),
           };
         })
       );
@@ -173,7 +192,7 @@ export const nfeRouter = router({
       return { info, items: enriched };
     }),
 
-  // Confirma a importação: dá entrada no estoque para cada item vinculado
+  // Confirma a importação: cria produtos novos e dá entrada no estoque
   confirm: protectedProcedure
     .input(
       z.object({
@@ -181,13 +200,15 @@ export const nfeRouter = router({
         supplier: z.string().optional(),
         items: z.array(
           z.object({
-            productId: z.number(),
+            productId: z.number().nullable(),
+            isNew: z.boolean(),
             qCom: z.number(),
             conversionFactor: z.number().int().min(1),
             stockQty: z.number().int().min(1),
             vUnCom: z.number(),
             xProd: z.string(),
             cProd: z.string().optional(),
+            uCom: z.string().optional(),
           })
         ),
       })
@@ -198,12 +219,37 @@ export const nfeRouter = router({
 
       const purchaseDate = new Date(input.nfeDate);
       let imported = 0;
+      let created = 0;
 
       for (const item of input.items) {
+        let productId = item.productId;
+
+        // ── Criar produto automaticamente se não existe ──
+        if (item.isNew || !productId) {
+          const costPerUnit = item.conversionFactor > 0 ? item.vUnCom / item.conversionFactor : item.vUnCom;
+          const [insertResult] = await dbInstance.insert(products).values({
+            name: formatProductName(item.xProd),
+            description: item.xProd,
+            costPrice: String(costPerUnit.toFixed(2)),
+            salePrice: "0.00",
+            currentStock: 0,
+            minStock: 5,
+            unit: "un",
+            purchaseUnit: item.uCom ?? "CX",
+            conversionFactor: item.conversionFactor,
+            supplierCode: item.cProd ?? null,
+            active: true,
+          });
+          productId = (insertResult as any).insertId;
+          created++;
+        }
+
+        if (!productId) continue;
+
         const [productRow] = await dbInstance
           .select({ currentStock: products.currentStock })
           .from(products)
-          .where(eq(products.id, item.productId))
+          .where(eq(products.id, productId))
           .limit(1);
 
         if (!productRow) continue;
@@ -215,11 +261,11 @@ export const nfeRouter = router({
         await dbInstance
           .update(products)
           .set({ currentStock: newStock })
-          .where(eq(products.id, item.productId));
+          .where(eq(products.id, productId));
 
         // Registra movimentação
         await dbInstance.insert(stockMovements).values({
-          productId: item.productId,
+          productId,
           type: "in",
           quantity: item.stockQty,
           previousStock,
@@ -227,16 +273,16 @@ export const nfeRouter = router({
           reason: `NF-e: ${item.xProd} (${item.qCom} ${item.qCom === 1 ? "cx" : "cxs"} × ${item.conversionFactor} un)`,
           purchaseDate,
           supplier: input.supplier ?? undefined,
-          unitCost: item.vUnCom > 0 ? String(item.vUnCom / item.conversionFactor) : undefined,
+          unitCost: item.vUnCom > 0 ? String((item.vUnCom / item.conversionFactor).toFixed(4)) : undefined,
           userId: ctx.user.id,
         });
 
-        // Atualiza supplierCode no produto se não tiver
-        if (item.cProd) {
+        // Salva supplierCode e fator no produto existente (se não tinha)
+        if (!item.isNew && item.cProd) {
           await dbInstance
             .update(products)
             .set({ supplierCode: item.cProd, conversionFactor: item.conversionFactor })
-            .where(and(eq(products.id, item.productId), sql`(supplierCode IS NULL OR supplierCode = '')`));
+            .where(and(eq(products.id, productId), sql`(supplierCode IS NULL OR supplierCode = '')`));
         }
 
         imported++;
@@ -248,13 +294,13 @@ export const nfeRouter = router({
         action: "create",
         module: "nfe_import",
         targetId: 0,
-        details: `NF-e importada: ${imported} produto(s) com entrada no estoque`,
+        details: `NF-e importada: ${imported} produto(s) com entrada no estoque, ${created} produto(s) criado(s) automaticamente`,
       });
 
-      return { imported };
+      return { imported, created };
     }),
 
-  // Lista todos os produtos cadastrados para o mapeamento manual
+  // Lista todos os produtos cadastrados para mapeamento manual
   productsList: protectedProcedure.query(async () => {
     const dbInstance = await getDb();
     if (!dbInstance) return [];
