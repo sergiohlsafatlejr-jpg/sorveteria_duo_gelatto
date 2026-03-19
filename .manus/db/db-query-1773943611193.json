@@ -1,0 +1,15 @@
+{
+  "query": "SELECT id, fullName, birthDate FROM customers LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT id, fullName, birthDate FROM customers LIMIT 5;",
+  "rows": [
+    {
+      "id": "1",
+      "fullName": "Clarissa Ulhoa Loro",
+      "birthDate": "1988-10-18 00:00:00"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tfullName\tbirthDate\n1\tClarissa Ulhoa Loro\t1988-10-18 00:00:00\n",
+  "stderr": "",
+  "execution_time_ms": 447
+}

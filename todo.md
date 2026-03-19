@@ -297,3 +297,17 @@
 - [x] Endpoint customers.getStats já existia no backend (getCustomerPurchaseStats)
 - [x] Carregamento lazy: dados só são buscados quando o usuário expande o card
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Registro de Compra no Card do Cliente (19/03)
+- [ ] Botão "Registrar Compra" no card do cliente
+- [ ] Modal com campo de valor da compra e forma de pagamento
+- [ ] Ao salvar: cria registro na tabela de compras do cliente e calcula pontos automaticamente pela regra ativa
+- [ ] Histórico de compras aparece no card expandível com data, valor e pontos ganhos
+- [ ] Total de compras e ticket médio atualizados em tempo real
+
+## Data de Compra no Estoque e Relatório Mensal (19/03)
+- [x] Campo purchaseDate na tabela stock_movements (data da compra/entrada)
+- [x] Migração pnpm db:push executada
+- [x] Campo de data de compra no modal de entrada de estoque (Estoque > Movimentações)
+- [x] Relatório mensal: quantas vezes cada item foi comprado no mês (tabela)
+- [x] Filtro por mês/ano no relatório de compras por produto

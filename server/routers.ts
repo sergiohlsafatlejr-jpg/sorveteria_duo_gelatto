@@ -353,15 +353,26 @@ const productsRouter = router({
         previousStock: z.number().int(),
         newStock: z.number().int(),
         reason: z.string().optional(),
+        purchaseDate: z.string().optional(),
+        supplier: z.string().optional(),
+        unitCost: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      await db.createStockMovement({ ...input, userId: ctx.user.id });
+      const { purchaseDate, unitCost, ...rest } = input;
+      await db.createStockMovement({
+        ...rest,
+        purchaseDate: purchaseDate ? new Date(purchaseDate) : undefined,
+        unitCost: unitCost !== undefined ? String(unitCost) : undefined,
+        userId: ctx.user.id,
+      });
     }),
-
   stockMovements: protectedProcedure
     .input(z.object({ productId: z.number().optional() }).optional())
     .query(({ input }) => db.getStockMovements(input?.productId)),
+  purchaseReport: protectedProcedure
+    .input(z.object({ year: z.number(), month: z.number() }))
+    .query(({ input }) => db.getMonthlyPurchaseReport(input.year, input.month)),
 });
 
 // ─── Sales Router ─────────────────────────────────────────────────────────────

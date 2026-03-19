@@ -622,3 +622,88 @@ export async function getCustomerPurchaseStats(customerId: number): Promise<{
     lastVisitDate,
   };
 }
+
+// ─── Monthly Purchase Report ──────────────────────────────────────────────────
+export async function getMonthlyPurchaseReport(
+  year: number,
+  month: number
+): Promise<{
+  productId: number;
+  productName: string;
+  purchaseCount: number;
+  totalQuantity: number;
+  totalCost: number;
+  lastPurchaseDate: Date | null;
+  purchases: { date: Date | null; quantity: number; unitCost: number | null; supplier: string | null; reason: string | null }[];
+}[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Busca todas as entradas (type = 'in') do mês/ano com purchaseDate ou createdAt no período
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59);
+
+  const movements = await db
+    .select({
+      id: stockMovements.id,
+      productId: stockMovements.productId,
+      quantity: stockMovements.quantity,
+      unitCost: stockMovements.unitCost,
+      supplier: stockMovements.supplier,
+      reason: stockMovements.reason,
+      purchaseDate: stockMovements.purchaseDate,
+      createdAt: stockMovements.createdAt,
+    })
+    .from(stockMovements)
+    .where(
+      and(
+        eq(stockMovements.type, "in"),
+        sql`COALESCE(${stockMovements.purchaseDate}, ${stockMovements.createdAt}) BETWEEN ${startDate} AND ${endDate}`
+      )
+    )
+    .orderBy(desc(stockMovements.createdAt));
+
+  // Busca os produtos relacionados
+  const productIds = Array.from(new Set(movements.map((m) => m.productId)));
+  if (productIds.length === 0) return [];
+
+  const productList = await db
+    .select({ id: products.id, name: products.name })
+    .from(products)
+    .where(sql`${products.id} IN (${sql.join(productIds.map((id) => sql`${id}`), sql`, `)})`);
+
+  const productMap = new Map(productList.map((p) => [p.id, p.name]));
+
+  // Agrupa por produto
+  const grouped = new Map<number, typeof movements>();
+  for (const m of movements) {
+    if (!grouped.has(m.productId)) grouped.set(m.productId, []);
+    grouped.get(m.productId)!.push(m);
+  }
+
+  return Array.from(grouped.entries()).map(([productId, items]) => {
+    const totalQuantity = items.reduce((s, i) => s + i.quantity, 0);
+    const totalCost = items.reduce((s, i) => {
+      const cost = i.unitCost ? parseFloat(String(i.unitCost)) * i.quantity : 0;
+      return s + cost;
+    }, 0);
+    const sortedDates = items
+      .map((i) => i.purchaseDate ?? i.createdAt)
+      .sort((a, b) => (b?.getTime() ?? 0) - (a?.getTime() ?? 0));
+    return {
+      productId,
+      productName: productMap.get(productId) ?? `Produto #${productId}`,
+      purchaseCount: items.length,
+      totalQuantity,
+      totalCost,
+      lastPurchaseDate: sortedDates[0] ?? null,
+      purchases: items.map((i) => ({
+        date: i.purchaseDate ?? i.createdAt,
+        quantity: i.quantity,
+        unitCost: i.unitCost ? parseFloat(String(i.unitCost)) : null,
+        supplier: i.supplier ?? null,
+        reason: i.reason ?? null,
+      })),
+    };
+  }).sort((a, b) => b.purchaseCount - a.purchaseCount);
+}
