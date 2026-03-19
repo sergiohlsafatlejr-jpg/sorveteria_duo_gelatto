@@ -12,17 +12,19 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import {
@@ -31,6 +33,7 @@ import {
   BookOpen,
   Building2,
   CalendarDays,
+  ChevronRight,
   Database,
   DollarSign,
   Gift,
@@ -54,31 +57,44 @@ import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
 
-const menuGroups = [
+// ─── Menu structure ──────────────────────────────────────────────────────────
+type MenuItem = { icon: React.ElementType; label: string; path: string };
+type MenuGroup = { icon: React.ElementType; label: string; items: MenuItem[] };
+type TopItem = { icon: React.ElementType; label: string; path: string };
+
+const topItems: TopItem[] = [
+  { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+];
+
+const menuGroups: MenuGroup[] = [
   {
-    label: "Principal",
+    icon: Package,
+    label: "Estoque",
     items: [
-      { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+      { icon: Package, label: "Cadastro de Produtos", path: "/products-register" },
+      { icon: Package, label: "Estoque", path: "/products" },
+      { icon: BarChart3, label: "Relatórios de Estoque", path: "/reports" },
     ],
   },
   {
-    label: "Comercial",
+    icon: Gift,
+    label: "Pontos",
     items: [
-      { icon: Users, label: "Clientes", path: "/customers" },
+      { icon: Users, label: "Cadastro de Clientes", path: "/customers" },
       { icon: Gift, label: "Programa de Pontos", path: "/points" },
+      { icon: TrendingUp, label: "Regras de Pontos", path: "/points" },
+    ],
+  },
+  {
+    icon: ShoppingCart,
+    label: "Vendas",
+    items: [
       { icon: ShoppingCart, label: "Vendas", path: "/sales" },
       { icon: Bell, label: "Notificações", path: "/notifications" },
     ],
   },
   {
-    label: "Operacional",
-    items: [
-      { icon: Package, label: "Estoque", path: "/products" },
-      { icon: Package, label: "Cadastro de Produtos", path: "/products-register" },
-      { icon: BarChart3, label: "Relatórios", path: "/reports" },
-    ],
-  },
-  {
+    icon: DollarSign,
     label: "Financeiro",
     items: [
       { icon: DollarSign, label: "Painel Financeiro", path: "/fin/dashboard" },
@@ -88,13 +104,14 @@ const menuGroups = [
       { icon: PiggyBank, label: "Custos", path: "/fin/costs" },
       { icon: BookOpen, label: "DRE", path: "/fin/dre" },
       { icon: CalendarDays, label: "Previsão de Faturamento", path: "/fin/forecast" },
-      { icon: Settings, label: "Config. Financeiras", path: "/fin/settings" },
       { icon: Tag, label: "Categorias", path: "/fin/categories" },
       { icon: Landmark, label: "Bancos / Caixas", path: "/fin/banks" },
       { icon: PiggyBank, label: "Cadastro de Custos", path: "/fin/costs-register" },
+      { icon: Settings, label: "Config. Financeiras", path: "/fin/settings" },
     ],
   },
   {
+    icon: UserCog,
     label: "Administração",
     items: [
       { icon: UserCog, label: "Usuários", path: "/users" },
@@ -170,6 +187,18 @@ function DashboardLayoutContent({
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
+  // Track which groups are open — default open the group containing the current route
+  const getDefaultOpenGroups = () => {
+    const open: Record<string, boolean> = {};
+    menuGroups.forEach((g) => {
+      if (g.items.some((item) => location === item.path || (item.path !== "/" && location.startsWith(item.path)))) {
+        open[g.label] = true;
+      }
+    });
+    return open;
+  };
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(getDefaultOpenGroups);
+
   const roleLabel: Record<string, string> = {
     admin: "Administrador",
     manager: "Gerente",
@@ -205,10 +234,15 @@ function DashboardLayoutContent({
     };
   }, [isResizing, setSidebarWidth]);
 
+  const toggleGroup = (label: string) => {
+    setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+  };
+
   return (
     <>
       <div className="relative" ref={sidebarRef}>
         <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
+          {/* Header */}
           <SidebarHeader className="h-16 border-b border-sidebar-border">
             <div className="flex items-center gap-3 px-3 h-full">
               <div className="h-9 w-9 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
@@ -223,38 +257,88 @@ function DashboardLayoutContent({
             </div>
           </SidebarHeader>
 
-          <SidebarContent className="py-2">
-            {menuGroups.map((group) => (
-              <SidebarGroup key={group.label}>
-                {!isCollapsed && (
-                  <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-3 mb-1">
-                    {group.label}
-                  </SidebarGroupLabel>
-                )}
-                <SidebarMenu>
-                  {group.items.map((item) => {
-                    const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
-                    return (
-                      <SidebarMenuItem key={item.path + item.label}>
+          <SidebarContent className="py-2 overflow-y-auto">
+            <SidebarMenu>
+              {/* Top-level single items (Dashboard) */}
+              {topItems.map((item) => {
+                const isActive = location === item.path;
+                return (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      onClick={() => setLocation(item.path)}
+                      tooltip={item.label}
+                      className="h-9 mx-1 rounded-lg transition-all"
+                    >
+                      <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-sidebar-primary" : "text-sidebar-foreground/70"}`} />
+                      <span className={isActive ? "text-sidebar-foreground font-medium" : "text-sidebar-foreground/80"}>
+                        {item.label}
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+
+              {/* Collapsible groups */}
+              {menuGroups.map((group) => {
+                const isGroupActive = group.items.some(
+                  (item) => location === item.path || (item.path !== "/" && location.startsWith(item.path))
+                );
+                const isOpen = openGroups[group.label] ?? false;
+
+                return (
+                  <Collapsible
+                    key={group.label}
+                    open={isOpen}
+                    onOpenChange={() => toggleGroup(group.label)}
+                    className="group/collapsible"
+                  >
+                    <SidebarMenuItem>
+                      <CollapsibleTrigger asChild>
                         <SidebarMenuButton
-                          isActive={isActive}
-                          onClick={() => setLocation(item.path)}
-                          tooltip={item.label}
+                          tooltip={group.label}
+                          isActive={isGroupActive && !isOpen}
                           className="h-9 mx-1 rounded-lg transition-all"
                         >
-                          <item.icon className={`h-4 w-4 ${isActive ? "text-sidebar-primary" : "text-sidebar-foreground/70"}`} />
-                          <span className={isActive ? "text-sidebar-foreground font-medium" : "text-sidebar-foreground/80"}>
-                            {item.label}
+                          <group.icon className={`h-4 w-4 shrink-0 ${isGroupActive ? "text-sidebar-primary" : "text-sidebar-foreground/70"}`} />
+                          <span className={`flex-1 ${isGroupActive ? "text-sidebar-foreground font-medium" : "text-sidebar-foreground/80"}`}>
+                            {group.label}
                           </span>
+                          <ChevronRight
+                            className={`h-3.5 w-3.5 shrink-0 text-sidebar-foreground/50 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
+                          />
                         </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroup>
-            ))}
+                      </CollapsibleTrigger>
+
+                      <CollapsibleContent>
+                        <SidebarMenuSub className="ml-1 border-l border-sidebar-border/50 pl-2 mt-0.5 mb-0.5">
+                          {group.items.map((item) => {
+                            const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
+                            return (
+                              <SidebarMenuSubItem key={item.path + item.label}>
+                                <SidebarMenuSubButton
+                                  isActive={isActive}
+                                  onClick={() => setLocation(item.path)}
+                                  className="h-8 rounded-md transition-all cursor-pointer"
+                                >
+                                  <item.icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-sidebar-primary" : "text-sidebar-foreground/60"}`} />
+                                  <span className={`text-xs ${isActive ? "text-sidebar-foreground font-medium" : "text-sidebar-foreground/75"}`}>
+                                    {item.label}
+                                  </span>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            );
+                          })}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </SidebarMenuItem>
+                  </Collapsible>
+                );
+              })}
+            </SidebarMenu>
           </SidebarContent>
 
+          {/* Footer */}
           <SidebarFooter className="p-3 border-t border-sidebar-border">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -296,6 +380,7 @@ function DashboardLayoutContent({
           </SidebarFooter>
         </Sidebar>
 
+        {/* Resize handle */}
         {!isCollapsed && (
           <div
             className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 transition-colors"

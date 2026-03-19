@@ -140,9 +140,18 @@
 
 ## Telas de Cadastro Dedicadas (solicitadas pelo usuário)
 
-- [ ] Tela de Cadastro de Produtos (/products) — CRUD completo com estoque, preço, categoria, código de barras, unidade, estoque mínimo
-- [ ] Tela de Cadastro de Categorias Financeiras (/fin/categories) — nome, tipo (receita/despesa), cor
-- [ ] Tela de Cadastro de Custos (/fin/costs) — fixos e variáveis, valor, categoria, recorrência
-- [ ] Tela de Cadastro de Bancos (/fin/banks) — nome, agência, conta, saldo inicial, cor
-- [ ] Registrar todas as novas rotas no App.tsx
-- [ ] Adicionar itens de menu no DashboardLayout para as novas telas
+- [x] Tela de Cadastro de Produtos (/products-register) — CRUD completo
+- [x] Tela de Cadastro de Categorias Financeiras (/fin/categories) — nome, tipo, cor
+- [x] Tela de Cadastro de Custos (/fin/costs-register) — fixos e variáveis
+- [x] Tela de Cadastro de Bancos (/fin/banks) — nome, saldo inicial, cor
+- [x] Rotas registradas no App.tsx
+- [x] Itens adicionados no DashboardLayout
+
+## Reestruturação do Menu Lateral
+- [x] Menu lateral com grupos colapsáveis (pastas + sub-itens)
+- [x] Grupo Dashboard (item único)
+- [x] Grupo Estoque: Cadastro de Produtos, Estoque, Relatórios de Estoque
+- [x] Grupo Pontos: Cadastro de Clientes, Programa de Pontos, Regras de Pontos
+- [x] Grupo Vendas: Vendas, Notificações
+- [x] Grupo Financeiro: Painel, Contas a Pagar, Contas a Receber, Extratos, Custos, DRE, Previsão, Categorias, Bancos, Cadastro de Custos
+- [x] Grupo Administração: Usuários, Conector Externo
