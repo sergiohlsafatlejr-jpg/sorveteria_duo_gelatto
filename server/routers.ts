@@ -113,6 +113,9 @@ const customersRouter = router({
     }),
 
   birthdays: protectedProcedure.query(() => db.getBirthdayCustomers()),
+  getStats: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(({ input }) => db.getCustomerPurchaseStats(input.id)),
 });
 
 // ─── Points Router ────────────────────────────────────────────────────────────

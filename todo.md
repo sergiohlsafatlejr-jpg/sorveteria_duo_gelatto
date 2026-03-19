@@ -283,3 +283,17 @@
 - [x] Badge "Agendado" e "IA" nos rascunhos da lista
 - [x] Card de alerta de posts agendados pendentes
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Correção Data Aniversário + Últimas Compras (19/03)
+- [ ] Corrigir bug de fuso horário na exibição da data de aniversário (18/10 aparece como 17/10)
+- [ ] Adicionar últimas 3 compras no card do cliente (data + valor)
+- [ ] Adicionar média de gasto por visita no card do cliente
+- [ ] Adicionar total de visitas no card do cliente
+
+## Correção Bug Fuso Horário + Stats de Compras no Card do Cliente (19/03)
+- [x] Bug corrigido: data de aniversário agora usa getUTCDate/getUTCMonth para evitar perda de 1 dia por UTC-3
+- [x] Componente CustomerStats: exibe total de compras com botão expandir/recolher
+- [x] Ao expandir: mostra ticket médio, número de visitas e últimas 5 compras com data, forma de pagamento e valor
+- [x] Endpoint customers.getStats já existia no backend (getCustomerPurchaseStats)
+- [x] Carregamento lazy: dados só são buscados quando o usuário expande o card
+- [x] TypeScript 0 erros, 23/23 testes passando

@@ -2,7 +2,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import BackButton from "@/components/BackButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -13,10 +13,93 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { Edit, Gift, Plus, Search, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronUp, Edit, Gift, Plus, Search, ShoppingBag, TrendingUp, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+// ─── Utilitário: exibe data sem conversão de fuso ────────────────────────────
+function formatBirthDate(raw: Date | string | null | undefined): string {
+  if (!raw) return "";
+  const d = raw instanceof Date ? raw : new Date(raw);
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${day}/${month}`;
+}
+
+// ─── Componente de stats de compras (lazy, só carrega ao expandir) ────────────
+function CustomerStats({ customerId, totalPurchases }: { customerId: number; totalPurchases: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: stats, isLoading } = trpc.customers.getStats.useQuery(
+    { id: customerId },
+    { enabled: expanded }
+  );
+
+  const fmt = (v: number | string) =>
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+      typeof v === "string" ? parseFloat(v) : v
+    );
+
+  const paymentLabel: Record<string, string> = {
+    cash: "Dinheiro",
+    credit_card: "Crédito",
+    debit_card: "Débito",
+    pix: "Pix",
+    other: "Outro",
+  };
+
+  return (
+    <div className="mt-2">
+      <button
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <ShoppingBag className="h-3 w-3" />
+        <span>Total compras: <strong className="text-foreground">{fmt(totalPurchases)}</strong></span>
+        {expanded ? <ChevronUp className="h-3 w-3 ml-auto" /> : <ChevronDown className="h-3 w-3 ml-auto" />}
+      </button>
+
+      {expanded && (
+        <div className="mt-2 rounded-lg border bg-muted/30 p-3 space-y-2 text-xs">
+          {isLoading ? (
+            <p className="text-muted-foreground animate-pulse">Carregando...</p>
+          ) : !stats ? (
+            <p className="text-muted-foreground">Sem dados disponíveis.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1 text-muted-foreground">
+                  <TrendingUp className="h-3 w-3" />
+                  <span>Média por visita:</span>
+                  <strong className="text-foreground">{fmt(stats.avgPurchase)}</strong>
+                </div>
+                <div className="text-muted-foreground">
+                  <span>{stats.visitCount} visita(s)</span>
+                </div>
+              </div>
+              {stats.lastPurchases.length > 0 ? (
+                <div className="space-y-1">
+                  <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Últimas compras</p>
+                  {stats.lastPurchases.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between">
+                      <span className="text-muted-foreground">
+                        {new Date(p.date).toLocaleDateString("pt-BR")} · {paymentLabel[p.paymentMethod] ?? p.paymentMethod}
+                      </span>
+                      <strong>{fmt(p.total)}</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">Nenhuma compra registrada ainda.</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tipos ───────────────────────────────────────────────────────────────────
 type CustomerForm = {
   fullName: string;
   birthDate: string;
@@ -82,7 +165,16 @@ export default function Customers() {
     setEditId(c.id);
     setForm({
       fullName: c.fullName,
-      birthDate: c.birthDate ? new Date(c.birthDate).toISOString().split("T")[0] : "",
+      // Usa UTC para não perder 1 dia por fuso
+      birthDate: c.birthDate
+        ? (() => {
+            const d = c.birthDate instanceof Date ? c.birthDate : new Date(c.birthDate);
+            const y = d.getUTCFullYear();
+            const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(d.getUTCDate()).padStart(2, "0");
+            return `${y}-${m}-${day}`;
+          })()
+        : "",
       cep: c.cep ?? "",
       phone: c.phone ?? "",
       email: c.email ?? "",
@@ -196,7 +288,7 @@ export default function Customers() {
                     </Badge>
                     {c.birthDate && (
                       <Badge variant="outline" className="text-xs">
-                        🎂 {new Date(c.birthDate).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+                        🎂 {formatBirthDate(c.birthDate)}
                       </Badge>
                     )}
                     {c.cep && (
@@ -205,9 +297,8 @@ export default function Customers() {
                       </Badge>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Total compras: {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parseFloat(String(c.totalPurchases)))}
-                  </p>
+                  {/* Stats expandíveis com últimas compras e média */}
+                  <CustomerStats customerId={c.id} totalPurchases={String(c.totalPurchases)} />
                 </CardContent>
               </Card>
             ))}

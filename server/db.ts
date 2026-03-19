@@ -577,3 +577,48 @@ export async function createNotificationLog(data: InsertNotificationLog): Promis
   if (!db) return;
   await db.insert(notificationLogs).values(data);
 }
+
+// ─── Customer Purchase Stats ──────────────────────────────────────────────────
+export async function getCustomerPurchaseStats(customerId: number): Promise<{
+  lastPurchases: { date: Date; total: string; paymentMethod: string }[];
+  avgPurchase: number;
+  visitCount: number;
+  lastVisitDate: Date | null;
+}> {
+  const db = await getDb();
+  if (!db) return { lastPurchases: [], avgPurchase: 0, visitCount: 0, lastVisitDate: null };
+
+  const recentSales = await db
+    .select({
+      date: sales.createdAt,
+      total: sales.finalTotal,
+      paymentMethod: sales.paymentMethod,
+    })
+    .from(sales)
+    .where(and(eq(sales.customerId, customerId), eq(sales.status, "completed")))
+    .orderBy(desc(sales.createdAt))
+    .limit(5);
+
+  const allSales = await db
+    .select({ total: sales.finalTotal })
+    .from(sales)
+    .where(and(eq(sales.customerId, customerId), eq(sales.status, "completed")));
+
+  const visitCount = allSales.length;
+  const avgPurchase =
+    visitCount > 0
+      ? allSales.reduce((sum, s) => sum + parseFloat(String(s.total)), 0) / visitCount
+      : 0;
+  const lastVisitDate = recentSales.length > 0 ? recentSales[0].date : null;
+
+  return {
+    lastPurchases: recentSales.map((s) => ({
+      date: s.date,
+      total: String(s.total),
+      paymentMethod: s.paymentMethod,
+    })),
+    avgPurchase,
+    visitCount,
+    lastVisitDate,
+  };
+}
