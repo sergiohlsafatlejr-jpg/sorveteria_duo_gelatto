@@ -266,6 +266,18 @@ export async function createProductCategory(data: InsertProductCategory): Promis
   await db.insert(productCategories).values(data);
 }
 
+export async function updateProductCategory(id: number, data: Partial<InsertProductCategory>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(productCategories).set(data).where(eq(productCategories.id, id));
+}
+
+export async function deleteProductCategory(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(productCategories).set({ active: false }).where(eq(productCategories.id, id));
+}
+
 // ─── Products ─────────────────────────────────────────────────────────────────
 export async function getProducts(search?: string, categoryId?: number): Promise<Product[]> {
   const db = await getDb();

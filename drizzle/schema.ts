@@ -268,6 +268,8 @@ export const finCategories = mysqlTable("fin_categories", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
+  type: mysqlEnum("type", ["income", "expense"]).default("expense").notNull(),
+  color: varchar("color", { length: 32 }).default("#6b7280").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type FinCategory = typeof finCategories.$inferSelect;
@@ -308,9 +310,13 @@ export const finCosts = mysqlTable("fin_costs", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   categoryId: int("categoryId"),
-  description: varchar("description", { length: 255 }).notNull(),
-  value: decimal("value", { precision: 12, scale: 2 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull().default(""),
+  description: varchar("description", { length: 255 }),
+  amount: decimal("amount", { precision: 12, scale: 2 }).default("0").notNull(),
+  value: decimal("value", { precision: 12, scale: 2 }).notNull().default("0"),
   type: mysqlEnum("type", ["fixed", "variable"]).default("fixed").notNull(),
+  recurrence: mysqlEnum("recurrence", ["monthly", "weekly", "yearly", "once"]).default("monthly"),
+  dueDay: int("dueDay").default(1),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type FinCost = typeof finCosts.$inferSelect;

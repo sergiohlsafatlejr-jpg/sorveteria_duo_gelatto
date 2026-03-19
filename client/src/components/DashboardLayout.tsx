@@ -35,6 +35,7 @@ import {
   DollarSign,
   Gift,
   IceCream,
+  Landmark,
   LayoutDashboard,
   LogOut,
   Package,
@@ -42,6 +43,7 @@ import {
   Receipt,
   Settings,
   ShoppingCart,
+  Tag,
   TrendingUp,
   Users,
   UserCog,
@@ -72,6 +74,7 @@ const menuGroups = [
     label: "Operacional",
     items: [
       { icon: Package, label: "Estoque", path: "/products" },
+      { icon: Package, label: "Cadastro de Produtos", path: "/products-register" },
       { icon: BarChart3, label: "Relatórios", path: "/reports" },
     ],
   },
@@ -86,6 +89,9 @@ const menuGroups = [
       { icon: BookOpen, label: "DRE", path: "/fin/dre" },
       { icon: CalendarDays, label: "Previsão de Faturamento", path: "/fin/forecast" },
       { icon: Settings, label: "Config. Financeiras", path: "/fin/settings" },
+      { icon: Tag, label: "Categorias", path: "/fin/categories" },
+      { icon: Landmark, label: "Bancos / Caixas", path: "/fin/banks" },
+      { icon: PiggyBank, label: "Cadastro de Custos", path: "/fin/costs-register" },
     ],
   },
   {

@@ -1,4 +1,3 @@
-import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   createFinBank,
@@ -50,15 +49,30 @@ export const finRouter = router({
   categories: router({
     list: protectedProcedure.query(({ ctx }) => getFinCategories(ctx.user.id)),
     create: protectedProcedure
-      .input(z.object({ name: z.string().min(1) }))
+      .input(z.object({
+        name: z.string().min(1),
+        type: z.enum(["income", "expense"]).default("expense"),
+        color: z.string().optional(),
+      }))
       .mutation(({ ctx, input }) =>
-        createFinCategory({ userId: ctx.user.id, name: input.name })
+        createFinCategory({
+          userId: ctx.user.id,
+          name: input.name,
+          type: input.type,
+          color: input.color ?? "#6b7280",
+        })
       ),
     update: protectedProcedure
-      .input(z.object({ id: z.number(), name: z.string().min(1) }))
-      .mutation(({ ctx, input }) =>
-        updateFinCategory(input.id, ctx.user.id, input.name)
-      ),
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1).optional(),
+        type: z.enum(["income", "expense"]).optional(),
+        color: z.string().optional(),
+      }))
+      .mutation(({ ctx, input }) => {
+        const { id, ...data } = input;
+        return updateFinCategory(id, ctx.user.id, data);
+      }),
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ ctx, input }) =>
@@ -149,27 +163,43 @@ export const finRouter = router({
     list: protectedProcedure.query(({ ctx }) => getFinCosts(ctx.user.id)),
     create: protectedProcedure
       .input(z.object({
-        description: z.string().min(1),
-        value: z.number().min(0),
+        name: z.string().min(1),
+        description: z.string().optional(),
+        amount: z.number().min(0),
         type: z.enum(["fixed", "variable"]).default("fixed"),
         categoryId: z.number().optional(),
+        recurrence: z.enum(["monthly", "weekly", "yearly", "once"]).default("monthly"),
+        dueDay: z.number().int().min(1).max(31).default(1),
       }))
       .mutation(({ ctx, input }) =>
-        createFinCost({ userId: ctx.user.id, ...input, value: String(input.value) })
+        createFinCost({
+          userId: ctx.user.id,
+          name: input.name,
+          description: input.description,
+          amount: String(input.amount),
+          value: String(input.amount),
+          type: input.type,
+          categoryId: input.categoryId,
+          recurrence: input.recurrence,
+          dueDay: input.dueDay,
+        })
       ),
     update: protectedProcedure
       .input(z.object({
         id: z.number(),
+        name: z.string().optional(),
         description: z.string().optional(),
-        value: z.number().optional(),
+        amount: z.number().optional(),
         type: z.enum(["fixed", "variable"]).optional(),
         categoryId: z.number().nullable().optional(),
+        recurrence: z.enum(["monthly", "weekly", "yearly", "once"]).optional(),
+        dueDay: z.number().int().min(1).max(31).optional(),
       }))
       .mutation(({ ctx, input }) => {
-        const { id, value, ...rest } = input;
+        const { id, amount, ...rest } = input;
         return updateFinCost(id, ctx.user.id, {
           ...rest,
-          ...(value !== undefined && { value: String(value) }),
+          ...(amount !== undefined && { amount: String(amount), value: String(amount) }),
         });
       }),
     delete: protectedProcedure
@@ -416,7 +446,7 @@ export const finRouter = router({
       ),
     upsert: protectedProcedure
       .input(z.object({
-        forecastDate: z.string(), // YYYY-MM-DD
+        forecastDate: z.string(),
         amount: z.number().min(0),
         actualAmount: z.number().nullable().optional(),
         description: z.string().optional(),

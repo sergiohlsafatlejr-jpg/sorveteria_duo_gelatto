@@ -42,10 +42,10 @@ export async function createFinCategory(data: InsertFinCategory): Promise<FinCat
   await db.insert(finCategories).values(data);
   return db.select().from(finCategories).where(eq(finCategories.userId, data.userId)).orderBy(finCategories.name);
 }
-export async function updateFinCategory(id: number, userId: number, name: string): Promise<void> {
+export async function updateFinCategory(id: number, userId: number, data: { name?: string; type?: "income" | "expense"; color?: string }): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.update(finCategories).set({ name }).where(and(eq(finCategories.id, id), eq(finCategories.userId, userId)));
+  await db.update(finCategories).set(data).where(and(eq(finCategories.id, id), eq(finCategories.userId, userId)));
 }
 export async function deleteFinCategory(id: number, userId: number): Promise<void> {
   const db = await getDb();

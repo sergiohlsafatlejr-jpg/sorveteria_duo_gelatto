@@ -195,6 +195,12 @@ const productsRouter = router({
   createCategory: managerProcedure
     .input(z.object({ name: z.string().min(2), description: z.string().optional() }))
     .mutation(({ input }) => db.createProductCategory(input)),
+  updateCategory: managerProcedure
+    .input(z.object({ id: z.number(), name: z.string().min(2).optional(), description: z.string().optional(), active: z.boolean().optional() }))
+    .mutation(({ input }) => { const { id, ...data } = input; return db.updateProductCategory(id, data); }),
+  deleteCategory: managerProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(({ input }) => db.deleteProductCategory(input.id)),
 
   create: managerProcedure
     .input(

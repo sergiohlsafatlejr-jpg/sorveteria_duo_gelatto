@@ -137,3 +137,12 @@
 - [x] Menu lateral atualizado com grupo Financeiro completo (8 itens)
 - [x] Rotas registradas no App.tsx
 - [x] 23 testes passando
+
+## Telas de Cadastro Dedicadas (solicitadas pelo usuário)
+
+- [ ] Tela de Cadastro de Produtos (/products) — CRUD completo com estoque, preço, categoria, código de barras, unidade, estoque mínimo
+- [ ] Tela de Cadastro de Categorias Financeiras (/fin/categories) — nome, tipo (receita/despesa), cor
+- [ ] Tela de Cadastro de Custos (/fin/costs) — fixos e variáveis, valor, categoria, recorrência
+- [ ] Tela de Cadastro de Bancos (/fin/banks) — nome, agência, conta, saldo inicial, cor
+- [ ] Registrar todas as novas rotas no App.tsx
+- [ ] Adicionar itens de menu no DashboardLayout para as novas telas

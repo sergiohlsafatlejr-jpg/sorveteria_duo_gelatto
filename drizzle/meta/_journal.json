@@ -29,6 +29,20 @@
       "when": 1773877979635,
       "tag": "0003_green_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1773882062341,
+      "tag": "0004_lethal_johnny_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1773882680461,
+      "tag": "0005_elite_microbe",
+      "breakpoints": true
     }
   ]
 }
