@@ -262,3 +262,24 @@
 - [x] Sincronização de métricas via botão
 - [x] Item Instagram no menu lateral (grupo Pontos)
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Instagram — IA e Agendamento (19/03)
+- [ ] Campo scheduledAt na tabela instagram_posts (data/hora de publicação agendada)
+- [ ] Endpoint: instagram.generateImage — gera imagem via IA com prompt da promoção
+- [ ] Endpoint: instagram.schedulePost — salva data/hora de publicação no rascunho
+- [ ] Endpoint: instagram.publishScheduled — publica posts cujo scheduledAt <= agora
+- [ ] Modal de criação: botão "Gerar com IA" com campo de descrição da promoção
+- [ ] Modal de criação: campo de data/hora para agendamento
+- [ ] Lista de rascunhos: badge "Agendado" com data/hora
+- [ ] Sugestões de horários de pico (11h, 19h, 21h)
+
+## Instagram — IA e Agendamento (19/03)
+- [x] Campos scheduledAt e aiPrompt adicionados à tabela instagram_posts e migrados
+- [x] Endpoint: instagram.generateImage (IA via generateImage helper do servidor)
+- [x] Endpoint: instagram.markPublished (marcar rascunho como publicado manualmente)
+- [x] Modal de criação com botão "Gerar com IA" (modo IA ativo/inativo)
+- [x] Seleção de estilo visual: Fotorrealista, Cartoon, Aquarela, Minimalista
+- [x] Campo de agendamento com data/hora e atalhos de horários de pico (11h, 14h, 19h, 21h)
+- [x] Badge "Agendado" e "IA" nos rascunhos da lista
+- [x] Card de alerta de posts agendados pendentes
+- [x] TypeScript 0 erros, 23/23 testes passando

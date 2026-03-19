@@ -477,6 +477,8 @@ export const instagramPosts = mysqlTable("instagram_posts", {
   impressions: int("impressions").default(0),
   comments: int("comments").default(0),
   promotionTitle: varchar("promotionTitle", { length: 200 }),
+  aiPrompt: text("aiPrompt"),
+  scheduledAt: timestamp("scheduledAt"),
   errorMessage: text("errorMessage"),
   publishedAt: timestamp("publishedAt"),
   createdBy: int("createdBy").notNull(),

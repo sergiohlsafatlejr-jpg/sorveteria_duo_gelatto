@@ -71,6 +71,13 @@
       "when": 1773940676150,
       "tag": "0009_minor_jetstream",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1773941233764,
+      "tag": "0010_fat_gargoyle",
+      "breakpoints": true
     }
   ]
 }
