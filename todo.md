@@ -324,3 +324,6 @@
 ## Criação Automática de Produtos na Importação NF-e (19/03)
 - [x] Backend: criar produto automaticamente se não encontrado na NF-e
 - [x] Frontend: mostrar quais produtos serão criados vs vinculados antes de confirmar
+
+## Correção Vínculo NF-e (19/03)
+- [x] Remover busca por nome parcial — vincular apenas por supplierCode exato

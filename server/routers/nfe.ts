@@ -3,7 +3,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import * as db from "../db";
 import { products, stockMovements } from "../../drizzle/schema";
-import { eq, like, and } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ export const nfeRouter = router({
         items.map(async (item) => {
           const suggestedFactor = extractConversionFromName(item.xProd);
 
-          // 1. Busca por supplierCode
+          // Busca APENAS por supplierCode exato — nunca por nome parcial
           const byCode = await dbInstance
             .select({ id: products.id, name: products.name, unit: products.unit, conversionFactor: products.conversionFactor })
             .from(products)
@@ -154,29 +154,7 @@ export const nfeRouter = router({
             };
           }
 
-          // 2. Busca por nome similar
-          const firstWord = item.xProd.split(" ")[0];
-          const byName = await dbInstance
-            .select({ id: products.id, name: products.name, unit: products.unit, conversionFactor: products.conversionFactor })
-            .from(products)
-            .where(like(products.name, `%${firstWord}%`))
-            .limit(1);
-
-          if (byName.length > 0) {
-            const p = byName[0];
-            const factor = p.conversionFactor > 1 ? p.conversionFactor : suggestedFactor;
-            return {
-              ...item,
-              matchedProductId: p.id,
-              matchedProductName: p.name,
-              isNew: false,
-              stockUnit: p.unit,
-              conversionFactor: factor,
-              stockQty: Math.round(item.qCom * factor),
-            };
-          }
-
-          // 3. Não encontrado → será criado automaticamente
+          // Não encontrado por código → será criado automaticamente
           return {
             ...item,
             matchedProductId: null,
