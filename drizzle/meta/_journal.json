@@ -57,6 +57,13 @@
       "when": 1773933590594,
       "tag": "0007_stale_vance_astro",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1773935261455,
+      "tag": "0008_sturdy_chimera",
+      "breakpoints": true
     }
   ]
 }

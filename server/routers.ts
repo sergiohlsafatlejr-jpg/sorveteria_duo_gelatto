@@ -6,6 +6,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { finRouter } from "./routers/fin";
+import { whatsappRouter } from "./routers/whatsapp";
 import { getDb } from "./db";
 import { finTransactions, finReceivables, products } from "../drizzle/schema";
 import { and, eq, lt, lte, sql } from "drizzle-orm";
@@ -185,6 +186,72 @@ const pointsRouter = router({
         purchaseAmount: input.purchaseAmount !== undefined ? String(input.purchaseAmount) : undefined,
         userId: ctx.user.id,
       });
+
+      // ── WhatsApp notification (fire-and-forget) ──────────────────────────
+      if (input.type === "earned") {
+        void (async () => {
+          try {
+            const { getWhatsappConfig, createWhatsappLog } = await import("./db.whatsapp");
+            const { sendWhatsAppMessage, buildMessage } = await import("./zapi");
+            const waConfig = await getWhatsappConfig();
+            if (!waConfig || !waConfig.active || !waConfig.notifyOnPoints) return;
+
+            const customer = await db.getCustomerById(input.customerId);
+            if (!customer || !customer.phone) return;
+
+            const rules = await db.getPointsRules();
+            const activeRule = rules[0];
+            const meta = activeRule ? activeRule.rewardThreshold : 100;
+            const saldo = customer.totalPoints;
+            const faltam = Math.max(0, meta - saldo);
+            const pct = saldo / meta;
+
+            // Determine which message to send
+            let template: string | null = null;
+            let type = "points_earned";
+
+            if (saldo >= meta && waConfig.notifyOnGoalReached) {
+              template = waConfig.msgGoalReached;
+              type = "goal_reached";
+            } else if (pct >= 0.8 && waConfig.notifyOnGoalNear) {
+              template = waConfig.msgGoalNear;
+              type = "goal_near";
+            } else if (waConfig.notifyOnPoints) {
+              template = waConfig.msgPointsEarned;
+              type = "points_earned";
+            }
+
+            if (!template) return;
+
+            const message = buildMessage(template, {
+              nome: customer.fullName,
+              pontos: input.points,
+              saldo,
+              meta,
+              faltam,
+              recompensa: activeRule ? activeRule.rewardValue : "0",
+            });
+
+            const result = await sendWhatsAppMessage(
+              { instanceId: waConfig.instanceId, token: waConfig.token },
+              customer.phone,
+              message
+            );
+
+            await createWhatsappLog({
+              customerId: customer.id,
+              phone: customer.phone,
+              type,
+              message,
+              status: result.success ? "sent" : "failed",
+              errorMessage: result.error ?? null,
+              sentAt: result.success ? new Date() : undefined,
+            });
+          } catch (err) {
+            console.error("[WhatsApp] Notification error:", err);
+          }
+        })();
+      }
     }),
 });
 
@@ -692,6 +759,7 @@ export const appRouter = router({
   connector: connectorRouter,
   notifications: notificationsRouter,
    fin: finRouter,
+  whatsapp: whatsappRouter,
   alerts: router({
     counts: protectedProcedure.query(async ({ ctx }) => {
       const dbInstance = await getDb();

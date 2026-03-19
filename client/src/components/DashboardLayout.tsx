@@ -33,6 +33,7 @@ import {
   BarChart3,
   Bell,
   BookOpen,
+  MessageSquare,
   Building2,
   CalendarDays,
   ChevronRight,
@@ -86,6 +87,7 @@ const menuGroups: MenuGroup[] = [
       { icon: Users, label: "Cadastro de Clientes", path: "/customers" },
       { icon: Gift, label: "Programa de Pontos", path: "/points" },
       { icon: Settings, label: "Regras de Pontos", path: "/points-rules" },
+      { icon: MessageSquare, label: "WhatsApp", path: "/whatsapp" },
     ],
   },
   {

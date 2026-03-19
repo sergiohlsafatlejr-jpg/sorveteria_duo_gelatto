@@ -235,3 +235,15 @@
 - [x] Dashboard: card "Clientes com Pontos" — top 8 com ranking e total de clientes com saldo
 - [x] Endpoints: getAllRules, deleteRule, toggleRuleActive, topCustomersByPoints, customersWithPointsCount
 - [x] TypeScript 0 erros, 23/23 testes passando
+
+## Integração WhatsApp Z-API (19/03)
+- [x] Tabelas: whatsapp_config, whatsapp_campaigns, whatsapp_logs no schema e migradas
+- [x] Serviço Z-API (server/zapi.ts): sendWhatsAppMessage, checkZApiConnection, buildMessage, DEFAULT_TEMPLATES
+- [x] Endpoints: getConfig, saveConfig, testConnection, getCampaigns, createCampaign, deleteCampaign, sendCampaign, getLogs, sendTest, getDefaultTemplates
+- [x] Disparo automático ao pontuar (fire-and-forget no addPoints mutation)
+- [x] Alerta de meta próxima (80%+) e meta atingida (notifyOnGoalNear, notifyOnGoalReached)
+- [x] Tela unificada WhatsApp (/whatsapp) com 3 abas: Configuração, Campanhas, Histórico
+- [x] Segmentação de clientes: todos, com pontos, sem pontos, próximos da meta
+- [x] Mensagens personalizadas com variáveis: {{nome}}, {{pontos}}, {{saldo}}, {{meta}}, {{faltam}}, {{recompensa}}
+- [x] Item WhatsApp no menu lateral (grupo Pontos)
+- [x] TypeScript 0 erros, 23/23 testes passando

@@ -402,3 +402,61 @@ export const finDailyRevenue = mysqlTable("fin_daily_revenue", {
 });
 export type FinDailyRevenue = typeof finDailyRevenue.$inferSelect;
 export type InsertFinDailyRevenue = typeof finDailyRevenue.$inferInsert;
+
+// ─── WhatsApp Integration ─────────────────────────────────────────────────────
+export const whatsappConfig = mysqlTable("whatsapp_config", {
+  id: int("id").autoincrement().primaryKey(),
+  instanceId: varchar("instanceId", { length: 255 }).notNull(),
+  token: varchar("token", { length: 500 }).notNull(),
+  active: boolean("active").default(false).notNull(),
+  // Message templates
+  msgPointsEarned: text("msgPointsEarned"), // Mensagem ao pontuar
+  msgGoalNear: text("msgGoalNear"),         // Mensagem quando próximo da meta (80%)
+  msgGoalReached: text("msgGoalReached"),   // Mensagem ao atingir a meta
+  msgPromotion: text("msgPromotion"),       // Mensagem de promoção genérica
+  // Notification toggles
+  notifyOnPoints: boolean("notifyOnPoints").default(true).notNull(),
+  notifyOnGoalNear: boolean("notifyOnGoalNear").default(true).notNull(),
+  notifyOnGoalReached: boolean("notifyOnGoalReached").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type WhatsappConfig = typeof whatsappConfig.$inferSelect;
+export type InsertWhatsappConfig = typeof whatsappConfig.$inferInsert;
+
+export const whatsappCampaigns = mysqlTable("whatsapp_campaigns", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  message: text("message").notNull(),
+  // Segmentation: 'all' | 'with_points' | 'near_goal' | 'no_points'
+  segment: varchar("segment", { length: 50 }).default("all").notNull(),
+  // Status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed'
+  status: varchar("status", { length: 20 }).default("draft").notNull(),
+  scheduledAt: timestamp("scheduledAt"),
+  sentAt: timestamp("sentAt"),
+  totalRecipients: int("totalRecipients").default(0).notNull(),
+  totalSent: int("totalSent").default(0).notNull(),
+  totalFailed: int("totalFailed").default(0).notNull(),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type WhatsappCampaign = typeof whatsappCampaigns.$inferSelect;
+export type InsertWhatsappCampaign = typeof whatsappCampaigns.$inferInsert;
+
+export const whatsappLogs = mysqlTable("whatsapp_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  customerId: int("customerId"),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  // Type: 'points_earned' | 'goal_near' | 'goal_reached' | 'campaign' | 'test'
+  type: varchar("type", { length: 30 }).notNull(),
+  message: text("message").notNull(),
+  // Status: 'sent' | 'failed' | 'pending'
+  status: varchar("status", { length: 20 }).default("pending").notNull(),
+  errorMessage: text("errorMessage"),
+  campaignId: int("campaignId"),
+  sentAt: timestamp("sentAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WhatsappLog = typeof whatsappLogs.$inferSelect;
+export type InsertWhatsappLog = typeof whatsappLogs.$inferInsert;
