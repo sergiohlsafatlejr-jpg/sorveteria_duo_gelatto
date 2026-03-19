@@ -152,8 +152,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-primary/5 to-accent/10">
         <div className="flex flex-col items-center gap-8 p-10 max-w-md w-full bg-card rounded-2xl shadow-xl border">
           <div className="flex flex-col items-center gap-3">
-            <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <IceCream className="h-8 w-8 text-primary" />
+            <div className="flex items-center justify-center">
+              <img
+                src="https://d2xsxph8kpxj0f.cloudfront.net/310519663295218967/WYaP3gu8gnshPc3N2h65yG/duo-gelatto-logo_817cbabb.png"
+                alt="Duo Gelatto"
+                className="h-24 w-auto object-contain drop-shadow-lg"
+              />
             </div>
             <h1 className="text-2xl font-bold text-center">Duo Gelatto</h1>
             <p className="text-sm text-muted-foreground text-center">
@@ -282,14 +286,18 @@ function DashboardLayoutContent({
       <div className="relative" ref={sidebarRef}>
         <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
           {/* Header */}
-          <SidebarHeader className="h-16 border-b border-sidebar-border">
-            <div className="flex items-center gap-3 px-3 h-full">
-              <div className="h-9 w-9 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
-                <IceCream className="h-5 w-5 text-primary" />
+          <SidebarHeader className="border-b border-sidebar-border" style={{ height: isCollapsed ? '64px' : '80px', transition: 'height 0.2s' }}>
+            <div className="flex items-center gap-2 px-3 h-full">
+              <div className="shrink-0 flex items-center justify-center">
+                <img
+                  src="https://d2xsxph8kpxj0f.cloudfront.net/310519663295218967/WYaP3gu8gnshPc3N2h65yG/duo-gelatto-logo_817cbabb.png"
+                  alt="Duo Gelatto"
+                  className={isCollapsed ? "h-9 w-9 object-contain rounded-lg" : "h-14 w-auto max-w-[140px] object-contain"}
+                  style={{ transition: 'all 0.2s' }}
+                />
               </div>
               {!isCollapsed && (
                 <div className="min-w-0">
-                  <p className="font-bold text-sidebar-foreground text-sm leading-tight">Duo Gelatto</p>
                   <p className="text-xs text-sidebar-foreground/60 leading-tight">Sistema de Gestão</p>
                 </div>
               )}
@@ -456,8 +464,11 @@ function DashboardLayoutContent({
           <div className="flex border-b h-14 items-center gap-3 bg-background px-4 sticky top-0 z-40">
             <SidebarTrigger className="h-9 w-9 rounded-lg" />
             <div className="flex items-center gap-2">
-              <IceCream className="h-5 w-5 text-primary" />
-              <span className="font-semibold text-sm">Duo Gelatto</span>
+              <img
+                src="https://d2xsxph8kpxj0f.cloudfront.net/310519663295218967/WYaP3gu8gnshPc3N2h65yG/duo-gelatto-logo_817cbabb.png"
+                alt="Duo Gelatto"
+                className="h-8 w-auto object-contain"
+              />
             </div>
             {/* Mobile total alert badge */}
             {(alertCounts?.total ?? 0) > 0 && (
