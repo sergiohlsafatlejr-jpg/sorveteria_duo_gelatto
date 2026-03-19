@@ -166,3 +166,22 @@
 - [x] Badge total no cabeçalho quando sidebar colapsada
 - [x] Badge total na barra mobile
 - [x] Polling automático a cada 60 segundos para atualizar contagens
+
+## Vinculação de Despesas a Custos
+- [x] Campo costId já existe em finTransactions (FK para finCosts)
+- [x] Endpoint tRPC: fin.costs.linkTransaction — vincular transação a custo
+- [x] Endpoint tRPC: fin.costs.unlinkTransaction — desvincular transação de custo
+- [x] Endpoint tRPC: fin.costs.getLinkedTransactions — listar despesas vinculadas a um custo
+- [x] Endpoint tRPC: fin.costs.getUnlinkedTransactions — listar despesas sem custo vinculado
+  - [x] Atualizar FinCostsRegister com painel de despesas vinculadas por custo
+  - [x] Modal de seleção de despesas para vincular ao custo
+  - [x] Exibir total gasto por custo com base nas despesas vinculadas
+
+## Melhorias Módulo Financeiro (19/03)
+- [x] Importação de Excel em Contas a Pagar (fin.transactions.importExcel)
+- [x] Coluna "Custo" na tabela de Contas a Pagar
+- [x] Expandir tela de Custos com mais campos (classificação: Administrativo/Operacional/Comercial/Financeiro/Outro)
+- [x] Painel de despesas vinculadas dentro de cada custo (expandir linha)
+- [x] Endpoint de importação de Excel no backend (fin.transactions.importExcel)
+- [x] Campo costCategory adicionado ao schema e migrado (pnpm db:push)
+- [x] 23/23 testes passando

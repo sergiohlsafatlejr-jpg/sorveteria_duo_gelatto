@@ -1,0 +1,1 @@
+ALTER TABLE `fin_costs` ADD `costCategory` enum('administrative','operational','commercial','financial','other') DEFAULT 'operational';

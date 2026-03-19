@@ -1,3 +1,4 @@
+import * as XLSX from "xlsx";
 import { z } from "zod";
 import {
   createFinBank,
@@ -28,6 +29,10 @@ import {
   getFinReceivables,
   getFinRevenueForecasts,
   getFinTransactions,
+  getTransactionsByCost,
+  getUnlinkedTransactions,
+  linkTransactionToCost,
+  unlinkTransactionFromCost,
   updateFinBank,
   updateFinBankStatement,
   updateFinCategory,
@@ -167,6 +172,7 @@ export const finRouter = router({
         description: z.string().optional(),
         amount: z.number().min(0),
         type: z.enum(["fixed", "variable"]).default("fixed"),
+        costCategory: z.enum(["administrative", "operational", "commercial", "financial", "other"]).default("operational"),
         categoryId: z.number().optional(),
         recurrence: z.enum(["monthly", "weekly", "yearly", "once"]).default("monthly"),
         dueDay: z.number().int().min(1).max(31).default(1),
@@ -179,6 +185,7 @@ export const finRouter = router({
           amount: String(input.amount),
           value: String(input.amount),
           type: input.type,
+          costCategory: input.costCategory,
           categoryId: input.categoryId,
           recurrence: input.recurrence,
           dueDay: input.dueDay,
@@ -191,6 +198,7 @@ export const finRouter = router({
         description: z.string().optional(),
         amount: z.number().optional(),
         type: z.enum(["fixed", "variable"]).optional(),
+        costCategory: z.enum(["administrative", "operational", "commercial", "financial", "other"]).optional(),
         categoryId: z.number().nullable().optional(),
         recurrence: z.enum(["monthly", "weekly", "yearly", "once"]).optional(),
         dueDay: z.number().int().min(1).max(31).optional(),
@@ -205,6 +213,25 @@ export const finRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ ctx, input }) => deleteFinCost(input.id, ctx.user.id)),
+    // Busca despesas vinculadas a um custo específico
+    getLinkedTransactions: protectedProcedure
+      .input(z.object({ costId: z.number() }))
+      .query(({ ctx, input }) => getTransactionsByCost(input.costId, ctx.user.id)),
+    // Busca despesas disponíveis para vincular (sem custo vinculado)
+    getUnlinkedTransactions: protectedProcedure
+      .query(({ ctx }) => getUnlinkedTransactions(ctx.user.id)),
+    // Vincula uma despesa existente a este custo
+    linkTransaction: protectedProcedure
+      .input(z.object({ transactionId: z.number(), costId: z.number() }))
+      .mutation(({ ctx, input }) =>
+        linkTransactionToCost(input.transactionId, input.costId, ctx.user.id)
+      ),
+    // Remove a vinculação de uma despesa com este custo
+    unlinkTransaction: protectedProcedure
+      .input(z.object({ transactionId: z.number() }))
+      .mutation(({ ctx, input }) =>
+        unlinkTransactionFromCost(input.transactionId, ctx.user.id)
+      ),
   }),
 
   // ─── Transactions (Contas a Pagar) ─────────────────────────────────────────
@@ -283,9 +310,72 @@ export const finRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ ctx, input }) => deleteFinTransaction(input.id, ctx.user.id)),
-  }),
+    // Importação de Excel: recebe base64 do arquivo e insere as transações em lote
+    importExcel: protectedProcedure
+      .input(z.object({
+        fileBase64: z.string(), // arquivo Excel em base64
+        categoryId: z.number().optional(),
+        bankId: z.number().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const buffer = Buffer.from(input.fileBase64, "base64");
+        const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) throw new Error("Planilha vazia");
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet!, { defval: "" });
 
-  // ─── Receivables (Contas a Receber) ────────────────────────────────────────
+        // Mapeamento flexível de colunas (aceita português e inglês)
+        const parseRow = (row: Record<string, unknown>) => {
+          const get = (...keys: string[]) => {
+            for (const k of keys) {
+              const found = Object.keys(row).find(rk => rk.toLowerCase().replace(/[^a-z0-9]/g, "") === k.toLowerCase().replace(/[^a-z0-9]/g, ""));
+              if (found && row[found] !== undefined && row[found] !== "") return row[found];
+            }
+            return undefined;
+          };
+          const desc = String(get("descricao", "description", "nome", "name", "historico") ?? "").trim();
+          if (!desc) return null;
+          const rawAmount = get("valor", "amount", "value", "vlr", "vl");
+          const amount = rawAmount ? parseFloat(String(rawAmount).replace(/[^0-9.,]/g, "").replace(",", ".")) : 0;
+          const rawDate = get("vencimento", "duedate", "data", "date", "datadevencimento");
+          let dueDate: Date;
+          if (rawDate instanceof Date) {
+            dueDate = rawDate;
+          } else if (typeof rawDate === "number") {
+            dueDate = XLSX.SSF.parse_date_code(rawDate) ? new Date(rawDate) : new Date();
+          } else {
+            const parsed = rawDate ? new Date(String(rawDate)) : null;
+            dueDate = parsed && !isNaN(parsed.getTime()) ? parsed : new Date();
+          }
+          const rawPaid = get("pago", "paid", "status", "situacao");
+          const isPaid = rawPaid ? ["sim", "yes", "pago", "paid", "1", "true"].includes(String(rawPaid).toLowerCase().trim()) : false;
+          const rawCostId = get("custo", "costid", "cost");
+          const costId = rawCostId ? parseInt(String(rawCostId)) : undefined;
+          return { desc, amount, dueDate, isPaid, costId };
+        };
+
+        let imported = 0;
+        let skipped = 0;
+        for (const row of rows) {
+          const parsed = parseRow(row);
+          if (!parsed) { skipped++; continue; }
+          await createFinTransaction({
+            userId: ctx.user.id,
+            description: parsed.desc,
+            amount: String(parsed.amount),
+            dueDate: parsed.dueDate,
+            categoryId: input.categoryId,
+            bankId: input.bankId,
+            isPaid: parsed.isPaid,
+            costId: parsed.costId ?? undefined,
+          });
+          imported++;
+        }
+        return { imported, skipped, total: rows.length };
+      }),
+  }),
+  // ─── Receivables (Contas a Receber)) ────────────────────────────────────────
   receivables: router({
     list: protectedProcedure
       .input(z.object({

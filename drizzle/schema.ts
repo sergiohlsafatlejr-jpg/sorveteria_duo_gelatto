@@ -315,6 +315,7 @@ export const finCosts = mysqlTable("fin_costs", {
   amount: decimal("amount", { precision: 12, scale: 2 }).default("0").notNull(),
   value: decimal("value", { precision: 12, scale: 2 }).notNull().default("0"),
   type: mysqlEnum("type", ["fixed", "variable"]).default("fixed").notNull(),
+  costCategory: mysqlEnum("costCategory", ["administrative", "operational", "commercial", "financial", "other"]).default("operational"),
   recurrence: mysqlEnum("recurrence", ["monthly", "weekly", "yearly", "once"]).default("monthly"),
   dueDay: int("dueDay").default(1),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { FinFilterBar, FinFilters } from "@/components/fin/FinFilterBar";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { CheckCircle2, Edit2, Plus, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useForm } from "react-hook-form";
 
@@ -25,6 +25,7 @@ type TransactionForm = {
   dueDate: string;
   categoryId: string;
   bankId: string;
+  costId: string;
   isPaid: boolean;
   paymentDate: string;
   notes: string;
@@ -34,10 +35,15 @@ export default function FinPayables() {
   const [filters, setFilters] = useState<FinFilters>({ status: "all" });
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<{ id: number } & TransactionForm | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importCategoryId, setImportCategoryId] = useState("none");
+  const [importBankId, setImportBankId] = useState("none");
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const utils = trpc.useUtils();
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
   const { data: banks = [] } = trpc.fin.banks.list.useQuery();
+  const { data: costs = [] } = trpc.fin.costs.list.useQuery();
   const { data: rawData = [], isLoading } = trpc.fin.transactions.list.useQuery({
     categoryId: filters.categoryId ?? undefined,
     bankId: filters.bankId ?? undefined,
@@ -71,9 +77,30 @@ export default function FinPayables() {
   const markUnpaidMut = trpc.fin.transactions.markUnpaid.useMutation({
     onSuccess: () => { utils.fin.transactions.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Marcado como pendente!"); },
   });
+  const importMut = trpc.fin.transactions.importExcel.useMutation({
+    onSuccess: (r) => { utils.fin.transactions.list.invalidate(); toast.success(`Importados: ${r.imported} registros (${r.skipped} ignorados)`); setShowImport(false); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = (ev.target?.result as string).split(",")[1];
+      if (!base64) { toast.error("Erro ao ler arquivo"); return; }
+      importMut.mutate({
+        fileBase64: base64,
+        categoryId: importCategoryId !== "none" ? parseInt(importCategoryId) : undefined,
+        bankId: importBankId !== "none" ? parseInt(importBankId) : undefined,
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
 
   const { register, handleSubmit, reset, setValue, watch } = useForm<TransactionForm>({
-    defaultValues: { description: "", amount: "", dueDate: "", categoryId: "", bankId: "", isPaid: false, paymentDate: "", notes: "" },
+    defaultValues: { description: "", amount: "", dueDate: "", categoryId: "", bankId: "", costId: "", isPaid: false, paymentDate: "", notes: "" },
   });
 
   const openCreate = () => { reset(); setEditItem(null); setModalOpen(true); };
@@ -85,6 +112,7 @@ export default function FinPayables() {
       dueDate: new Date(t.dueDate).toISOString().split("T")[0],
       categoryId: t.categoryId?.toString() ?? "",
       bankId: t.bankId?.toString() ?? "",
+      costId: (t as any).costId?.toString() ?? "",
       isPaid: t.isPaid,
       paymentDate: t.paymentDate ? new Date(t.paymentDate).toISOString().split("T")[0] : "",
       notes: t.notes ?? "",
@@ -101,6 +129,7 @@ export default function FinPayables() {
       dueDate: new Date(form.dueDate),
       categoryId: form.categoryId ? Number(form.categoryId) : undefined,
       bankId: form.bankId ? Number(form.bankId) : undefined,
+      costId: form.costId ? Number(form.costId) : undefined,
       isPaid: form.isPaid,
       paymentDate: form.paymentDate ? new Date(form.paymentDate) : undefined,
       notes: form.notes || undefined,
@@ -115,6 +144,7 @@ export default function FinPayables() {
 
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
   const bankMap = new Map(banks.map(b => [b.id, b.name]));
+  const costMap = new Map(costs.map(c => [c.id, c.name]));
 
   return (
     <div className="p-6 space-y-5">
@@ -123,9 +153,14 @@ export default function FinPayables() {
           <h1 className="text-2xl font-bold">Contas a Pagar</h1>
           <p className="text-sm text-muted-foreground">Gerencie seus lançamentos de despesas</p>
         </div>
-        <Button onClick={openCreate} className="gap-2">
-          <Plus className="h-4 w-4" /> Novo Lançamento
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowImport(true)} className="gap-2">
+            <FileSpreadsheet className="h-4 w-4" /> Importar Excel
+          </Button>
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="h-4 w-4" /> Novo Lançamento
+          </Button>
+        </div>
       </div>
 
       {/* Summary */}
@@ -157,10 +192,11 @@ export default function FinPayables() {
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">Descrição</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">Categoria</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">Banco</th>
+              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Custo</th>
               <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
               <th className="text-center px-4 py-3 font-medium text-muted-foreground">Vencimento</th>
               <th className="text-center px-4 py-3 font-medium text-muted-foreground">Status</th>
-              <th className="text-center px-4 py-3 font-medium text-muted-foreground">Ações</th>
+              <th className="text-center px-4 py-3 font-medium text-muted-foreground w-24">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/30">
@@ -183,6 +219,11 @@ export default function FinPayables() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">
                     {t.bankId ? bankMap.get(t.bankId) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    {(t as any).costId
+                      ? <Badge variant="outline" className="text-xs">{costMap.get((t as any).costId) ?? "—"}</Badge>
+                      : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold">{fmtBRL(Number(t.amount))}</td>
                   <td className="px-4 py-3 text-center text-xs">
@@ -268,6 +309,16 @@ export default function FinPayables() {
                 </Select>
               </div>
             </div>
+            <div className="space-y-2">
+              <Label>Vincular ao Custo</Label>
+              <Select value={watch("costId") || "none"} onValueChange={v => setValue("costId", v === "none" ? "" : v)}>
+                <SelectTrigger><SelectValue placeholder="Selecione o custo" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem custo vinculado</SelectItem>
+                  {costs.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center gap-3">
               <input type="checkbox" id="isPaid" {...register("isPaid")} className="rounded" />
               <Label htmlFor="isPaid">Já foi pago?</Label>
@@ -288,6 +339,59 @@ export default function FinPayables() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Importar Excel */}
+      <Dialog open={showImport} onOpenChange={setShowImport}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Importar Contas via Excel</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
+              <p className="font-medium">Colunas reconhecidas na planilha:</p>
+              <ul className="text-muted-foreground space-y-1 list-disc list-inside text-xs">
+                <li><strong>Descricao / Description / Nome</strong> — obrigatório</li>
+                <li><strong>Valor / Amount / Vlr</strong> — valor numérico</li>
+                <li><strong>Vencimento / DueDate / Data</strong> — data de vencimento</li>
+                <li><strong>Pago / Paid / Status</strong> — "sim"/"não" (opcional)</li>
+                <li><strong>Custo / CostId</strong> — ID do custo para vincular (opcional)</li>
+              </ul>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Categoria padrão</Label>
+                <Select value={importCategoryId} onValueChange={setImportCategoryId}>
+                  <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sem categoria</SelectItem>
+                    {categories.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Banco padrão</Label>
+                <Select value={importBankId} onValueChange={setImportBankId}>
+                  <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sem banco</SelectItem>
+                    {banks.map(b => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div
+              className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
+              onClick={() => fileRef.current?.click()}
+            >
+              <Upload className="w-10 h-10 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-sm font-medium">Clique para selecionar o arquivo</p>
+              <p className="text-xs text-muted-foreground mt-1">.xlsx, .xls, .csv</p>
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileImport} />
+            </div>
+            {importMut.isPending && <p className="text-center text-sm text-muted-foreground animate-pulse">Importando...</p>}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

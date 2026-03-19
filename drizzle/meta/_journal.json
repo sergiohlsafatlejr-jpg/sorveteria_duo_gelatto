@@ -43,6 +43,13 @@
       "when": 1773882680461,
       "tag": "0005_elite_microbe",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1773929105626,
+      "tag": "0006_tired_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }

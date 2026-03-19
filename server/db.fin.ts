@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import {
   FinBank,
   FinBankStatement,
@@ -170,6 +170,43 @@ export async function deleteFinTransaction(id: number, userId: number): Promise<
   const db = await getDb();
   if (!db) return;
   await db.delete(finTransactions).where(and(eq(finTransactions.id, id), eq(finTransactions.userId, userId)));
+}
+
+// Busca transações vinculadas a um custo específico
+export async function getTransactionsByCost(costId: number, userId: number): Promise<FinTransaction[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(finTransactions)
+    .where(and(eq(finTransactions.costId, costId), eq(finTransactions.userId, userId)))
+    .orderBy(desc(finTransactions.dueDate));
+}
+
+// Vincula uma transação existente a um custo
+export async function linkTransactionToCost(transactionId: number, costId: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(finTransactions)
+    .set({ costId, updatedAt: new Date() })
+    .where(and(eq(finTransactions.id, transactionId), eq(finTransactions.userId, userId)));
+}
+
+// Remove a vinculação de uma transação com um custo
+export async function unlinkTransactionFromCost(transactionId: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(finTransactions)
+    .set({ costId: null, updatedAt: new Date() })
+    .where(and(eq(finTransactions.id, transactionId), eq(finTransactions.userId, userId)));
+}
+
+// Busca transações sem custo vinculado (disponíveis para vincular)
+export async function getUnlinkedTransactions(userId: number): Promise<FinTransaction[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(finTransactions)
+    .where(and(eq(finTransactions.userId, userId), isNull(finTransactions.costId)))
+    .orderBy(desc(finTransactions.dueDate))
+    .limit(100);
 }
 
 // ─── Fin Receivables ──────────────────────────────────────────────────────────
