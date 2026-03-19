@@ -29,6 +29,7 @@ import {
   ChevronDown,
   ChevronUp,
   Edit,
+  FileText,
   Package,
   Plus,
   Search,
@@ -37,6 +38,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { toast } from "sonner";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
@@ -115,6 +117,7 @@ function PurchaseDetail({ purchases }: {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function Products() {
+  const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -242,10 +245,16 @@ export default function Products() {
               )}
             </p>
           </div>
-          <Button onClick={openCreate} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Novo Produto
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => navigate("/nfe-import")} className="gap-2">
+              <FileText className="h-4 w-4" />
+              Importar NF-e
+            </Button>
+            <Button onClick={openCreate} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Novo Produto
+            </Button>
+          </div>
         </div>
 
         {(lowStock?.length ?? 0) > 0 && (

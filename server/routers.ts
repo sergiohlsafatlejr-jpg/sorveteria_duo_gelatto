@@ -8,6 +8,7 @@ import * as db from "./db";
 import { finRouter } from "./routers/fin";
 import { whatsappRouter } from "./routers/whatsapp";
 import { instagramRouter } from "./routers/instagram";
+import { nfeRouter } from "./routers/nfe";
 import { getDb } from "./db";
 import { finTransactions, finReceivables, products } from "../drizzle/schema";
 import { and, eq, lt, lte, sql } from "drizzle-orm";
@@ -296,6 +297,9 @@ const productsRouter = router({
         currentStock: z.number().int().min(0),
         minStock: z.number().int().min(0),
         unit: z.string().default("un"),
+        purchaseUnit: z.string().default("un"),
+        conversionFactor: z.number().int().min(1).default(1),
+        supplierCode: z.string().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -328,6 +332,9 @@ const productsRouter = router({
         salePrice: z.number().optional(),
         minStock: z.number().optional(),
         unit: z.string().optional(),
+        purchaseUnit: z.string().optional(),
+        conversionFactor: z.number().int().min(1).optional(),
+        supplierCode: z.string().optional(),
         active: z.boolean().optional(),
       })
     )
@@ -776,6 +783,7 @@ export const appRouter = router({
    fin: finRouter,
   whatsapp: whatsappRouter,
   instagram: instagramRouter,
+  nfe: nfeRouter,
   alerts: router({
     counts: protectedProcedure.query(async ({ ctx }) => {
       const dbInstance = await getDb();

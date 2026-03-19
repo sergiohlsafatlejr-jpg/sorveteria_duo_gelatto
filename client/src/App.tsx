@@ -9,6 +9,7 @@ import Customers from "./pages/Customers";
 import Points from "./pages/Points";
 import PointsRules from "./pages/PointsRules";
 import Products from "./pages/Products";
+import NfeImport from "./pages/NfeImport";
 import Sales from "./pages/Sales";
 import Finance from "./pages/Finance";
 import Users from "./pages/Users";
@@ -42,6 +43,7 @@ function Router() {
       <Route path="/points" component={Points} />
       <Route path="/points-rules" component={PointsRules} />
       <Route path="/products" component={Products} />
+      <Route path="/nfe-import" component={NfeImport} />
       <Route path="/sales" component={Sales} />
       <Route path="/finance" component={Finance} />
       <Route path="/reports" component={Reports} />

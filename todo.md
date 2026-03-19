@@ -311,3 +311,12 @@
 - [x] Campo de data de compra no modal de entrada de estoque (Estoque > Movimentações)
 - [x] Relatório mensal: quantas vezes cada item foi comprado no mês (tabela)
 - [x] Filtro por mês/ano no relatório de compras por produto
+
+## Fator de Conversão e Importação NF-e XML (19/03)
+- [x] Campos purchaseUnit e conversionFactor no schema de products
+- [x] Migração pnpm db:push executada
+- [x] Modal de produto atualizado com campos de unidade de compra e fator de conversão
+- [x] Procedure de parse de NF-e XML no backend (extrai itens, vincula produtos, calcula unidades)
+- [x] Tela de importação NF-e XML com upload drag-and-drop
+- [x] Revisão dos itens: tabela mostrando produto NF-e → produto cadastrado → qtd caixas → qtd unidades
+- [x] Confirmar importação dá entrada automática no estoque com purchaseDate da NF-e
