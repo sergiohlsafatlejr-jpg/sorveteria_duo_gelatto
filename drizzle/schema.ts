@@ -261,3 +261,124 @@ export const scheduledNotifications = mysqlTable("scheduled_notifications", {
 
 export type ScheduledNotification = typeof scheduledNotifications.$inferSelect;
 export type InsertScheduledNotification = typeof scheduledNotifications.$inferInsert;
+
+// ─── Financial Module (finance-buddy-70) ──────────────────────────────────────
+
+export const finCategories = mysqlTable("fin_categories", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FinCategory = typeof finCategories.$inferSelect;
+export type InsertFinCategory = typeof finCategories.$inferInsert;
+
+export const finBanks = mysqlTable("fin_banks", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  color: varchar("color", { length: 32 }).default("#6366f1").notNull(),
+  initialBalance: decimal("initialBalance", { precision: 12, scale: 2 }).default("0"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FinBank = typeof finBanks.$inferSelect;
+export type InsertFinBank = typeof finBanks.$inferInsert;
+
+export const finPaymentTypes = mysqlTable("fin_payment_types", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  categoryId: int("categoryId"),
+  costId: int("costId"),
+  description: varchar("description", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FinPaymentType = typeof finPaymentTypes.$inferSelect;
+export type InsertFinPaymentType = typeof finPaymentTypes.$inferInsert;
+
+export const finReceivableTypes = mysqlTable("fin_receivable_types", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  description: varchar("description", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FinReceivableType = typeof finReceivableTypes.$inferSelect;
+export type InsertFinReceivableType = typeof finReceivableTypes.$inferInsert;
+
+export const finCosts = mysqlTable("fin_costs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  categoryId: int("categoryId"),
+  description: varchar("description", { length: 255 }).notNull(),
+  value: decimal("value", { precision: 12, scale: 2 }).notNull(),
+  type: mysqlEnum("type", ["fixed", "variable"]).default("fixed").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FinCost = typeof finCosts.$inferSelect;
+export type InsertFinCost = typeof finCosts.$inferInsert;
+
+export const finTransactions = mysqlTable("fin_transactions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  categoryId: int("categoryId"),
+  typeId: int("typeId"),
+  costId: int("costId"),
+  bankId: int("bankId"),
+  description: varchar("description", { length: 500 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  dueDate: timestamp("dueDate").notNull(),
+  paymentDate: timestamp("paymentDate"),
+  isPaid: boolean("isPaid").default(false).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FinTransaction = typeof finTransactions.$inferSelect;
+export type InsertFinTransaction = typeof finTransactions.$inferInsert;
+
+export const finReceivables = mysqlTable("fin_receivables", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  clientId: int("clientId"),
+  typeId: int("typeId"),
+  description: varchar("description", { length: 500 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  dueDate: timestamp("dueDate").notNull(),
+  receivedDate: timestamp("receivedDate"),
+  isReceived: boolean("isReceived").default(false).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FinReceivable = typeof finReceivables.$inferSelect;
+export type InsertFinReceivable = typeof finReceivables.$inferInsert;
+
+export const finBankStatements = mysqlTable("fin_bank_statements", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  bankId: int("bankId"),
+  categoryId: int("categoryId"),
+  transactionId: int("transactionId"),
+  receivableId: int("receivableId"),
+  date: timestamp("date").notNull(),
+  description: varchar("description", { length: 500 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  type: mysqlEnum("type", ["credit", "debit"]).notNull(),
+  reconciled: boolean("reconciled").default(false).notNull(),
+  paymentMethod: mysqlEnum("paymentMethod", ["pix", "cartao", "ted", "doc", "boleto", "dinheiro", "cheque", "outros"]),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FinBankStatement = typeof finBankStatements.$inferSelect;
+export type InsertFinBankStatement = typeof finBankStatements.$inferInsert;
+
+export const finRevenueForecasts = mysqlTable("fin_revenue_forecasts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  forecastDate: varchar("forecastDate", { length: 10 }).notNull(), // YYYY-MM-DD
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  actualAmount: decimal("actualAmount", { precision: 12, scale: 2 }),
+  description: varchar("description", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FinRevenueForecast = typeof finRevenueForecasts.$inferSelect;
+export type InsertFinRevenueForecast = typeof finRevenueForecasts.$inferInsert;

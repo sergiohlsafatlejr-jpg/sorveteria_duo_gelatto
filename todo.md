@@ -114,3 +114,26 @@
 - [ ] Sincronização automática agendada com banco externo
 - [ ] Exportação de relatórios em PDF/Excel
 - [ ] App mobile para atendentes
+
+## Módulo Financeiro Completo (finance-buddy-70)
+
+- [x] Schema: 9 tabelas financeiras (finCategories, finBanks, finTransactions, finReceivables, finCosts, finBankStatements, finRevenueForecast, finPaymentTypes, finReceivableTypes)
+- [x] Backend: db.fin.ts com todas as funções de banco de dados
+- [x] Router tRPC: fin.categories, fin.banks, fin.paymentTypes, fin.receivableTypes, fin.costs
+- [x] Router tRPC: fin.transactions (CRUD + markPaid + markUnpaid + filtros)
+- [x] Router tRPC: fin.receivables (CRUD + markReceived + markPending + filtros)
+- [x] Router tRPC: fin.bankStatements (CRUD + filtros)
+- [x] Router tRPC: fin.revenueForecast (upsert + delete + calendário)
+- [x] Router tRPC: fin.dashboard (KPIs financeiros completos)
+- [x] Componentes: FinKPICard, FinFilterBar, FinCharts (CashFlow + MonthlyEvolution)
+- [x] Página: Painel Financeiro com KPIs e gráficos (/fin/dashboard)
+- [x] Página: Contas a Pagar com CRUD e marcação de pagamento (/fin/payables)
+- [x] Página: Contas a Receber com CRUD e marcação de recebimento (/fin/receivables)
+- [x] Página: Extratos Bancários com entradas/saídas e conciliação (/fin/bank-statements)
+- [x] Página: Gestão de Custos fixos e variáveis (/fin/costs)
+- [x] Página: DRE - Demonstrativo de Resultado do Exercício (/fin/dre)
+- [x] Página: Previsão de Faturamento com calendário interativo (/fin/forecast)
+- [x] Página: Configurações Financeiras (categorias, bancos, tipos) (/fin/settings)
+- [x] Menu lateral atualizado com grupo Financeiro completo (8 itens)
+- [x] Rotas registradas no App.tsx
+- [x] 23 testes passando

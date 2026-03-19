@@ -5,6 +5,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
+import { finRouter } from "./routers/fin";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function requireRole(role: "admin" | "manager", ctx: { user: { role: string } }) {
@@ -670,6 +671,7 @@ export const appRouter = router({
   dashboard: dashboardRouter,
   connector: connectorRouter,
   notifications: notificationsRouter,
+  fin: finRouter,
 });
 
 export type AppRouter = typeof appRouter;

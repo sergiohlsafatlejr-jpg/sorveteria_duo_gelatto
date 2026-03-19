@@ -407,7 +407,6 @@ export async function getSalesChartData(days = 30) {
   if (!db) return [];
   const from = new Date();
   from.setDate(from.getDate() - days);
-  // Use MIN(createdAt) to satisfy only_full_group_by; group by the date expression
   return db
     .select({
       date: sql<string>`DATE(MIN(${sales.createdAt}))`,

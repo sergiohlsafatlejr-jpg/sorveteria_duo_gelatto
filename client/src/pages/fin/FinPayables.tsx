@@ -1,0 +1,295 @@
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { FinFilterBar, FinFilters } from "@/components/fin/FinFilterBar";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
+import { CheckCircle2, Edit2, Plus, Trash2, XCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useForm } from "react-hook-form";
+
+const fmtBRL = (v: number) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
+const fmtDate = (d: Date | string) =>
+  new Date(d).toLocaleDateString("pt-BR");
+
+type TransactionForm = {
+  description: string;
+  amount: string;
+  dueDate: string;
+  categoryId: string;
+  bankId: string;
+  isPaid: boolean;
+  paymentDate: string;
+  notes: string;
+};
+
+export default function FinPayables() {
+  const [filters, setFilters] = useState<FinFilters>({ status: "all" });
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editItem, setEditItem] = useState<{ id: number } & TransactionForm | null>(null);
+
+  const utils = trpc.useUtils();
+  const { data: categories = [] } = trpc.fin.categories.list.useQuery();
+  const { data: banks = [] } = trpc.fin.banks.list.useQuery();
+  const { data: rawData = [], isLoading } = trpc.fin.transactions.list.useQuery({
+    categoryId: filters.categoryId ?? undefined,
+    bankId: filters.bankId ?? undefined,
+    isPaid: filters.status === "paid" ? true : filters.status === "pending" || filters.status === "overdue" ? false : undefined,
+    dateFrom: filters.dateFrom ? new Date(filters.dateFrom) : undefined,
+    dateTo: filters.dateTo ? new Date(filters.dateTo) : undefined,
+  });
+
+  const now = new Date();
+  const data = rawData.filter(t => {
+    if (filters.status === "overdue") return !t.isPaid && new Date(t.dueDate) < now;
+    if (filters.search) return t.description.toLowerCase().includes(filters.search.toLowerCase());
+    return true;
+  });
+
+  const createMut = trpc.fin.transactions.create.useMutation({
+    onSuccess: () => { utils.fin.transactions.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Lançamento criado!"); setModalOpen(false); },
+    onError: (e) => toast.error(e.message),
+  });
+  const updateMut = trpc.fin.transactions.update.useMutation({
+    onSuccess: () => { utils.fin.transactions.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Lançamento atualizado!"); setModalOpen(false); setEditItem(null); },
+    onError: (e) => toast.error(e.message),
+  });
+  const deleteMut = trpc.fin.transactions.delete.useMutation({
+    onSuccess: () => { utils.fin.transactions.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Lançamento excluído!"); },
+    onError: (e) => toast.error(e.message),
+  });
+  const markPaidMut = trpc.fin.transactions.markPaid.useMutation({
+    onSuccess: () => { utils.fin.transactions.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Marcado como pago!"); },
+  });
+  const markUnpaidMut = trpc.fin.transactions.markUnpaid.useMutation({
+    onSuccess: () => { utils.fin.transactions.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Marcado como pendente!"); },
+  });
+
+  const { register, handleSubmit, reset, setValue, watch } = useForm<TransactionForm>({
+    defaultValues: { description: "", amount: "", dueDate: "", categoryId: "", bankId: "", isPaid: false, paymentDate: "", notes: "" },
+  });
+
+  const openCreate = () => { reset(); setEditItem(null); setModalOpen(true); };
+  const openEdit = (t: typeof data[0]) => {
+    const form = {
+      id: t.id,
+      description: t.description,
+      amount: String(t.amount),
+      dueDate: new Date(t.dueDate).toISOString().split("T")[0],
+      categoryId: t.categoryId?.toString() ?? "",
+      bankId: t.bankId?.toString() ?? "",
+      isPaid: t.isPaid,
+      paymentDate: t.paymentDate ? new Date(t.paymentDate).toISOString().split("T")[0] : "",
+      notes: t.notes ?? "",
+    };
+    setEditItem(form);
+    reset(form);
+    setModalOpen(true);
+  };
+
+  const onSubmit = (form: TransactionForm) => {
+    const payload = {
+      description: form.description,
+      amount: Number(form.amount),
+      dueDate: new Date(form.dueDate),
+      categoryId: form.categoryId ? Number(form.categoryId) : undefined,
+      bankId: form.bankId ? Number(form.bankId) : undefined,
+      isPaid: form.isPaid,
+      paymentDate: form.paymentDate ? new Date(form.paymentDate) : undefined,
+      notes: form.notes || undefined,
+    };
+    if (editItem) updateMut.mutate({ id: editItem.id, ...payload });
+    else createMut.mutate(payload);
+  };
+
+  const totalPending = data.filter(t => !t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
+  const totalPaid = data.filter(t => t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
+  const totalOverdue = data.filter(t => !t.isPaid && new Date(t.dueDate) < now).reduce((s, t) => s + Number(t.amount), 0);
+
+  const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+  const bankMap = new Map(banks.map(b => [b.id, b.name]));
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Contas a Pagar</h1>
+          <p className="text-sm text-muted-foreground">Gerencie seus lançamentos de despesas</p>
+        </div>
+        <Button onClick={openCreate} className="gap-2">
+          <Plus className="h-4 w-4" /> Novo Lançamento
+        </Button>
+      </div>
+
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Pendente", value: totalPending, color: "text-amber-500" },
+          { label: "Pago", value: totalPaid, color: "text-emerald-500" },
+          { label: "Vencido", value: totalOverdue, color: "text-destructive" },
+        ].map(s => (
+          <div key={s.label} className="rounded-xl border border-border/50 bg-card/50 p-4 text-center">
+            <p className="text-xs text-muted-foreground">{s.label}</p>
+            <p className={cn("text-xl font-bold", s.color)}>{fmtBRL(s.value)}</p>
+          </div>
+        ))}
+      </div>
+
+      <FinFilterBar
+        filters={filters}
+        onChange={setFilters}
+        categories={categories}
+        banks={banks}
+      />
+
+      {/* Table */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/30 border-b border-border/50">
+            <tr>
+              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Descrição</th>
+              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Categoria</th>
+              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Banco</th>
+              <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
+              <th className="text-center px-4 py-3 font-medium text-muted-foreground">Vencimento</th>
+              <th className="text-center px-4 py-3 font-medium text-muted-foreground">Status</th>
+              <th className="text-center px-4 py-3 font-medium text-muted-foreground">Ações</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/30">
+            {isLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i}><td colSpan={7} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
+              ))
+            ) : data.length === 0 ? (
+              <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">Nenhum lançamento encontrado</td></tr>
+            ) : data.map(t => {
+              const isOverdue = !t.isPaid && new Date(t.dueDate) < now;
+              return (
+                <tr key={t.id} className={cn("hover:bg-muted/20 transition-colors", isOverdue && "bg-destructive/5")}>
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{t.description}</div>
+                    {t.notes && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{t.notes}</div>}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs">
+                    {t.categoryId ? categoryMap.get(t.categoryId) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs">
+                    {t.bankId ? bankMap.get(t.bankId) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold">{fmtBRL(Number(t.amount))}</td>
+                  <td className="px-4 py-3 text-center text-xs">
+                    <span className={cn(isOverdue && "text-destructive font-medium")}>
+                      {fmtDate(t.dueDate)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {t.isPaid ? (
+                      <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30 text-xs">Pago</Badge>
+                    ) : isOverdue ? (
+                      <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30 text-xs">Vencido</Badge>
+                    ) : (
+                      <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/30 text-xs">Pendente</Badge>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-center gap-1">
+                      {t.isPaid ? (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => markUnpaidMut.mutate({ id: t.id })} title="Marcar como pendente">
+                          <XCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
+                      ) : (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => markPaidMut.mutate({ id: t.id })} title="Marcar como pago">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(t)}>
+                        <Edit2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteMut.mutate({ id: t.id })}>
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modal */}
+      <Dialog open={modalOpen} onOpenChange={v => { setModalOpen(v); if (!v) setEditItem(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editItem ? "Editar Lançamento" : "Novo Lançamento"}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Descrição *</Label>
+              <Input {...register("description", { required: true })} placeholder="Ex: Fornecedor de sorvetes" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Valor (R$) *</Label>
+                <Input {...register("amount", { required: true })} type="number" step="0.01" placeholder="0,00" />
+              </div>
+              <div className="space-y-2">
+                <Label>Vencimento *</Label>
+                <Input {...register("dueDate", { required: true })} type="date" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Categoria</Label>
+                <Select value={watch("categoryId")} onValueChange={v => setValue("categoryId", v)}>
+                  <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Sem categoria</SelectItem>
+                    {categories.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Banco</Label>
+                <Select value={watch("bankId")} onValueChange={v => setValue("bankId", v)}>
+                  <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Sem banco</SelectItem>
+                    {banks.map(b => <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <input type="checkbox" id="isPaid" {...register("isPaid")} className="rounded" />
+              <Label htmlFor="isPaid">Já foi pago?</Label>
+              {watch("isPaid") && (
+                <div className="flex-1">
+                  <Input {...register("paymentDate")} type="date" placeholder="Data do pagamento" className="h-8 text-xs" />
+                </div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Observações</Label>
+              <Textarea {...register("notes")} placeholder="Notas adicionais..." rows={2} />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setModalOpen(false)} className="flex-1">Cancelar</Button>
+              <Button type="submit" className="flex-1" disabled={createMut.isPending || updateMut.isPending}>
+                {editItem ? "Salvar" : "Criar"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

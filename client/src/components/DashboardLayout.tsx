@@ -28,6 +28,9 @@ import { useIsMobile } from "@/hooks/useMobile";
 import {
   BarChart3,
   Bell,
+  BookOpen,
+  Building2,
+  CalendarDays,
   Database,
   DollarSign,
   Gift,
@@ -35,10 +38,14 @@ import {
   LayoutDashboard,
   LogOut,
   Package,
+  PiggyBank,
+  Receipt,
   Settings,
   ShoppingCart,
+  TrendingUp,
   Users,
   UserCog,
+  Wallet,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -65,8 +72,20 @@ const menuGroups = [
     label: "Operacional",
     items: [
       { icon: Package, label: "Estoque", path: "/products" },
-      { icon: DollarSign, label: "Financeiro", path: "/finance" },
-      { icon: BarChart3, label: "Relatórios", path: "/finance" },
+      { icon: BarChart3, label: "Relatórios", path: "/reports" },
+    ],
+  },
+  {
+    label: "Financeiro",
+    items: [
+      { icon: DollarSign, label: "Painel Financeiro", path: "/fin/dashboard" },
+      { icon: Receipt, label: "Contas a Pagar", path: "/fin/payables" },
+      { icon: Wallet, label: "Contas a Receber", path: "/fin/receivables" },
+      { icon: Building2, label: "Extratos Bancários", path: "/fin/bank-statements" },
+      { icon: PiggyBank, label: "Custos", path: "/fin/costs" },
+      { icon: BookOpen, label: "DRE", path: "/fin/dre" },
+      { icon: CalendarDays, label: "Previsão de Faturamento", path: "/fin/forecast" },
+      { icon: Settings, label: "Config. Financeiras", path: "/fin/settings" },
     ],
   },
   {
