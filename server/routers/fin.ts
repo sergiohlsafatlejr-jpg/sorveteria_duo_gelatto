@@ -46,6 +46,8 @@ import {
   getDailyRevenues,
   getAccuracyHistory,
   getRainAlert,
+  getForecastSettings,
+  saveForecastSettings,
 } from "../db.fin";
 import { protectedProcedure, router } from "../_core/trpc";
 
@@ -731,6 +733,16 @@ export const finRouter = router({
         input?.avgSundayHoliday ?? 8300,
         input?.rainFactor ?? 0.7,
       )),
+    getSettings: protectedProcedure
+      .query(({ ctx }) => getForecastSettings(ctx.user.id)),
+    saveSettings: protectedProcedure
+      .input(z.object({
+        avgWeekday: z.number().int().min(0),
+        avgSaturday: z.number().int().min(0),
+        avgSundayHoliday: z.number().int().min(0),
+        rainFactor: z.number().min(0).max(1),
+      }))
+      .mutation(({ ctx, input }) => saveForecastSettings(ctx.user.id, input)),
   }),
   // ─── Cashflow Monthlyy ────────────────────────────────────────────────────────────────────────────
   cashflow: router({

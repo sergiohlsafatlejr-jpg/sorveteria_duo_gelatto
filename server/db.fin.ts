@@ -28,6 +28,8 @@ import {
   finRevenueForecasts,
   finTransactions,
   finDailyRevenue,
+  forecastSettings,
+  ForecastSettings,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 
@@ -627,4 +629,39 @@ export async function getRainAlert(
   } catch { /* ignora erros de rede */ }
 
   return alerts;
+}
+
+// ─── Forecast Settings ────────────────────────────────────────────────────────
+export async function getForecastSettings(userId: number): Promise<ForecastSettings | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(forecastSettings).where(eq(forecastSettings.userId, userId)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function saveForecastSettings(
+  userId: number,
+  settings: { avgWeekday: number; avgSaturday: number; avgSundayHoliday: number; rainFactor: number }
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select({ id: forecastSettings.id }).from(forecastSettings).where(eq(forecastSettings.userId, userId)).limit(1);
+  if (existing.length > 0) {
+    await db.update(forecastSettings)
+      .set({
+        avgWeekday: settings.avgWeekday,
+        avgSaturday: settings.avgSaturday,
+        avgSundayHoliday: settings.avgSundayHoliday,
+        rainFactor: String(settings.rainFactor),
+      })
+      .where(eq(forecastSettings.userId, userId));
+  } else {
+    await db.insert(forecastSettings).values({
+      userId,
+      avgWeekday: settings.avgWeekday,
+      avgSaturday: settings.avgSaturday,
+      avgSundayHoliday: settings.avgSundayHoliday,
+      rainFactor: String(settings.rainFactor),
+    });
+  }
 }

@@ -327,3 +327,6 @@
 
 ## Correção Vínculo NF-e (19/03)
 - [x] Remover busca por nome parcial — vincular apenas por supplierCode exato
+
+## Bug Previsão de Faturamento (20/03)
+- [x] Corrigir persistência dos valores de média na tela de previsão de faturamento

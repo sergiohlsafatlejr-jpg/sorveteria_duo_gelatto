@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import BackButton from "@/components/BackButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -118,6 +118,7 @@ export default function FinRevenueForecast() {
   const [avgSaturday, setAvgSaturday] = useState(5300);
   const [avgSundayHoliday, setAvgSundayHoliday] = useState(8300);
   const [rainFactor, setRainFactor] = useState(0.7);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   // Modal de lançamento real
   const [modalOpen, setModalOpen] = useState(false);
@@ -126,6 +127,24 @@ export default function FinRevenueForecast() {
   const [realNote, setRealNote] = useState("");
 
   const utils = trpc.useUtils();
+
+  // Carregar configurações salvas do banco
+  const { data: savedSettings } = trpc.fin.forecastCalendar.getSettings.useQuery();
+
+  useEffect(() => {
+    if (savedSettings && !settingsLoaded) {
+      setAvgWeekday(savedSettings.avgWeekday);
+      setAvgSaturday(savedSettings.avgSaturday);
+      setAvgSundayHoliday(savedSettings.avgSundayHoliday);
+      setRainFactor(parseFloat(savedSettings.rainFactor));
+      setSettingsLoaded(true);
+    }
+  }, [savedSettings, settingsLoaded]);
+
+  const saveSettingsMut = trpc.fin.forecastCalendar.saveSettings.useMutation({
+    onSuccess: () => toast.success("Médias salvas com sucesso!"),
+    onError: (e) => toast.error(e.message),
+  });
 
   const { data, isLoading } = trpc.fin.forecastCalendar.getCalendar.useQuery({
     year, month, avgWeekday, avgSaturday, avgSundayHoliday, rainFactor,
@@ -275,7 +294,18 @@ export default function FinRevenueForecast() {
                 Médias de Faturamento por Tipo de Dia
               </CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-6 pb-5">
+              <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-6 pb-5">
+                {/* Botão salvar */}
+                <div className="col-span-2 md:col-span-4 flex justify-end">
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs gap-1.5"
+                    onClick={() => saveSettingsMut.mutate({ avgWeekday, avgSaturday, avgSundayHoliday, rainFactor })}
+                    disabled={saveSettingsMut.isPending}
+                  >
+                    {saveSettingsMut.isPending ? "Salvando..." : "Salvar Médias"}
+                  </Button>
+                </div>
               {[
                 { label: "Dia de Semana (Seg–Sex)", value: avgWeekday, set: setAvgWeekday, max: 15000 },
                 { label: "Sábado", value: avgSaturday, set: setAvgSaturday, max: 20000 },

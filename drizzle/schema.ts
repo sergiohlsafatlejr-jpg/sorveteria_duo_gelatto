@@ -493,3 +493,16 @@ export const instagramPosts = mysqlTable("instagram_posts", {
 });
 export type InstagramPost = typeof instagramPosts.$inferSelect;
 export type InsertInstagramPost = typeof instagramPosts.$inferInsert;
+
+// ─── Forecast Settings ──────────────────────────────────────────────────────
+export const forecastSettings = mysqlTable("forecast_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  avgWeekday: int("avgWeekday").default(2000).notNull(),
+  avgSaturday: int("avgSaturday").default(5300).notNull(),
+  avgSundayHoliday: int("avgSundayHoliday").default(8300).notNull(),
+  rainFactor: varchar("rainFactor", { length: 10 }).default("0.7").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type ForecastSettings = typeof forecastSettings.$inferSelect;
+export type InsertForecastSettings = typeof forecastSettings.$inferInsert;
