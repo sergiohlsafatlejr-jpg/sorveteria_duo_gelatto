@@ -17,7 +17,10 @@ import { useForm } from "react-hook-form";
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
-const fmtDate = (d: Date | string) => new Date(d).toLocaleDateString("pt-BR");
+const fmtDate = (d: Date | string) => {
+  const dt = typeof d === "string" ? new Date(d + (d.length === 10 ? "T12:00:00" : "")) : d;
+  return dt.toLocaleDateString("pt-BR");
+};
 
 type ReceivableForm = {
   description: string;
@@ -78,10 +81,10 @@ export default function FinReceivables() {
       id: r.id,
       description: r.description,
       amount: String(r.amount),
-      dueDate: new Date(r.dueDate).toISOString().split("T")[0],
+      dueDate: (() => { const dt = new Date(r.dueDate); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })(),
       typeId: r.typeId?.toString() ?? "",
       isReceived: r.isReceived,
-      receivedDate: r.receivedDate ? new Date(r.receivedDate).toISOString().split("T")[0] : "",
+      receivedDate: r.receivedDate ? (() => { const dt = new Date(r.receivedDate!); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })() : "",
       notes: r.notes ?? "",
     };
     setEditItem(form);
@@ -93,10 +96,10 @@ export default function FinReceivables() {
     const payload = {
       description: form.description,
       amount: Number(form.amount),
-      dueDate: new Date(form.dueDate),
+      dueDate: new Date(form.dueDate + "T12:00:00"),
       typeId: form.typeId ? Number(form.typeId) : undefined,
       isReceived: form.isReceived,
-      receivedDate: form.receivedDate ? new Date(form.receivedDate) : undefined,
+      receivedDate: form.receivedDate ? new Date(form.receivedDate + "T12:00:00") : undefined,
       notes: form.notes || undefined,
     };
     if (editItem) updateMut.mutate({ id: editItem.id, ...payload });

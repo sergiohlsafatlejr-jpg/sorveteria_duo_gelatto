@@ -330,3 +330,10 @@
 
 ## Bug Previsão de Faturamento (20/03)
 - [x] Corrigir persistência dos valores de média na tela de previsão de faturamento
+
+## Previsão de Faturamento — Duplicar e Bug de Data (31/03)
+- [x] Corrigir bug de fuso horário nas datas dos itens de previsão (dia salvo a menos)
+- [x] Selecionador de itens em Contas a Pagar com botão "Duplicar para próximo mês"
+- [x] Selecionador de itens na Previsão de Faturamento com botão "Duplicar para próximo mês"
+- [x] Endpoint backend: fin.transactions.duplicateToNextMonth
+- [x] Endpoint backend: fin.forecastCalendar.duplicateDaysToNextMonth

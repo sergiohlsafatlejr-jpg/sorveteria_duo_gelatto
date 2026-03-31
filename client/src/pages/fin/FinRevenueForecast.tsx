@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import {
   Sun, Cloud, CloudRain, CloudLightning, HelpCircle,
   TrendingUp, CalendarDays, DollarSign, Umbrella, Settings2,
-  ChevronLeft, ChevronRight, CheckCircle2, BarChart3,
+  ChevronLeft, ChevronRight, CheckCircle2, BarChart3, CopyPlus, Square, CheckSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -120,6 +120,24 @@ export default function FinRevenueForecast() {
   const [rainFactor, setRainFactor] = useState(0.7);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
+  // Seleção para duplicar
+  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
+
+  const toggleSelectDate = (date: string) => {
+    setSelectedDates(prev => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date); else next.add(date);
+      return next;
+    });
+  };
+
+  const toggleSelectAllDates = () => {
+    if (!data) return;
+    const allDates = data.days.map(d => d.date);
+    if (selectedDates.size === allDates.length) setSelectedDates(new Set());
+    else setSelectedDates(new Set(allDates));
+  };
+
   // Modal de lançamento real
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState<{ date: string; projected: number; label: string } | null>(null);
@@ -156,6 +174,16 @@ export default function FinRevenueForecast() {
 
   const { data: accuracyHistory = [] } = trpc.fin.forecastCalendar.getAccuracyHistory.useQuery({
     avgWeekday, avgSaturday, avgSundayHoliday, rainFactor, months: 6,
+  });
+
+  const duplicateDaysMut = trpc.fin.forecastCalendar.duplicateDaysToNextMonth.useMutation({
+    onSuccess: (r: { created: number }) => {
+      utils.fin.forecastCalendar.getRealRevenues.invalidate();
+      const nextMonthName = MONTHS[month === 12 ? 0 : month];
+      toast.success(`${r.created} dia(s) duplicado(s) para ${nextMonthName}!`);
+      setSelectedDates(new Set());
+    },
+    onError: (e: { message: string }) => toast.error(e.message),
   });
 
   const saveRealMut = trpc.fin.forecastCalendar.saveRealRevenue.useMutation({
@@ -577,6 +605,73 @@ export default function FinRevenueForecast() {
             )}
           </CardContent>
         </Card>
+
+        {/* Selecionador de dias para duplicar */}
+        {data && data.days.length > 0 && (
+          <Card className="border-border/50">
+            <CardHeader className="pb-2 pt-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <button onClick={toggleSelectAllDates} className="text-muted-foreground hover:text-foreground transition-colors">
+                    {selectedDates.size === data.days.length && data.days.length > 0
+                      ? <CheckSquare className="h-4 w-4 text-primary" />
+                      : <Square className="h-4 w-4" />}
+                  </button>
+                  <CardTitle className="text-sm font-semibold">
+                    Duplicar dias para o próximo mês
+                    {selectedDates.size > 0 && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">{selectedDates.size} dia(s) selecionado(s)</span>
+                    )}
+                  </CardTitle>
+                </div>
+                {selectedDates.size > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 h-7 text-xs border-blue-500/50 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+                    onClick={() => duplicateDaysMut.mutate({ dates: Array.from(selectedDates) })}
+                    disabled={duplicateDaysMut.isPending}
+                  >
+                    <CopyPlus className="h-3.5 w-3.5" />
+                    {duplicateDaysMut.isPending ? "Duplicando..." : `Duplicar ${selectedDates.size} dia(s) para ${MONTHS[month === 12 ? 0 : month]}`}
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="px-3 pb-3">
+              <p className="text-xs text-muted-foreground mb-2">Selecione os dias cujo faturamento real você quer copiar para o mesmo dia do próximo mês. Apenas dias com valor real lançado serão duplicados.</p>
+              <div className="grid grid-cols-7 gap-1">
+                {data.days.map(d => {
+                  const isSelected = selectedDates.has(d.date);
+                  const realVal = realMap.get(d.date);
+                  const hasReal = realVal !== undefined;
+                  return (
+                    <button
+                      key={d.date}
+                      onClick={() => toggleSelectDate(d.date)}
+                      className={cn(
+                        "rounded-md p-1.5 text-center text-xs transition-all border",
+                        isSelected
+                          ? "bg-blue-500/20 border-blue-500/60 text-blue-600 dark:text-blue-400 ring-1 ring-blue-500/40"
+                          : hasReal
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-foreground hover:bg-emerald-500/20"
+                          : "bg-muted/20 border-border/30 text-muted-foreground/50 hover:bg-muted/40"
+                      )}
+                    >
+                      <div className="font-bold">{d.day}</div>
+                      {hasReal && (
+                        <div className="text-[9px] text-emerald-500 font-medium">{fmtBRLShort(realVal!)}</div>
+                      )}
+                      {!hasReal && (
+                        <div className="text-[9px] text-muted-foreground/30">—</div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Legenda */}
         <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">

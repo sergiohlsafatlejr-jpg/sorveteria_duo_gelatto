@@ -16,7 +16,10 @@ import { useForm } from "react-hook-form";
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
-const fmtDate = (d: Date | string) => new Date(d).toLocaleDateString("pt-BR");
+const fmtDate = (d: Date | string) => {
+  const dt = typeof d === "string" ? new Date(d + (d.length === 10 ? "T12:00:00" : "")) : d;
+  return dt.toLocaleDateString("pt-BR");
+};
 
 const PAYMENT_METHODS = [
   { value: "pix", label: "PIX" },
@@ -82,7 +85,7 @@ export default function FinBankStatements() {
       id: s.id,
       bankId: s.bankId?.toString() ?? "",
       categoryId: s.categoryId?.toString() ?? "",
-      date: new Date(s.date).toISOString().split("T")[0],
+      date: (() => { const dt = new Date(s.date); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })(),
       description: s.description,
       amount: String(Math.abs(Number(s.amount))),
       type: s.type as "credit" | "debit",
@@ -98,7 +101,7 @@ export default function FinBankStatements() {
     const payload = {
       bankId: form.bankId ? Number(form.bankId) : undefined,
       categoryId: form.categoryId ? Number(form.categoryId) : undefined,
-      date: new Date(form.date),
+      date: new Date(form.date + "T12:00:00"),
       description: form.description,
       amount: Number(form.amount),
       type: form.type,

@@ -50,6 +50,9 @@ import {
   saveForecastSettings,
 } from "../db.fin";
 import { protectedProcedure, router } from "../_core/trpc";
+import { finDailyRevenue } from "../../drizzle/schema";
+import { and, eq } from "drizzle-orm";
+import { getDb } from "../db";
 
 export const finRouter = router({
   // ─── Dashboard ─────────────────────────────────────────────────────────────
@@ -317,6 +320,30 @@ export const finRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ ctx, input }) => deleteFinTransaction(input.id, ctx.user.id)),
+    duplicateToNextMonth: protectedProcedure
+      .input(z.object({ ids: z.array(z.number()) }))
+      .mutation(async ({ ctx, input }) => {
+        const all = await getFinTransactions(ctx.user.id, {});
+        const selected = all.filter(t => input.ids.includes(t.id));
+        let created = 0;
+        for (const t of selected) {
+          const d = new Date(t.dueDate);
+          const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, d.getDate(), 12, 0, 0);
+          await createFinTransaction({
+            userId: ctx.user.id,
+            description: t.description,
+            amount: String(t.amount),
+            dueDate: nextMonth,
+            categoryId: t.categoryId ?? undefined,
+            bankId: t.bankId ?? undefined,
+            costId: (t as any).costId ?? undefined,
+            isPaid: false,
+            notes: t.notes ?? undefined,
+          });
+          created++;
+        }
+        return { created };
+      }),
     // Importação de Excel: recebe base64 do arquivo e insere as transações em lote
     importExcel: protectedProcedure
       .input(z.object({
@@ -560,6 +587,28 @@ export const finRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ ctx, input }) => deleteFinRevenueForecast(input.id, ctx.user.id)),
+    duplicateToNextMonth: protectedProcedure
+      .input(z.object({ ids: z.array(z.number()) }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await import("../db.fin");
+        // Buscar todos os forecasts do usuário
+        const allForecasts = await db.getFinRevenueForecasts(ctx.user.id, "2000-01-01", "2099-12-31");
+        const selected = allForecasts.filter((f: { id: number }) => input.ids.includes(f.id));
+        let created = 0;
+        for (const f of selected) {
+          const [y, m, d] = (f.forecastDate as string).split("-").map(Number);
+          const nextDate = new Date(y!, m!, d!, 12, 0, 0); // m! already is next month (0-indexed + 1)
+          const nextDateStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-${String(nextDate.getDate()).padStart(2, "0")}`;
+          await upsertFinRevenueForecast({
+            userId: ctx.user.id,
+            forecastDate: nextDateStr,
+            amount: String(f.amount),
+            description: f.description ?? undefined,
+          });
+          created++;
+        }
+        return { created };
+      }),
   }),
 
   // ─── Forecast Calendar ────────────────────────────────────────────────────────────────────────────
@@ -743,6 +792,45 @@ export const finRouter = router({
         rainFactor: z.number().min(0).max(1),
       }))
       .mutation(({ ctx, input }) => saveForecastSettings(ctx.user.id, input)),
+    duplicateDaysToNextMonth: protectedProcedure
+      .input(z.object({
+        dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await getDb();
+        if (!db) return { created: 0 };
+        let created = 0;
+        for (const date of input.dates) {
+          const [y, m, d] = date.split("-").map(Number);
+          const nextM = m === 12 ? 1 : m + 1;
+          const nextY = m === 12 ? y + 1 : y;
+          // Verificar se o dia existe no próximo mês (ex: dia 31 em fevereiro)
+          const maxDay = new Date(nextY, nextM, 0).getDate();
+          if (d > maxDay) continue;
+          const nextDate = `${nextY}-${String(nextM).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          // Buscar o valor real do dia original
+          const [existing] = await db.select().from(finDailyRevenue)
+            .where(and(eq(finDailyRevenue.userId, ctx.user.id), eq(finDailyRevenue.revenueDate, date)));
+          if (!existing) continue;
+          // Upsert no próximo mês
+          const [alreadyExists] = await db.select().from(finDailyRevenue)
+            .where(and(eq(finDailyRevenue.userId, ctx.user.id), eq(finDailyRevenue.revenueDate, nextDate)));
+          if (alreadyExists) {
+            await db.update(finDailyRevenue)
+              .set({ realAmount: existing.realAmount, note: existing.note })
+              .where(and(eq(finDailyRevenue.userId, ctx.user.id), eq(finDailyRevenue.revenueDate, nextDate)));
+          } else {
+            await db.insert(finDailyRevenue).values({
+              userId: ctx.user.id,
+              revenueDate: nextDate,
+              realAmount: existing.realAmount,
+              note: existing.note,
+            });
+          }
+          created++;
+        }
+        return { created };
+      }),
   }),
   // ─── Cashflow Monthlyy ────────────────────────────────────────────────────────────────────────────
   cashflow: router({

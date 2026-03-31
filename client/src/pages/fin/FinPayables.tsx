@@ -10,15 +10,17 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload } from "lucide-react";
+import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload, CopyPlus, Square, CheckSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useForm } from "react-hook-form";
 
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
-const fmtDate = (d: Date | string) =>
-  new Date(d).toLocaleDateString("pt-BR");
+const fmtDate = (d: Date | string) => {
+  const dt = typeof d === "string" ? new Date(d + (d.length === 10 ? "T12:00:00" : "")) : d;
+  return dt.toLocaleDateString("pt-BR");
+};
 
 type TransactionForm = {
   description: string;
@@ -39,6 +41,7 @@ export default function FinPayables() {
   const [showImport, setShowImport] = useState(false);
   const [importCategoryId, setImportCategoryId] = useState("none");
   const [importBankId, setImportBankId] = useState("none");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   const utils = trpc.useUtils();
@@ -78,6 +81,28 @@ export default function FinPayables() {
   const markUnpaidMut = trpc.fin.transactions.markUnpaid.useMutation({
     onSuccess: () => { utils.fin.transactions.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Marcado como pendente!"); },
   });
+  const duplicateMut = trpc.fin.transactions.duplicateToNextMonth.useMutation({
+    onSuccess: (r) => {
+      utils.fin.transactions.list.invalidate();
+      toast.success(`${r.created} lançamento(s) duplicado(s) para o próximo mês!`);
+      setSelectedIds(new Set());
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === data.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(data.map(t => t.id)));
+  };
+
   const importMut = trpc.fin.transactions.importExcel.useMutation({
     onSuccess: (r) => { utils.fin.transactions.list.invalidate(); toast.success(`Importados: ${r.imported} registros (${r.skipped} ignorados)`); setShowImport(false); },
     onError: (e) => toast.error(e.message),
@@ -110,12 +135,12 @@ export default function FinPayables() {
       id: t.id,
       description: t.description,
       amount: String(t.amount),
-      dueDate: new Date(t.dueDate).toISOString().split("T")[0],
+      dueDate: (() => { const dt = new Date(t.dueDate); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })(),
       categoryId: t.categoryId?.toString() ?? "",
       bankId: t.bankId?.toString() ?? "",
       costId: (t as any).costId?.toString() ?? "",
       isPaid: t.isPaid,
-      paymentDate: t.paymentDate ? new Date(t.paymentDate).toISOString().split("T")[0] : "",
+      paymentDate: t.paymentDate ? (() => { const dt = new Date(t.paymentDate!); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })() : "",
       notes: t.notes ?? "",
     };
     setEditItem(form);
@@ -127,12 +152,12 @@ export default function FinPayables() {
     const payload = {
       description: form.description,
       amount: Number(form.amount),
-      dueDate: new Date(form.dueDate),
+      dueDate: new Date(form.dueDate + "T12:00:00"),
       categoryId: form.categoryId ? Number(form.categoryId) : undefined,
       bankId: form.bankId ? Number(form.bankId) : undefined,
       costId: form.costId ? Number(form.costId) : undefined,
       isPaid: form.isPaid,
-      paymentDate: form.paymentDate ? new Date(form.paymentDate) : undefined,
+      paymentDate: form.paymentDate ? new Date(form.paymentDate + "T12:00:00") : undefined,
       notes: form.notes || undefined,
     };
     if (editItem) updateMut.mutate({ id: editItem.id, ...payload });
@@ -157,6 +182,17 @@ export default function FinPayables() {
           <p className="text-sm text-muted-foreground">Gerencie seus lançamentos de despesas</p>
         </div>
         <div className="flex gap-2">
+          {selectedIds.size > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => duplicateMut.mutate({ ids: Array.from(selectedIds) })}
+              disabled={duplicateMut.isPending}
+              className="gap-2 border-blue-500/50 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+            >
+              <CopyPlus className="h-4 w-4" />
+              Duplicar {selectedIds.size} para próximo mês
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setShowImport(true)} className="gap-2">
             <FileSpreadsheet className="h-4 w-4" /> Importar Excel
           </Button>
@@ -192,6 +228,13 @@ export default function FinPayables() {
         <table className="w-full text-sm">
           <thead className="bg-muted/30 border-b border-border/50">
             <tr>
+              <th className="px-4 py-3 w-10">
+                <button onClick={toggleSelectAll} className="text-muted-foreground hover:text-foreground transition-colors">
+                  {selectedIds.size === data.length && data.length > 0
+                    ? <CheckSquare className="h-4 w-4 text-primary" />
+                    : <Square className="h-4 w-4" />}
+                </button>
+              </th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">Descrição</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">Categoria</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">Banco</th>
@@ -211,8 +254,16 @@ export default function FinPayables() {
               <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">Nenhum lançamento encontrado</td></tr>
             ) : data.map(t => {
               const isOverdue = !t.isPaid && new Date(t.dueDate) < now;
+              const isSelected = selectedIds.has(t.id);
               return (
-                <tr key={t.id} className={cn("hover:bg-muted/20 transition-colors", isOverdue && "bg-destructive/5")}>
+                <tr key={t.id} className={cn("hover:bg-muted/20 transition-colors", isOverdue && "bg-destructive/5", isSelected && "bg-blue-50/50 dark:bg-blue-950/20")}>
+                  <td className="px-4 py-3">
+                    <button onClick={() => toggleSelect(t.id)} className="text-muted-foreground hover:text-foreground transition-colors">
+                      {isSelected
+                        ? <CheckSquare className="h-4 w-4 text-primary" />
+                        : <Square className="h-4 w-4" />}
+                    </button>
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-medium">{t.description}</div>
                     {t.notes && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{t.notes}</div>}
