@@ -341,3 +341,11 @@
 ## Bug Acesso Financeiro Usuário Clarissa (01/04)
 - [x] Investigar por que Clarissa não vê dados de Contas a Pagar
 - [x] Corrigir: dados financeiros agora são compartilhados por empresa (sem filtro por userId nas consultas)
+
+## Página Meta de Gerência (01/04)
+- [x] Tabela fin_goals no schema (cenários: label, targetRevenue, salary, notes)
+- [x] Endpoint fin.goals.list, create, update, delete
+- [x] Endpoint fin.goals.getMonthSummary (total contas a pagar do mês)
+- [x] Tela FinGoals: total contas a pagar + tabela de cenários editáveis
+- [x] Cálculo automático: faturamento necessário para cobrir contas + salário
+- [x] Rota /fin/goals no App.tsx e link no menu Financeiro

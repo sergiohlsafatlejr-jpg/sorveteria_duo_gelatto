@@ -506,3 +506,29 @@ export const forecastSettings = mysqlTable("forecast_settings", {
 });
 export type ForecastSettings = typeof forecastSettings.$inferSelect;
 export type InsertForecastSettings = typeof forecastSettings.$inferInsert;
+
+// ─── Financial Goals (Meta de Gerência) ─────────────────────────────────────
+export const finGoals = mysqlTable("fin_goals", {
+  id: int("id").autoincrement().primaryKey(),
+  month: varchar("month", { length: 7 }).notNull(), // "2025-04"
+  label: varchar("label", { length: 100 }).notNull(), // e.g. "Cenário 1"
+  targetRevenue: decimal("targetRevenue", { precision: 12, scale: 2 }).notNull().default("0"),
+  salary: decimal("salary", { precision: 12, scale: 2 }).notNull().default("0"),
+  notes: text("notes"),
+  sortOrder: int("sortOrder").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FinGoal = typeof finGoals.$inferSelect;
+export type InsertFinGoal = typeof finGoals.$inferInsert;
+
+// ─── Financial Goals Extra Costs (custos extras manuais por mês) ─────────────
+export const finGoalExtraCosts = mysqlTable("fin_goal_extra_costs", {
+  id: int("id").autoincrement().primaryKey(),
+  month: varchar("month", { length: 7 }).notNull(), // "2025-04"
+  description: varchar("description", { length: 200 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FinGoalExtraCost = typeof finGoalExtraCosts.$inferSelect;
+export type InsertFinGoalExtraCost = typeof finGoalExtraCosts.$inferInsert;

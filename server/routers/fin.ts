@@ -48,6 +48,14 @@ import {
   getRainAlert,
   getForecastSettings,
   saveForecastSettings,
+  getFinGoals,
+  createFinGoal,
+  updateFinGoal,
+  deleteFinGoal,
+  getFinGoalExtraCosts,
+  createFinGoalExtraCost,
+  deleteFinGoalExtraCost,
+  getFinGoalsMonthSummary,
 } from "../db.fin";
 import { protectedProcedure, router } from "../_core/trpc";
 import { finDailyRevenue } from "../../drizzle/schema";
@@ -832,6 +840,75 @@ export const finRouter = router({
         return { created };
       }),
   }),
+  // ─── Goals (Meta de Gerência) ────────────────────────────────────────────────
+  goals: router({
+    summary: protectedProcedure
+      .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }))
+      .query(({ input }) => getFinGoalsMonthSummary(input.month)),
+    list: protectedProcedure
+      .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }))
+      .query(({ input }) => getFinGoals(input.month)),
+    create: protectedProcedure
+      .input(z.object({
+        month: z.string().regex(/^\d{4}-\d{2}$/),
+        label: z.string().min(1),
+        targetRevenue: z.number().min(0),
+        salary: z.number().min(0),
+        notes: z.string().optional(),
+        sortOrder: z.number().optional(),
+      }))
+      .mutation(({ input }) =>
+        createFinGoal({
+          month: input.month,
+          label: input.label,
+          targetRevenue: String(input.targetRevenue),
+          salary: String(input.salary),
+          notes: input.notes,
+          sortOrder: input.sortOrder ?? 0,
+        })
+      ),
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        label: z.string().optional(),
+        targetRevenue: z.number().optional(),
+        salary: z.number().optional(),
+        notes: z.string().optional(),
+        sortOrder: z.number().optional(),
+      }))
+      .mutation(({ input }) => {
+        const { id, targetRevenue, salary, ...rest } = input;
+        return updateFinGoal(id, {
+          ...rest,
+          ...(targetRevenue !== undefined && { targetRevenue: String(targetRevenue) }),
+          ...(salary !== undefined && { salary: String(salary) }),
+        });
+      }),
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => deleteFinGoal(input.id)),
+    // Extra costs
+    listExtraCosts: protectedProcedure
+      .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }))
+      .query(({ input }) => getFinGoalExtraCosts(input.month)),
+    createExtraCost: protectedProcedure
+      .input(z.object({
+        month: z.string().regex(/^\d{4}-\d{2}$/),
+        description: z.string().min(1),
+        amount: z.number().min(0),
+      }))
+      .mutation(({ input }) =>
+        createFinGoalExtraCost({
+          month: input.month,
+          description: input.description,
+          amount: String(input.amount),
+        })
+      ),
+    deleteExtraCost: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => deleteFinGoalExtraCost(input.id)),
+  }),
+
   // ─── Cashflow Monthlyy ────────────────────────────────────────────────────────────────────────────
   cashflow: router({
     monthly: protectedProcedure

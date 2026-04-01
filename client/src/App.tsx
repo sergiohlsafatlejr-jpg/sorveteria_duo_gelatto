@@ -25,6 +25,7 @@ import FinBankStatements from "./pages/fin/FinBankStatements";
 import FinCosts from "./pages/fin/FinCosts";
 import FinDRE from "./pages/fin/FinDRE";
 import FinRevenueForecast from "./pages/fin/FinRevenueForecast";
+import FinGoals from "./pages/fin/FinGoals";
 import FinSettings from "./pages/fin/FinSettings";
 import FinCategories from "./pages/fin/FinCategories";
 import FinBanks from "./pages/fin/FinBanks";
@@ -63,6 +64,7 @@ function Router() {
       <Route path="/fin/banks" component={FinBanks} />
       <Route path="/fin/costs-register" component={FinCostsRegister} />
       <Route path="/fin/cashflow" component={FinCashflow} />
+      <Route path="/fin/goals" component={FinGoals} />
       <Route path="/whatsapp" component={WhatsApp} />
       <Route path="/instagram" component={InstagramPage} />
       <Route path="/products-register" component={ProductsRegister} />

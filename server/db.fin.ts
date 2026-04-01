@@ -30,6 +30,12 @@ import {
   finDailyRevenue,
   forecastSettings,
   ForecastSettings,
+  finGoals,
+  FinGoal,
+  InsertFinGoal,
+  finGoalExtraCosts,
+  FinGoalExtraCost,
+  InsertFinGoalExtraCost,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 
@@ -664,4 +670,92 @@ export async function saveForecastSettings(
       rainFactor: String(settings.rainFactor),
     });
   }
+}
+
+// ─── Fin Goals (Meta de Gerência) ─────────────────────────────────────────────
+export async function getFinGoals(month: string): Promise<FinGoal[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(finGoals)
+    .where(eq(finGoals.month, month))
+    .orderBy(finGoals.sortOrder, finGoals.id);
+}
+
+export async function createFinGoal(data: InsertFinGoal): Promise<FinGoal | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(finGoals).values(data);
+  const insertId = (result as unknown as { insertId: number }[])[0]?.insertId;
+  if (!insertId) return null;
+  const rows = await db.select().from(finGoals).where(eq(finGoals.id, insertId)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function updateFinGoal(id: number, data: Partial<InsertFinGoal>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(finGoals).set({ ...data, updatedAt: new Date() }).where(eq(finGoals.id, id));
+}
+
+export async function deleteFinGoal(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(finGoals).where(eq(finGoals.id, id));
+}
+
+// ─── Fin Goal Extra Costs ─────────────────────────────────────────────────────
+export async function getFinGoalExtraCosts(month: string): Promise<FinGoalExtraCost[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(finGoalExtraCosts)
+    .where(eq(finGoalExtraCosts.month, month))
+    .orderBy(finGoalExtraCosts.id);
+}
+
+export async function createFinGoalExtraCost(data: InsertFinGoalExtraCost): Promise<FinGoalExtraCost | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(finGoalExtraCosts).values(data);
+  const insertId = (result as unknown as { insertId: number }[])[0]?.insertId;
+  if (!insertId) return null;
+  const rows = await db.select().from(finGoalExtraCosts).where(eq(finGoalExtraCosts.id, insertId)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function deleteFinGoalExtraCost(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(finGoalExtraCosts).where(eq(finGoalExtraCosts.id, id));
+}
+
+// ─── Fin Goals Month Summary ──────────────────────────────────────────────────
+export async function getFinGoalsMonthSummary(month: string): Promise<{
+  totalPayables: number;
+  totalPaid: number;
+  totalPending: number;
+  totalExtraCosts: number;
+}> {
+  const db = await getDb();
+  if (!db) return { totalPayables: 0, totalPaid: 0, totalPending: 0, totalExtraCosts: 0 };
+
+  // Parse month "2025-04" → date range
+  const [year, mon] = month.split("-").map(Number);
+  const monthStart = new Date(year, mon - 1, 1);
+  const monthEnd = new Date(year, mon, 0, 23, 59, 59);
+
+  const transactions = await db.select().from(finTransactions)
+    .where(and(
+      gte(finTransactions.dueDate, monthStart),
+      lte(finTransactions.dueDate, monthEnd),
+    ));
+
+  const extraCosts = await db.select().from(finGoalExtraCosts)
+    .where(eq(finGoalExtraCosts.month, month));
+
+  const totalPayables = transactions.reduce((sum, t) => sum + parseFloat(String(t.amount) || "0"), 0);
+  const totalPaid = transactions.filter(t => t.isPaid).reduce((sum, t) => sum + parseFloat(String(t.amount) || "0"), 0);
+  const totalPending = transactions.filter(t => !t.isPaid).reduce((sum, t) => sum + parseFloat(String(t.amount) || "0"), 0);
+  const totalExtraCosts = extraCosts.reduce((sum, e) => sum + parseFloat(String(e.amount) || "0"), 0);
+
+  return { totalPayables, totalPaid, totalPending, totalExtraCosts };
 }
