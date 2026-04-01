@@ -802,17 +802,17 @@ export async function populateForecastFromGoal(
   const totalWeight = days.reduce((s, d) => s + d.weight, 0);
   if (totalWeight === 0) return { populated: 0, skipped: 0 };
 
-  // Load existing entries for this month
+  // Load existing forecast entries for this month (finRevenueForecasts)
   const dateFrom = `${year}-${String(mon).padStart(2, "0")}-01`;
   const dateTo = `${year}-${String(mon).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
-  const existing = await db.select({ revenueDate: finDailyRevenue.revenueDate })
-    .from(finDailyRevenue)
+  const existing = await db.select({ forecastDate: finRevenueForecasts.forecastDate })
+    .from(finRevenueForecasts)
     .where(and(
-      eq(finDailyRevenue.userId, userId),
-      gte(finDailyRevenue.revenueDate, dateFrom),
-      lte(finDailyRevenue.revenueDate, dateTo),
+      eq(finRevenueForecasts.userId, userId),
+      gte(finRevenueForecasts.forecastDate, dateFrom),
+      lte(finRevenueForecasts.forecastDate, dateTo),
     ));
-  const existingDates = new Set(existing.map(r => r.revenueDate));
+  const existingDates = new Set(existing.map(r => r.forecastDate));
 
   let populated = 0;
   let skipped = 0;
@@ -823,7 +823,13 @@ export async function populateForecastFromGoal(
       continue;
     }
     const amount = Math.round((day.weight / totalWeight) * targetRevenue * 100) / 100;
-    await saveDailyRevenue(userId, day.date, amount, "Meta de Gerência");
+    // Gravar como PREVISÃO (finRevenueForecasts.amount), não como valor real
+    await upsertFinRevenueForecast({
+      userId,
+      forecastDate: day.date,
+      amount: String(amount),
+      description: "Meta de Gerência",
+    });
     populated++;
   }
 

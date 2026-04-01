@@ -802,6 +802,19 @@ export const finRouter = router({
         rainFactor: z.number().min(0).max(1),
       }))
       .mutation(({ ctx, input }) => saveForecastSettings(ctx.user.id, input)),
+    // Buscar previsões de meta (gravadas por populateForecastFromGoal) para um mês
+    getGoalForecasts: protectedProcedure
+      .input(z.object({
+        year: z.number().int(),
+        month: z.number().int().min(1).max(12),
+      }))
+      .query(({ ctx, input }) => {
+        const { year, month } = input.year !== undefined ? input : { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+        const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+        return getFinRevenueForecasts(ctx.user.id, dateFrom, dateTo);
+      }),
     duplicateDaysToNextMonth: protectedProcedure
       .input(z.object({
         dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1),

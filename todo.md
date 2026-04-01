@@ -370,3 +370,11 @@
 - [x] Tela FinMonthlyComparison: seletor de dois meses, tabela por categoria com variação %
 - [x] Gráfico de barras lado a lado por categoria
 - [x] Rota /fin/monthly-comparison e link no menu Financeiro
+
+## Corrigir Popular Previsão — Gravar como Previsão, não como Real (01/04)
+- [x] Corrigir populateForecastFromGoal para gravar em finRevenueForecasts (previsão) em vez de finDailyRevenue (valor real)
+- [x] Valor real deve continuar sendo inserido manualmente pelo usuário no calendário
+- [x] Calendário exibe: Meta (laranja, da Meta de Gerência) e Real (verde, inserido manualmente)
+- [x] Modal mostra Meta do Dia vs Projeção por médias, acurácia calculada vs meta
+- [x] KPI card de Meta do Mês exibido quando meta populada
+- [x] Legenda atualizada com cor de meta

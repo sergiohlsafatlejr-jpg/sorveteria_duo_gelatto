@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import {
   Sun, Cloud, CloudRain, CloudLightning, HelpCircle,
   TrendingUp, CalendarDays, DollarSign, Umbrella, Settings2,
-  ChevronLeft, ChevronRight, CheckCircle2, BarChart3, CopyPlus, Square, CheckSquare,
+  ChevronLeft, ChevronRight, CheckCircle2, BarChart3, CopyPlus, Square, CheckSquare, Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -140,7 +140,7 @@ export default function FinRevenueForecast() {
 
   // Modal de lançamento real
   const [modalOpen, setModalOpen] = useState(false);
-  const [selectedDay, setSelectedDay] = useState<{ date: string; projected: number; label: string } | null>(null);
+  const [selectedDay, setSelectedDay] = useState<{ date: string; projected: number; goalAmount: number | null; label: string } | null>(null);
   const [realAmount, setRealAmount] = useState("");
   const [realNote, setRealNote] = useState("");
 
@@ -169,6 +169,11 @@ export default function FinRevenueForecast() {
   });
 
   const { data: realRevenues = [] } = trpc.fin.forecastCalendar.getRealRevenues.useQuery({
+    year, month,
+  });
+
+  // Previsões de meta (populadas via Meta de Gerência)
+  const { data: goalForecasts = [] } = trpc.fin.forecastCalendar.getGoalForecasts.useQuery({
     year, month,
   });
 
@@ -205,6 +210,13 @@ export default function FinRevenueForecast() {
     return m;
   }, [realRevenues]);
 
+  // Mapa de meta por data (finRevenueForecasts.amount)
+  const goalMap = useMemo(() => {
+    const m = new Map<string, number>();
+    goalForecasts.forEach((f: { forecastDate: string; amount: string | number }) => m.set(f.forecastDate, Number(f.amount)));
+    return m;
+  }, [goalForecasts]);
+
   const firstDayOffset = useMemo(
     () => new Date(year, month - 1, 1).getDay(),
     [year, month]
@@ -221,10 +233,11 @@ export default function FinRevenueForecast() {
 
   function openModal(d: { date: string; projectedAmount: number; day: number; dayType: string }) {
     const existing = realMap.get(d.date);
+    const goalAmt = goalMap.get(d.date) ?? null;
     const dateLabel = new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR", {
       weekday: "long", day: "numeric", month: "long",
     });
-    setSelectedDay({ date: d.date, projected: d.projectedAmount, label: dateLabel });
+    setSelectedDay({ date: d.date, projected: d.projectedAmount, goalAmount: goalAmt, label: dateLabel });
     setRealAmount(existing !== undefined ? String(existing) : "");
     setRealNote("");
     setModalOpen(true);
@@ -271,10 +284,14 @@ export default function FinRevenueForecast() {
     return result;
   }, [data, firstDayOffset, realMap]);
 
-  // Totais do mês com real
+  // Totais do mês com real e meta
   const totalReal = useMemo(() => realRevenues.reduce((s, r) => s + Number(r.realAmount), 0), [realRevenues]);
-  const accuracy = data && totalReal > 0
-    ? Math.round((totalReal / data.summary.totalProjected) * 100)
+  const totalGoal = useMemo(() => goalForecasts.reduce((s: number, f: { amount: string | number }) => s + Number(f.amount), 0), [goalForecasts]);
+  const hasGoalMonth = totalGoal > 0;
+  // Acurácia: real vs meta (se tiver meta), senão real vs projeção
+  const accuracyBase = hasGoalMonth ? totalGoal : (data?.summary.totalProjected ?? 0);
+  const accuracy = totalReal > 0 && accuracyBase > 0
+    ? Math.round((totalReal / accuracyBase) * 100)
     : null;
 
   return (
@@ -404,7 +421,7 @@ export default function FinRevenueForecast() {
               <p className="text-xs text-muted-foreground mt-0.5">{realRevenues.length} dias</p>
             </CardContent>
           </Card>
-          <Card className="border-border/50 md:col-span-1">
+                <Card className="border-border/50">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs text-muted-foreground">Acurácia</span>
@@ -417,8 +434,21 @@ export default function FinRevenueForecast() {
               )}>
                 {accuracy !== null ? `${accuracy}%` : "—"}
               </p>
+              {hasGoalMonth && <p className="text-[10px] text-muted-foreground mt-0.5">vs meta</p>}
             </CardContent>
           </Card>
+          {hasGoalMonth && (
+            <Card className="border-orange-500/30 bg-orange-500/5">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">Meta do Mês</span>
+                  <Target className="h-4 w-4 text-orange-400" />
+                </div>
+                <p className="text-base font-bold text-orange-400">{fmtBRLShort(totalGoal)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{goalForecasts.length} dias</p>
+              </CardContent>
+            </Card>
+          )}
           <Card className="border-border/50">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-1">
@@ -486,10 +516,14 @@ export default function FinRevenueForecast() {
                   const info = dayTypeInfo(d.dayType);
                   const realVal = realMap.get(d.date);
                   const hasReal = realVal !== undefined;
+                  const goalVal = goalMap.get(d.date);
+                  const hasGoal = goalVal !== undefined;
                   const colorClass = dayTypeColor(d.dayType, d.isPast, d.isToday, hasReal);
                   const weatherReduced = d.weather && (d.weather.label === "rain" || d.weather.label === "storm");
-                  const accuracyDay = hasReal && d.projectedAmount > 0
-                    ? Math.round((realVal! / d.projectedAmount) * 100)
+                  // Acurácia: real vs meta (se tiver meta), senão real vs projeção
+                  const compareBase = hasGoal ? goalVal! : d.projectedAmount;
+                  const accuracyDay = hasReal && compareBase > 0
+                    ? Math.round((realVal! / compareBase) * 100)
                     : null;
 
                   return (
@@ -524,12 +558,20 @@ export default function FinRevenueForecast() {
 
                           {/* Valores */}
                           <div className="mt-auto space-y-0.5">
-                            <span className={cn(
-                              "text-[10px] font-bold leading-none block",
-                              weatherReduced ? "text-blue-400" : "text-muted-foreground"
-                            )}>
-                              {fmtBRLShort(d.projectedAmount)}
-                            </span>
+                            {/* Meta (da Meta de Gerência) - exibida em laranja quando disponível */}
+                            {hasGoal ? (
+                              <span className="text-[10px] font-bold leading-none block text-orange-400">
+                                {fmtBRLShort(goalVal!)}
+                              </span>
+                            ) : (
+                              <span className={cn(
+                                "text-[10px] font-bold leading-none block",
+                                weatherReduced ? "text-blue-400" : "text-muted-foreground"
+                              )}>
+                                {fmtBRLShort(d.projectedAmount)}
+                              </span>
+                            )}
+                            {/* Real lançado manualmente */}
                             {hasReal && (
                               <span className="text-[10px] font-bold leading-none block text-emerald-400">
                                 {fmtBRLShort(realVal!)}
@@ -564,11 +606,14 @@ export default function FinRevenueForecast() {
                           </p>
                           {d.isHoliday && <p className="text-amber-400">🎉 {d.holidayName}</p>}
                           <p>Projeção: <span className="font-bold text-primary">{fmtBRL(d.projectedAmount)}</span></p>
+                          {hasGoal && (
+                            <p>Meta: <span className="font-bold text-orange-400">{fmtBRL(goalVal!)}</span></p>
+                          )}
                           {hasReal && (
                             <>
                               <p>Real: <span className="font-bold text-emerald-400">{fmtBRL(realVal!)}</span></p>
                               {accuracyDay !== null && (
-                                <p>Acurácia: <span className={cn(
+                                <p>Acurácia vs {hasGoal ? "meta" : "projeção"}: <span className={cn(
                                   "font-bold",
                                   accuracyDay >= 95 ? "text-emerald-400" : accuracyDay >= 75 ? "text-amber-400" : "text-rose-400"
                                 )}>{accuracyDay}%</span></p>
@@ -681,6 +726,7 @@ export default function FinRevenueForecast() {
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-500/20 border border-amber-500/40" /> Feriado</span>
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-500/15 border border-emerald-500/40" /> Real lançado</span>
           <span className="flex items-center gap-1.5"><CheckCircle2 size={12} className="text-emerald-400" /> Real registrado</span>
+          {hasGoalMonth && <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-orange-500/20 border border-orange-500/40" /> Meta (Gerência)</span>}
           <span className="flex items-center gap-1.5"><CloudRain size={12} className="text-blue-400" /> Chuva (−{Math.round((1 - rainFactor) * 100)}%)</span>
         </div>
 
@@ -770,9 +816,24 @@ export default function FinRevenueForecast() {
           {selectedDay && (
             <div className="space-y-4">
               <p className="text-xs text-muted-foreground capitalize">{selectedDay.label}</p>
-              <div className="rounded-lg bg-muted/20 border border-border/40 p-3 text-xs">
-                <span className="text-muted-foreground">Projeção do dia: </span>
-                <span className="font-bold text-primary">{fmtBRL(selectedDay.projected)}</span>
+              <div className="rounded-lg bg-muted/20 border border-border/40 p-3 text-xs space-y-1">
+                {selectedDay.goalAmount !== null ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Meta do dia (Gerência):</span>
+                      <span className="font-bold text-orange-400">{fmtBRL(selectedDay.goalAmount)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Projeção (médias):</span>
+                      <span className="font-bold text-primary">{fmtBRL(selectedDay.projected)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Projeção do dia:</span>
+                    <span className="font-bold text-primary">{fmtBRL(selectedDay.projected)}</span>
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <Label className="text-xs">Valor Real Faturado (R$) *</Label>
@@ -782,17 +843,19 @@ export default function FinRevenueForecast() {
                   onChange={e => setRealAmount(e.target.value)}
                   autoFocus
                 />
-                {realAmount && selectedDay.projected > 0 && (
-                  <p className={cn(
-                    "text-xs font-medium",
-                    Number(realAmount) / selectedDay.projected >= 0.95 ? "text-emerald-400"
-                    : Number(realAmount) / selectedDay.projected >= 0.75 ? "text-amber-400"
-                    : "text-rose-400"
-                  )}>
-                    Acurácia: {Math.round((Number(realAmount) / selectedDay.projected) * 100)}%
-                    {Number(realAmount) >= selectedDay.projected ? " ✓ Acima da meta!" : ""}
-                  </p>
-                )}
+                {realAmount && (() => {
+                  const base = selectedDay.goalAmount ?? selectedDay.projected;
+                  const pct = base > 0 ? Math.round((Number(realAmount) / base) * 100) : null;
+                  return pct !== null ? (
+                    <p className={cn(
+                      "text-xs font-medium",
+                      pct >= 95 ? "text-emerald-400" : pct >= 75 ? "text-amber-400" : "text-rose-400"
+                    )}>
+                      Acurácia vs {selectedDay.goalAmount !== null ? "meta" : "projeção"}: {pct}%
+                      {Number(realAmount) >= base ? " ✓ Acima da meta!" : ""}
+                    </p>
+                  ) : null;
+                })()}
               </div>
               <div className="space-y-2">
                 <Label className="text-xs">Observação (opcional)</Label>
