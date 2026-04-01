@@ -3,10 +3,13 @@ import multer from "multer";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
+import { fileURLToPath } from "url";
 import fs from "fs";
+
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
+
 import {
   createSalesImport,
   getSalesImports,
@@ -16,6 +19,10 @@ import {
   deleteSalesImport,
   getProductsForLinking,
 } from "../db.sales-import";
+
+// ESM-compatible __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const execFileAsync = promisify(execFile);
 
@@ -41,11 +48,16 @@ salesImportExpressRouter.post(
 
       const caixaPath = files.caixa[0].path;
       const produtosPath = files.produtos[0].path;
-      const pythonScript = path.join(__dirname, "../parse_sales_xls.py");
+      // Em dev: tsx roda a partir de server/routers/ → cwd é a raiz do projeto
+      // Em prod: dist/index.js → cwd também é a raiz do projeto
+      const pythonScript = path.join(process.cwd(), "server/parse_sales_xls.py");
 
       // Executar o parser Python
-      const { stdout, stderr } = await execFileAsync("python3", [pythonScript, caixaPath, produtosPath], {
+      // Usar caminho absoluto e limpar PYTHONPATH para evitar conflito com Python 3.13 do uv
+      const cleanEnv = { ...process.env, PYTHONPATH: "", PYTHONHOME: "" };
+      const { stdout, stderr } = await execFileAsync("/usr/bin/python3.11", [pythonScript, caixaPath, produtosPath], {
         timeout: 30000,
+        env: cleanEnv,
       });
 
       // Limpar arquivos temporários
