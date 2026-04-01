@@ -465,19 +465,49 @@ export async function saveDailyRevenue(
   }
 }
 
-export async function getDailyRevenues(userId: number, year: number, month: number) {
+export async function getDailyRevenues(_userId: number, year: number, month: number) {
   const db = await getDb();
   if (!db) return [];
   const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
   const daysInMonth = new Date(year, month, 0).getDate();
   const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+  // Não filtra por userId: dados são compartilhados entre todos os usuários
   return db.select().from(finDailyRevenue)
     .where(and(
-      eq(finDailyRevenue.userId, userId),
       gte(finDailyRevenue.revenueDate, dateFrom),
       lte(finDailyRevenue.revenueDate, dateTo),
     ))
     .orderBy(finDailyRevenue.revenueDate);
+}
+
+// Apagar faturamento real de uma data específica
+export async function deleteRealRevenue(revenueDate: string): Promise<{ deleted: number }> {
+  const db = await getDb();
+  if (!db) return { deleted: 0 };
+  const result = await db.delete(finDailyRevenue)
+    .where(eq(finDailyRevenue.revenueDate, revenueDate));
+  return { deleted: (result as unknown as { rowsAffected?: number }).rowsAffected ?? 1 };
+}
+
+// Apagar todos os faturamentos reais de um mês
+export async function clearMonthRealRevenues(year: number, month: number): Promise<{ deleted: number }> {
+  const db = await getDb();
+  if (!db) return { deleted: 0 };
+  const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+  const rows = await db.select({ id: finDailyRevenue.id }).from(finDailyRevenue)
+    .where(and(
+      gte(finDailyRevenue.revenueDate, dateFrom),
+      lte(finDailyRevenue.revenueDate, dateTo),
+    ));
+  if (rows.length === 0) return { deleted: 0 };
+  await db.delete(finDailyRevenue)
+    .where(and(
+      gte(finDailyRevenue.revenueDate, dateFrom),
+      lte(finDailyRevenue.revenueDate, dateTo),
+    ));
+  return { deleted: rows.length };
 }
 
 // Histórico de acurácia: compara faturamento real vs projetado por mês
@@ -528,10 +558,9 @@ export async function getAccuracyHistory(
       else totalProjected += avgWeekday;
     }
 
-    // Buscar faturamento real do mês
+    // Buscar faturamento real do mês (compartilhado entre todos os usuários)
     const realRows = await db.select().from(finDailyRevenue)
       .where(and(
-        eq(finDailyRevenue.userId, userId),
         gte(finDailyRevenue.revenueDate, dateFrom),
         lte(finDailyRevenue.revenueDate, dateTo),
       ));

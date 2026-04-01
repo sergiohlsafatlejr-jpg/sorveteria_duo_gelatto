@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import {
   Sun, Cloud, CloudRain, CloudLightning, HelpCircle,
   TrendingUp, CalendarDays, DollarSign, Umbrella, Settings2,
-  ChevronLeft, ChevronRight, CheckCircle2, BarChart3, CopyPlus, Square, CheckSquare, Target,
+  ChevronLeft, ChevronRight, CheckCircle2, BarChart3, CopyPlus, Square, CheckSquare, Target, Trash2, AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -203,6 +203,29 @@ export default function FinRevenueForecast() {
     onError: (e) => toast.error(e.message),
   });
 
+  const deleteRealMut = trpc.fin.forecastCalendar.deleteRealRevenue.useMutation({
+    onSuccess: () => {
+      utils.fin.forecastCalendar.getRealRevenues.invalidate();
+      utils.fin.forecastCalendar.getAccuracyHistory.invalidate();
+      toast.success("Valor real removido!");
+      setModalOpen(false);
+      setRealAmount("");
+      setRealNote("");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const clearMonthMut = trpc.fin.forecastCalendar.clearMonthRealRevenues.useMutation({
+    onSuccess: (r: { deleted: number }) => {
+      utils.fin.forecastCalendar.getRealRevenues.invalidate();
+      utils.fin.forecastCalendar.getAccuracyHistory.invalidate();
+      toast.success(`${r.deleted} valor(es) real(is) removido(s)!`);
+      setShowClearConfirm(false);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   // Mapa de faturamento real por data
   const realMap = useMemo(() => {
     const m = new Map<string, number>();
@@ -320,7 +343,17 @@ export default function FinRevenueForecast() {
               <BarChart3 className="h-3.5 w-3.5" />
               Acurácia
             </Button>
-            <Button
+            {totalReal > 0 && (
+              <Button
+                variant="outline" size="sm"
+                onClick={() => setShowClearConfirm(true)}
+                className="gap-2 h-8 text-xs border-rose-500/50 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Limpar Mês
+              </Button>
+            )}
+          <Button
               variant="outline" size="sm"
               onClick={() => setShowSettings(s => !s)}
               className={cn("gap-2 h-8 text-xs", showSettings && "bg-primary/10 border-primary/40")}
@@ -869,6 +902,17 @@ export default function FinRevenueForecast() {
                 <Button variant="outline" onClick={() => setModalOpen(false)} className="flex-1 h-8 text-xs">
                   Cancelar
                 </Button>
+                {realMap.has(selectedDay.date) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => deleteRealMut.mutate({ revenueDate: selectedDay.date })}
+                    disabled={deleteRealMut.isPending}
+                    className="h-8 text-xs border-rose-500/50 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950 gap-1"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    {deleteRealMut.isPending ? "..." : "Apagar"}
+                  </Button>
+                )}
                 <Button
                   onClick={() => {
                     if (!selectedDay || !realAmount) return;
@@ -886,6 +930,37 @@ export default function FinRevenueForecast() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      {/* Diálogo de confirmação: Limpar Mês */}
+      <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2 text-rose-500">
+              <AlertTriangle className="h-4 w-4" />
+              Limpar Faturamento Real do Mês
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Tem certeza que deseja apagar <strong>todos os {realRevenues.length} valor(es) real(is)</strong> lançados em <strong>{MONTHS[month - 1]} {year}</strong>?
+            </p>
+            <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-lg p-3">
+              Esta ação não pode ser desfeita. Os valores de meta e projeção não serão afetados.
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowClearConfirm(false)} className="flex-1 h-8 text-xs">
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => clearMonthMut.mutate({ year, month })}
+                disabled={clearMonthMut.isPending}
+                className="flex-1 h-8 text-xs bg-rose-500 hover:bg-rose-600 text-white"
+              >
+                {clearMonthMut.isPending ? "Apagando..." : "Apagar Tudo"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </TooltipProvider>

@@ -44,6 +44,8 @@ import {
   upsertFinRevenueForecast,
   saveDailyRevenue,
   getDailyRevenues,
+  deleteRealRevenue,
+  clearMonthRealRevenues,
   getAccuracyHistory,
   getRainAlert,
   getForecastSettings,
@@ -763,6 +765,17 @@ export const finRouter = router({
         month: z.number().int().min(1).max(12),
       }))
       .query(({ ctx, input }) => getDailyRevenues(ctx.user.id, input.year, input.month)),
+    deleteRealRevenue: protectedProcedure
+      .input(z.object({
+        revenueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      }))
+      .mutation(({ input }) => deleteRealRevenue(input.revenueDate)),
+    clearMonthRealRevenues: protectedProcedure
+      .input(z.object({
+        year: z.number().int(),
+        month: z.number().int().min(1).max(12),
+      }))
+      .mutation(({ input }) => clearMonthRealRevenues(input.year, input.month)),
     getAccuracyHistory: protectedProcedure
       .input(z.object({
         avgWeekday: z.number().default(2000),

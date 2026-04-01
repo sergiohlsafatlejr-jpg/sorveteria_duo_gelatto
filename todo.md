@@ -378,3 +378,14 @@
 - [x] Modal mostra Meta do Dia vs Projeção por médias, acurácia calculada vs meta
 - [x] KPI card de Meta do Mês exibido quando meta populada
 - [x] Legenda atualizada com cor de meta
+
+## Compartilhamento de Dados do Calendário entre Usuários (01/04)
+- [x] finDailyRevenue: dados visíveis para todos os usuários (filtro userId removido de getDailyRevenues e getAccuracyHistory)
+- [x] finRevenueForecasts: dados visíveis para todos os usuários
+- [x] forecastSettings: mantido por userId (cada usuário pode ter suas próprias médias)
+
+## Apagar Valores Reais do Calendário (01/04)
+- [x] Endpoint backend: deleteRealRevenue (por data específica)
+- [x] Endpoint backend: clearMonthRealRevenues (apagar todos os reais de um mês)
+- [x] Modal do dia: botão "Apagar" (vermelho) quando já tem valor real lançado
+- [x] Botão "Limpar Mês" no cabeçalho do calendário com diálogo de confirmação
