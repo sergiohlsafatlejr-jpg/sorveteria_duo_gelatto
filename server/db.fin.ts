@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { SQL, and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import {
   FinBank,
   FinBankStatement,
@@ -34,16 +34,16 @@ import {
 import { getDb } from "./db";
 
 // ─── Fin Categories ───────────────────────────────────────────────────────────
-export async function getFinCategories(userId: number): Promise<FinCategory[]> {
+export async function getFinCategories(): Promise<FinCategory[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(finCategories).where(eq(finCategories.userId, userId)).orderBy(finCategories.name);
+  return db.select().from(finCategories).orderBy(finCategories.name);
 }
 export async function createFinCategory(data: InsertFinCategory): Promise<FinCategory[]> {
   const db = await getDb();
   if (!db) return [];
   await db.insert(finCategories).values(data);
-  return db.select().from(finCategories).where(eq(finCategories.userId, data.userId)).orderBy(finCategories.name);
+  return db.select().from(finCategories).orderBy(finCategories.name);
 }
 export async function updateFinCategory(id: number, userId: number, data: { name?: string; type?: "income" | "expense"; color?: string }): Promise<void> {
   const db = await getDb();
@@ -57,16 +57,16 @@ export async function deleteFinCategory(id: number, userId: number): Promise<voi
 }
 
 // ─── Fin Banks ────────────────────────────────────────────────────────────────
-export async function getFinBanks(userId: number): Promise<FinBank[]> {
+export async function getFinBanks(): Promise<FinBank[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(finBanks).where(eq(finBanks.userId, userId)).orderBy(finBanks.name);
+  return db.select().from(finBanks).orderBy(finBanks.name);
 }
 export async function createFinBank(data: InsertFinBank): Promise<FinBank[]> {
   const db = await getDb();
   if (!db) return [];
   await db.insert(finBanks).values(data);
-  return db.select().from(finBanks).where(eq(finBanks.userId, data.userId)).orderBy(finBanks.name);
+  return db.select().from(finBanks).orderBy(finBanks.name);
 }
 export async function updateFinBank(id: number, userId: number, data: Partial<InsertFinBank>): Promise<void> {
   const db = await getDb();
@@ -80,10 +80,10 @@ export async function deleteFinBank(id: number, userId: number): Promise<void> {
 }
 
 // ─── Fin Payment Types ────────────────────────────────────────────────────────
-export async function getFinPaymentTypes(userId: number): Promise<FinPaymentType[]> {
+export async function getFinPaymentTypes(): Promise<FinPaymentType[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(finPaymentTypes).where(eq(finPaymentTypes.userId, userId)).orderBy(finPaymentTypes.description);
+  return db.select().from(finPaymentTypes).orderBy(finPaymentTypes.description);
 }
 export async function createFinPaymentType(data: InsertFinPaymentType): Promise<void> {
   const db = await getDb();
@@ -102,10 +102,10 @@ export async function deleteFinPaymentType(id: number, userId: number): Promise<
 }
 
 // ─── Fin Receivable Types ─────────────────────────────────────────────────────
-export async function getFinReceivableTypes(userId: number): Promise<FinReceivableType[]> {
+export async function getFinReceivableTypes(): Promise<FinReceivableType[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(finReceivableTypes).where(eq(finReceivableTypes.userId, userId)).orderBy(finReceivableTypes.description);
+  return db.select().from(finReceivableTypes).orderBy(finReceivableTypes.description);
 }
 export async function createFinReceivableType(data: InsertFinReceivableType): Promise<void> {
   const db = await getDb();
@@ -119,10 +119,10 @@ export async function deleteFinReceivableType(id: number, userId: number): Promi
 }
 
 // ─── Fin Costs ────────────────────────────────────────────────────────────────
-export async function getFinCosts(userId: number): Promise<FinCost[]> {
+export async function getFinCosts(): Promise<FinCost[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(finCosts).where(eq(finCosts.userId, userId)).orderBy(finCosts.description);
+  return db.select().from(finCosts).orderBy(finCosts.description);
 }
 export async function createFinCost(data: InsertFinCost): Promise<void> {
   const db = await getDb();
@@ -141,13 +141,13 @@ export async function deleteFinCost(id: number, userId: number): Promise<void> {
 }
 
 // ─── Fin Transactions ─────────────────────────────────────────────────────────
-export async function getFinTransactions(userId: number, filters?: {
+export async function getFinTransactions(_userId: number, filters?: {
   categoryId?: number; bankId?: number; isPaid?: boolean;
   dateFrom?: Date; dateTo?: Date;
 }): Promise<FinTransaction[]> {
   const db = await getDb();
   if (!db) return [];
-  const conditions: ReturnType<typeof eq>[] = [eq(finTransactions.userId, userId)];
+  const conditions: SQL[] = [];
   if (filters?.categoryId) conditions.push(eq(finTransactions.categoryId, filters.categoryId));
   if (filters?.bankId) conditions.push(eq(finTransactions.bankId, filters.bankId));
   if (filters?.isPaid !== undefined) conditions.push(eq(finTransactions.isPaid, filters.isPaid));
@@ -176,11 +176,11 @@ export async function deleteFinTransaction(id: number, userId: number): Promise<
 }
 
 // Busca transações vinculadas a um custo específico
-export async function getTransactionsByCost(costId: number, userId: number): Promise<FinTransaction[]> {
+export async function getTransactionsByCost(costId: number, _userId?: number): Promise<FinTransaction[]> {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(finTransactions)
-    .where(and(eq(finTransactions.costId, costId), eq(finTransactions.userId, userId)))
+    .where(eq(finTransactions.costId, costId))
     .orderBy(desc(finTransactions.dueDate));
 }
 
@@ -203,22 +203,22 @@ export async function unlinkTransactionFromCost(transactionId: number, userId: n
 }
 
 // Busca transações sem custo vinculado (disponíveis para vincular)
-export async function getUnlinkedTransactions(userId: number): Promise<FinTransaction[]> {
+export async function getUnlinkedTransactions(_userId?: number): Promise<FinTransaction[]> {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(finTransactions)
-    .where(and(eq(finTransactions.userId, userId), isNull(finTransactions.costId)))
+    .where(isNull(finTransactions.costId))
     .orderBy(desc(finTransactions.dueDate))
     .limit(100);
 }
 
 // ─── Fin Receivables ──────────────────────────────────────────────────────────
-export async function getFinReceivables(userId: number, filters?: {
+export async function getFinReceivables(_userId: number, filters?: {
   typeId?: number; isReceived?: boolean; dateFrom?: Date; dateTo?: Date;
 }): Promise<FinReceivable[]> {
   const db = await getDb();
   if (!db) return [];
-  const conditions: ReturnType<typeof eq>[] = [eq(finReceivables.userId, userId)];
+  const conditions: SQL[] = [];
   if (filters?.typeId) conditions.push(eq(finReceivables.typeId, filters.typeId));
   if (filters?.isReceived !== undefined) conditions.push(eq(finReceivables.isReceived, filters.isReceived));
   if (filters?.dateFrom) conditions.push(gte(finReceivables.dueDate, filters.dateFrom));
@@ -242,12 +242,12 @@ export async function deleteFinReceivable(id: number, userId: number): Promise<v
 }
 
 // ─── Fin Bank Statements ──────────────────────────────────────────────────────
-export async function getFinBankStatements(userId: number, filters?: {
+export async function getFinBankStatements(_userId: number, filters?: {
   bankId?: number; categoryId?: number; dateFrom?: Date; dateTo?: Date;
 }): Promise<FinBankStatement[]> {
   const db = await getDb();
   if (!db) return [];
-  const conditions: ReturnType<typeof eq>[] = [eq(finBankStatements.userId, userId)];
+  const conditions: SQL[] = [];
   if (filters?.bankId) conditions.push(eq(finBankStatements.bankId, filters.bankId));
   if (filters?.categoryId) conditions.push(eq(finBankStatements.categoryId, filters.categoryId));
   if (filters?.dateFrom) conditions.push(gte(finBankStatements.date, filters.dateFrom));
@@ -277,12 +277,12 @@ export async function deleteFinBankStatement(id: number, userId: number): Promis
 }
 
 // ─── Fin Revenue Forecasts ────────────────────────────────────────────────────
-export async function getFinRevenueForecasts(userId: number, monthStart: string, monthEnd: string): Promise<FinRevenueForecast[]> {
+export async function getFinRevenueForecasts(_userId: number, monthStart: string, monthEnd: string): Promise<FinRevenueForecast[]> {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(finRevenueForecasts)
     .where(and(
-      eq(finRevenueForecasts.userId, userId),
+
       gte(finRevenueForecasts.forecastDate, monthStart),
       lte(finRevenueForecasts.forecastDate, monthEnd),
     ))
@@ -310,7 +310,7 @@ export async function deleteFinRevenueForecast(id: number, userId: number): Prom
 }
 
 // ─── Fin Dashboard KPIs ───────────────────────────────────────────────────────
-export async function getFinDashboardKPIs(userId: number) {
+export async function getFinDashboardKPIs(_userId: number) {
   const db = await getDb();
   if (!db) return null;
   const now = new Date();
@@ -319,9 +319,9 @@ export async function getFinDashboardKPIs(userId: number) {
   const next7 = new Date(today); next7.setDate(today.getDate() + 7);
 
   const [allTransactions, allReceivables, allBanks] = await Promise.all([
-    db.select().from(finTransactions).where(eq(finTransactions.userId, userId)),
-    db.select().from(finReceivables).where(eq(finReceivables.userId, userId)),
-    db.select().from(finBanks).where(eq(finBanks.userId, userId)),
+    db.select().from(finTransactions),
+    db.select().from(finReceivables),
+    db.select().from(finBanks),
   ]);
 
   const totalPayable = allTransactions.filter(t => !t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
@@ -385,7 +385,7 @@ export interface CashflowMonth {
 }
 
 export async function getCashflowMonthly(
-  userId: number,
+  _userId: number,
   monthsBack = 3,
   monthsAhead = 6,
 ): Promise<CashflowMonth[]> {
@@ -393,8 +393,8 @@ export async function getCashflowMonthly(
   if (!db) return [];
 
   const [allTransactions, allReceivables] = await Promise.all([
-    db.select().from(finTransactions).where(eq(finTransactions.userId, userId)),
-    db.select().from(finReceivables).where(eq(finReceivables.userId, userId)),
+    db.select().from(finTransactions),
+    db.select().from(finReceivables),
   ]);
 
   const now = new Date();

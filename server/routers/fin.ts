@@ -62,7 +62,7 @@ export const finRouter = router({
 
   // ─── Categories ────────────────────────────────────────────────────────────
   categories: router({
-    list: protectedProcedure.query(({ ctx }) => getFinCategories(ctx.user.id)),
+    list: protectedProcedure.query(() => getFinCategories()),
     create: protectedProcedure
       .input(z.object({
         name: z.string().min(1),
@@ -97,7 +97,7 @@ export const finRouter = router({
 
   // ─── Banks ─────────────────────────────────────────────────────────────────
   banks: router({
-    list: protectedProcedure.query(({ ctx }) => getFinBanks(ctx.user.id)),
+    list: protectedProcedure.query(() => getFinBanks()),
     create: protectedProcedure
       .input(z.object({
         name: z.string().min(1),
@@ -134,7 +134,7 @@ export const finRouter = router({
 
   // ─── Payment Types ─────────────────────────────────────────────────────────
   paymentTypes: router({
-    list: protectedProcedure.query(({ ctx }) => getFinPaymentTypes(ctx.user.id)),
+    list: protectedProcedure.query(() => getFinPaymentTypes()),
     create: protectedProcedure
       .input(z.object({
         description: z.string().min(1),
@@ -162,7 +162,7 @@ export const finRouter = router({
 
   // ─── Receivable Types ──────────────────────────────────────────────────────
   receivableTypes: router({
-    list: protectedProcedure.query(({ ctx }) => getFinReceivableTypes(ctx.user.id)),
+    list: protectedProcedure.query(() => getFinReceivableTypes()),
     create: protectedProcedure
       .input(z.object({ description: z.string().min(1) }))
       .mutation(({ ctx, input }) =>
@@ -175,7 +175,7 @@ export const finRouter = router({
 
   // ─── Costs ─────────────────────────────────────────────────────────────────
   costs: router({
-    list: protectedProcedure.query(({ ctx }) => getFinCosts(ctx.user.id)),
+    list: protectedProcedure.query(() => getFinCosts()),
     create: protectedProcedure
       .input(z.object({
         name: z.string().min(1),

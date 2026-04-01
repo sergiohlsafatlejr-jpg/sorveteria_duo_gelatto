@@ -337,3 +337,7 @@
 - [x] Selecionador de itens na Previsão de Faturamento com botão "Duplicar para próximo mês"
 - [x] Endpoint backend: fin.transactions.duplicateToNextMonth
 - [x] Endpoint backend: fin.forecastCalendar.duplicateDaysToNextMonth
+
+## Bug Acesso Financeiro Usuário Clarissa (01/04)
+- [x] Investigar por que Clarissa não vê dados de Contas a Pagar
+- [x] Corrigir: dados financeiros agora são compartilhados por empresa (sem filtro por userId nas consultas)
