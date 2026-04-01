@@ -349,3 +349,9 @@
 - [x] Tela FinGoals: total contas a pagar + tabela de cenários editáveis
 - [x] Cálculo automático: faturamento necessário para cobrir contas + salário
 - [x] Rota /fin/goals no App.tsx e link no menu Financeiro
+
+## Popular Previsão de Faturamento a partir da Meta (01/04)
+- [x] Analisar como finDailyRevenue e forecastSettings armazenam dados
+- [x] Endpoint backend: populateForecastFromGoal distribui faturamento pelos dias com pesos
+- [x] Botão na tela Meta de Gerência: "Popular Previsão" por cenário com diálogo de confirmação
+- [x] Confirmação antes de sobrescrever dados existentes na previsão

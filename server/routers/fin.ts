@@ -56,6 +56,7 @@ import {
   createFinGoalExtraCost,
   deleteFinGoalExtraCost,
   getFinGoalsMonthSummary,
+  populateForecastFromGoal,
 } from "../db.fin";
 import { protectedProcedure, router } from "../_core/trpc";
 import { finDailyRevenue } from "../../drizzle/schema";
@@ -907,6 +908,16 @@ export const finRouter = router({
     deleteExtraCost: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteFinGoalExtraCost(input.id)),
+    // Populate forecast calendar from goal target
+    populateForecast: protectedProcedure
+      .input(z.object({
+        month: z.string().regex(/^\d{4}-\d{2}$/),
+        targetRevenue: z.number().min(0),
+        overwrite: z.boolean().default(false),
+      }))
+      .mutation(({ ctx, input }) =>
+        populateForecastFromGoal(ctx.user.id, input.month, input.targetRevenue, input.overwrite)
+      ),
   }),
 
   // ─── Cashflow Monthlyy ────────────────────────────────────────────────────────────────────────────

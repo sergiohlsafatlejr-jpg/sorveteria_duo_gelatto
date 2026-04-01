@@ -7,8 +7,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import {
   ArrowLeft, Target, Plus, Trash2, Edit2, Check, X, TrendingUp,
-  DollarSign, AlertCircle, CheckCircle2, Calculator
+  DollarSign, AlertCircle, CheckCircle2, Calculator, CalendarDays
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const fmt = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -64,6 +74,18 @@ export default function FinGoals() {
 
   const [addingExtra, setAddingExtra] = useState(false);
   const [newExtra, setNewExtra] = useState({ description: "", amount: "" });
+
+  // ── Populate forecast state ───────────────────────────────────────────────────
+  const [populateConfirm, setPopulateConfirm] = useState<{ goalId: number; label: string; revenue: number } | null>(null);
+  const [overwrite, setOverwrite] = useState(false);
+
+  const populateForecast = trpc.fin.goals.populateForecast.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Previsão populada! ${result.populated} dia(s) preenchido(s)${result.skipped > 0 ? `, ${result.skipped} ignorado(s)` : ""}.`);
+      setPopulateConfirm(null);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   // ── Computed ──────────────────────────────────────────────────────────────────
   const totalFixed = (summary?.totalPayables ?? 0) + (summary?.totalExtraCosts ?? 0);
@@ -337,7 +359,13 @@ export default function FinGoals() {
                             </p>
                           </div>
                           {/* Actions */}
-                          <div className="flex gap-1 md:justify-end">
+                          <div className="flex gap-1 md:justify-end flex-wrap">
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                              onClick={() => { setPopulateConfirm({ goalId: g.id, label: g.label, revenue: g.revenue }); setOverwrite(false); }}
+                              title="Popular Previsão de Faturamento com este cenário">
+                              <CalendarDays className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">Popular Previsão</span>
+                            </Button>
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(g)}>
                               <Edit2 className="h-3.5 w-3.5" />
                             </Button>
@@ -418,6 +446,56 @@ export default function FinGoals() {
           </Card>
         </div>
       )}
+      {/* Populate forecast confirm dialog */}
+      <AlertDialog open={!!populateConfirm} onOpenChange={(open) => !open && setPopulateConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-primary" />
+              Popular Previsão de Faturamento
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  O cenário <strong>{populateConfirm?.label}</strong> ({fmt(populateConfirm?.revenue ?? 0)}) será distribuído
+                  pelos dias de <strong className="capitalize">{monthLabel(month)}</strong> usando os pesos de
+                  Dia de Semana, Sábado e Domingo/Feriado configurados na Previsão de Faturamento.
+                </p>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={overwrite}
+                    onChange={e => setOverwrite(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className="text-sm">Sobrescrever dias que já têm valor lançado</span>
+                </label>
+                {!overwrite && (
+                  <p className="text-xs text-muted-foreground">
+                    Dias com faturamento real já lançado serão ignorados.
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!populateConfirm) return;
+                populateForecast.mutate({
+                  month,
+                  targetRevenue: populateConfirm.revenue,
+                  overwrite,
+                });
+              }}
+              disabled={populateForecast.isPending}
+            >
+              {populateForecast.isPending ? "Populando..." : "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

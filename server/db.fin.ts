@@ -759,3 +759,73 @@ export async function getFinGoalsMonthSummary(month: string): Promise<{
 
   return { totalPayables, totalPaid, totalPending, totalExtraCosts };
 }
+
+/**
+ * Distributes a target revenue across all days of a month using the
+ * weekday/saturday/sunday weights from forecastSettings.
+ * Saves each day as a finDailyRevenue entry (upsert).
+ */
+export async function populateForecastFromGoal(
+  userId: number,
+  month: string,       // "YYYY-MM"
+  targetRevenue: number,
+  overwrite: boolean,  // if false, skip days that already have a value
+): Promise<{ populated: number; skipped: number }> {
+  const db = await getDb();
+  if (!db) return { populated: 0, skipped: 0 };
+
+  const [year, mon] = month.split("-").map(Number);
+  const daysInMonth = new Date(year, mon, 0).getDate();
+
+  // Load forecast settings for weights
+  const settingsRows = await db.select().from(forecastSettings)
+    .where(eq(forecastSettings.userId, userId)).limit(1);
+  const settings = settingsRows[0] ?? {
+    avgWeekday: 2000,
+    avgSaturday: 5300,
+    avgSundayHoliday: 8300,
+  };
+  const wWeekday = Number(settings.avgWeekday);
+  const wSaturday = Number(settings.avgSaturday);
+  const wSunday = Number(settings.avgSundayHoliday);
+
+  // Build day list with weights
+  const days: { date: string; weight: number }[] = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dt = new Date(year, mon - 1, d);
+    const dow = dt.getDay(); // 0=Sun, 6=Sat
+    const weight = dow === 0 ? wSunday : dow === 6 ? wSaturday : wWeekday;
+    const dateStr = `${year}-${String(mon).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    days.push({ date: dateStr, weight });
+  }
+
+  const totalWeight = days.reduce((s, d) => s + d.weight, 0);
+  if (totalWeight === 0) return { populated: 0, skipped: 0 };
+
+  // Load existing entries for this month
+  const dateFrom = `${year}-${String(mon).padStart(2, "0")}-01`;
+  const dateTo = `${year}-${String(mon).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+  const existing = await db.select({ revenueDate: finDailyRevenue.revenueDate })
+    .from(finDailyRevenue)
+    .where(and(
+      eq(finDailyRevenue.userId, userId),
+      gte(finDailyRevenue.revenueDate, dateFrom),
+      lte(finDailyRevenue.revenueDate, dateTo),
+    ));
+  const existingDates = new Set(existing.map(r => r.revenueDate));
+
+  let populated = 0;
+  let skipped = 0;
+
+  for (const day of days) {
+    if (!overwrite && existingDates.has(day.date)) {
+      skipped++;
+      continue;
+    }
+    const amount = Math.round((day.weight / totalWeight) * targetRevenue * 100) / 100;
+    await saveDailyRevenue(userId, day.date, amount, "Meta de Gerência");
+    populated++;
+  }
+
+  return { populated, skipped };
+}
