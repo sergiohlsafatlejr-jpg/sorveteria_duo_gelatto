@@ -389,3 +389,21 @@
 - [x] Endpoint backend: clearMonthRealRevenues (apagar todos os reais de um mês)
 - [x] Modal do dia: botão "Apagar" (vermelho) quando já tem valor real lançado
 - [x] Botão "Limpar Mês" no cabeçalho do calendário com diálogo de confirmação
+
+## Importação de Vendas via XLS + Vinculação com Estoque (01/04)
+- [x] Schema: campo externalCode em products (código PDV externo)
+- [x] Schema: tabela sales_imports (cabeçalho da importação: mês, status, totais)
+- [x] Schema: tabela sales_import_items (itens da importação: produto, qtd, valor, status de vínculo)
+- [x] Schema: tabela sales_import_payments (formas de pagamento da importação)
+- [x] Migração: pnpm db:push executada com sucesso
+- [x] Backend: script Python parse_sales_xls.py (lê caixa e produtos XLS, 210 produtos, 3200 transações)
+- [x] Backend: endpoint REST /api/sales-import/upload (multer + python)
+- [x] Backend: endpoints tRPC: create, list, detail, linkItem, confirm, delete, getProductsForLinking
+- [x] Backend: funções db.sales-import.ts com fuzzy match e desconto de estoque na confirmação
+- [x] Frontend: tela SalesImport com upload drag-and-drop de dois arquivos XLS
+- [x] Frontend: revisão de itens com status de vínculo (vinculado/pendente/ignorado)
+- [x] Frontend: vinculação manual via select de produto do estoque
+- [x] Frontend: resumo de pagamentos por forma (dinheiro, crédito, débito, PIX, iFood...)
+- [x] Frontend: botão confirmar importação com desconto automático de estoque
+- [x] Frontend: histórico de importações com status (pendente/confirmada/cancelada)
+- [x] Rota /sales-import e link no menu Vendas

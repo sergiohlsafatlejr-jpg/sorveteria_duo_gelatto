@@ -135,6 +135,7 @@ export const products = mysqlTable("products", {
   purchaseUnit: varchar("purchaseUnit", { length: 20 }).default("un").notNull(),
   conversionFactor: int("conversionFactor").default(1).notNull(),
   supplierCode: varchar("supplierCode", { length: 100 }),
+  externalCode: varchar("externalCode", { length: 100 }), // Código do PDV externo (para vinculação com importação de vendas)
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -532,3 +533,51 @@ export const finGoalExtraCosts = mysqlTable("fin_goal_extra_costs", {
 });
 export type FinGoalExtraCost = typeof finGoalExtraCosts.$inferSelect;
 export type InsertFinGoalExtraCost = typeof finGoalExtraCosts.$inferInsert;
+
+// ─── Sales Imports (Importação de Vendas via XLS) ──────────────────────────────
+export const salesImports = mysqlTable("sales_imports", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  referenceMonth: varchar("referenceMonth", { length: 7 }).notNull(), // "2026-03"
+  status: mysqlEnum("status", ["pending", "confirmed", "cancelled"]).default("pending").notNull(),
+  totalRevenue: decimal("totalRevenue", { precision: 12, scale: 2 }).default("0").notNull(),
+  totalItems: int("totalItems").default(0).notNull(),
+  totalTransactions: int("totalTransactions").default(0).notNull(),
+  linkedItems: int("linkedItems").default(0).notNull(),
+  pendingItems: int("pendingItems").default(0).notNull(),
+  notes: text("notes"),
+  confirmedAt: timestamp("confirmedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type SalesImport = typeof salesImports.$inferSelect;
+export type InsertSalesImport = typeof salesImports.$inferInsert;
+
+// ─── Sales Import Items (Itens de cada importação) ─────────────────────────────
+export const salesImportItems = mysqlTable("sales_import_items", {
+  id: int("id").autoincrement().primaryKey(),
+  importId: int("importId").notNull(),
+  externalCode: varchar("externalCode", { length: 100 }).notNull(), // Código do PDV
+  externalName: varchar("externalName", { length: 255 }).notNull(), // Nome no PDV
+  unit: varchar("unit", { length: 20 }).default("UND").notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
+  unitPrice: decimal("unitPrice", { precision: 10, scale: 2 }).notNull(),
+  totalPrice: decimal("totalPrice", { precision: 12, scale: 2 }).notNull(),
+  productId: int("productId"), // NULL = não vinculado ainda
+  linkStatus: mysqlEnum("linkStatus", ["linked", "pending", "ignored"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SalesImportItem = typeof salesImportItems.$inferSelect;
+export type InsertSalesImportItem = typeof salesImportItems.$inferInsert;
+
+// ─── Sales Import Payments (Formas de pagamento da importação) ────────────────
+export const salesImportPayments = mysqlTable("sales_import_payments", {
+  id: int("id").autoincrement().primaryKey(),
+  importId: int("importId").notNull(),
+  paymentMethod: varchar("paymentMethod", { length: 50 }).notNull(), // "C. DEBITO", "PIX", etc.
+  totalAmount: decimal("totalAmount", { precision: 12, scale: 2 }).notNull(),
+  transactionCount: int("transactionCount").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SalesImportPayment = typeof salesImportPayments.$inferSelect;
+export type InsertSalesImportPayment = typeof salesImportPayments.$inferInsert;

@@ -35,6 +35,7 @@ import FinMonthlyComparison from "./pages/fin/FinMonthlyComparison";
 import WhatsApp from "./pages/WhatsApp";
 import InstagramPage from "./pages/Instagram";
 import ProductsRegister from "./pages/ProductsRegister";
+import SalesImport from "./pages/SalesImport";
 
 function Router() {
   return (
@@ -70,6 +71,7 @@ function Router() {
       <Route path="/whatsapp" component={WhatsApp} />
       <Route path="/instagram" component={InstagramPage} />
       <Route path="/products-register" component={ProductsRegister} />
+      <Route path="/sales-import" component={SalesImport} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

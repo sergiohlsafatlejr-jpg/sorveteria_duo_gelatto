@@ -31,6 +31,7 @@ import { trpc } from "@/lib/trpc";
 import {
   Activity,
   BarChart2,
+  FileSpreadsheet,
   BarChart3,
   Bell,
   BookOpen,
@@ -99,6 +100,7 @@ const menuGroups: MenuGroup[] = [
     label: "Vendas",
     items: [
       { icon: ShoppingCart, label: "Vendas", path: "/sales" },
+      { icon: FileSpreadsheet, label: "Importação de Vendas", path: "/sales-import" },
       { icon: Bell, label: "Notificações", path: "/notifications" },
     ],
   },
