@@ -57,6 +57,7 @@ import {
   deleteFinGoalExtraCost,
   getFinGoalsMonthSummary,
   populateForecastFromGoal,
+  getMonthlyComparison,
 } from "../db.fin";
 import { protectedProcedure, router } from "../_core/trpc";
 import { finDailyRevenue } from "../../drizzle/schema";
@@ -918,6 +919,24 @@ export const finRouter = router({
       .mutation(({ ctx, input }) =>
         populateForecastFromGoal(ctx.user.id, input.month, input.targetRevenue, input.overwrite)
       ),
+  }),
+
+  // ─── Monthly Comparison ─────────────────────────────────────────────────────
+  monthlyComparison: router({
+    compare: protectedProcedure
+      .input(z.object({
+        month1: z.string().regex(/^\d{4}-\d{2}$/),
+        month2: z.string().regex(/^\d{4}-\d{2}$/),
+      }))
+      .query(({ input }) => {
+        const [y1, m1] = input.month1.split("-").map(Number);
+        const [y2, m2] = input.month2.split("-").map(Number);
+        const month1From = new Date(y1, m1 - 1, 1, 12, 0, 0);
+        const month1To = new Date(y1, m1, 0, 23, 59, 59);
+        const month2From = new Date(y2, m2 - 1, 1, 12, 0, 0);
+        const month2To = new Date(y2, m2, 0, 23, 59, 59);
+        return getMonthlyComparison(month1From, month1To, month2From, month2To);
+      }),
   }),
 
   // ─── Cashflow Monthlyy ────────────────────────────────────────────────────────────────────────────

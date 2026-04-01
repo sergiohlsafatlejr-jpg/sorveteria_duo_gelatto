@@ -1,7 +1,6 @@
 import { useState } from "react";
 import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -37,54 +36,75 @@ export default function FinDRE() {
 
   const { data: transactions = [] } = trpc.fin.transactions.list.useQuery({ dateFrom, dateTo });
   const { data: receivables = [] } = trpc.fin.receivables.list.useQuery({ dateFrom, dateTo });
-  const { data: costs = [] } = trpc.fin.costs.list.useQuery();
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
 
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
 
-  // Revenue
-  const totalRevenue = receivables.filter(r => r.isReceived).reduce((s, r) => s + Number(r.amount), 0);
-  const pendingRevenue = receivables.filter(r => !r.isReceived).reduce((s, r) => s + Number(r.amount), 0);
+  // ── Receitas ──────────────────────────────────────────────────────────────
+  const totalRevenue = receivables
+    .filter(r => r.isReceived)
+    .reduce((s, r) => s + Number(r.amount), 0);
+  const pendingRevenue = receivables
+    .filter(r => !r.isReceived)
+    .reduce((s, r) => s + Number(r.amount), 0);
 
-  // Expenses by category
-  const expensesByCategory = new Map<string, number>();
+  // ── Despesas (somente Contas a Pagar do período) ──────────────────────────
+  // Agrupadas por categoria para exibição detalhada
+  const expensesByCategory = new Map<string, { paid: number; pending: number }>();
   transactions.forEach(t => {
-    const cat = t.categoryId ? (categoryMap.get(t.categoryId) ?? "Outros") : "Sem categoria";
-    expensesByCategory.set(cat, (expensesByCategory.get(cat) ?? 0) + Number(t.amount));
+    const cat = t.categoryId
+      ? (categoryMap.get(t.categoryId) ?? "Outros")
+      : "Sem categoria";
+    const current = expensesByCategory.get(cat) ?? { paid: 0, pending: 0 };
+    if (t.isPaid) {
+      current.paid += Number(t.amount);
+    } else {
+      current.pending += Number(t.amount);
+    }
+    expensesByCategory.set(cat, current);
   });
 
-  const totalExpensesPaid = transactions.filter(t => t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
-  const totalExpensesPending = transactions.filter(t => !t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
+  const totalExpensesPaid = transactions
+    .filter(t => t.isPaid)
+    .reduce((s, t) => s + Number(t.amount), 0);
+  const totalExpensesPending = transactions
+    .filter(t => !t.isPaid)
+    .reduce((s, t) => s + Number(t.amount), 0);
   const totalExpenses = totalExpensesPaid + totalExpensesPending;
 
-  // Fixed and variable costs
-  const totalFixedCosts = costs.filter(c => c.type === "fixed").reduce((s, c) => s + Number(c.value), 0);
-  const totalVariableCosts = costs.filter(c => c.type === "variable").reduce((s, c) => s + Number(c.value), 0);
-
-  // EBITDA and results
+  // ── Cálculos do DRE ───────────────────────────────────────────────────────
+  // Lucro Bruto = Receitas Recebidas - Despesas Pagas
   const grossProfit = totalRevenue - totalExpensesPaid;
-  const ebitda = grossProfit - totalFixedCosts;
-  const netResult = ebitda - totalVariableCosts;
-  const margin = totalRevenue > 0 ? (netResult / totalRevenue) * 100 : 0;
+  // Resultado Líquido = Receita Total (recebida + pendente) - Despesas Totais
+  const netResult = (totalRevenue + pendingRevenue) - totalExpenses;
+  const margin = (totalRevenue + pendingRevenue) > 0
+    ? (netResult / (totalRevenue + pendingRevenue)) * 100
+    : 0;
+
+  // ── Linhas do DRE ─────────────────────────────────────────────────────────
+  const categoryRows: DRERow[] = Array.from(expensesByCategory.entries()).flatMap(([cat, vals]) => {
+    const rows: DRERow[] = [
+      { label: cat, value: vals.paid + vals.pending, indent: 2 },
+    ];
+    if (vals.paid > 0 && vals.pending > 0) {
+      rows.push({ label: `${cat} — Pago`, value: vals.paid, indent: 3 });
+      rows.push({ label: `${cat} — Pendente`, value: vals.pending, indent: 3 });
+    }
+    return rows;
+  });
 
   const dreRows: DRERow[] = [
     { label: "RECEITA BRUTA", value: totalRevenue + pendingRevenue, bold: true, positive: true },
     { label: "Receitas Recebidas", value: totalRevenue, indent: 1, positive: true },
     { label: "Receitas Pendentes", value: pendingRevenue, indent: 1 },
     { label: "", value: 0, separator: true },
-    { label: "(-) DEDUÇÕES / DESPESAS", value: totalExpenses, bold: true, negative: true },
+    { label: "(-) DESPESAS TOTAIS", value: totalExpenses, bold: true, negative: true },
     { label: "Despesas Pagas", value: totalExpensesPaid, indent: 1, negative: true },
     { label: "Despesas Pendentes", value: totalExpensesPending, indent: 1 },
-    ...Array.from(expensesByCategory.entries()).map(([cat, val]) => ({
-      label: cat, value: val, indent: 2,
-    })),
+    ...categoryRows,
     { label: "", value: 0, separator: true },
     { label: "LUCRO BRUTO", value: grossProfit, bold: true, positive: grossProfit >= 0, negative: grossProfit < 0 },
-    { label: "", value: 0, separator: true },
-    { label: "(-) CUSTOS FIXOS", value: totalFixedCosts, bold: true, negative: true },
-    { label: "(-) CUSTOS VARIÁVEIS", value: totalVariableCosts, bold: true, negative: true },
-    { label: "", value: 0, separator: true },
-    { label: "EBITDA", value: ebitda, bold: true, positive: ebitda >= 0, negative: ebitda < 0 },
+    { label: "(Receitas recebidas − Despesas pagas)", value: 0, indent: 1 },
     { label: "", value: 0, separator: true },
     { label: "RESULTADO LÍQUIDO", value: netResult, bold: true, positive: netResult >= 0, negative: netResult < 0 },
     { label: `Margem Líquida: ${margin.toFixed(1)}%`, value: netResult, indent: 1, positive: netResult >= 0, negative: netResult < 0 },
@@ -92,7 +112,7 @@ export default function FinDRE() {
 
   return (
     <div className="p-6 space-y-5">
-        <BackButton to="/fin/dashboard" />
+      <BackButton to="/fin/dashboard" />
 
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -169,6 +189,7 @@ export default function FinDRE() {
                   row.bold ? "bg-muted/20" : "hover:bg-muted/10",
                   row.indent === 1 && "pl-8",
                   row.indent === 2 && "pl-12",
+                  row.indent === 3 && "pl-16",
                 )}
               >
                 <span className={cn(

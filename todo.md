@@ -355,3 +355,18 @@
 - [x] Endpoint backend: populateForecastFromGoal distribui faturamento pelos dias com pesos
 - [x] Botão na tela Meta de Gerência: "Popular Previsão" por cenário com diálogo de confirmação
 - [x] Confirmação antes de sobrescrever dados existentes na previsão
+
+## Bug DRE Resultado Líquido (01/04)
+- [x] Investigar por que Custos Fixos (-R$188k) e Variáveis (-R$270k) estão absurdamente altos no DRE
+- [x] Corrigir cálculo do DRE no backend (removida duplicação com fin_costs, usa apenas Contas a Pagar filtradas por mês)
+
+## Registrar Compra no Card do Cliente (01/04)
+- [ ] Botão "Registrar Compra" no card do cliente com valor e forma de pagamento
+- [ ] Gerar pontos automaticamente pela regra ativa ao registrar compra
+- [ ] Mostrar histórico de compras no card do cliente
+
+## Comparativo Mensal por Categoria (01/04)
+- [x] Endpoint backend: comparar dois meses por categoria de custo (fin.monthlyComparison.compare)
+- [x] Tela FinMonthlyComparison: seletor de dois meses, tabela por categoria com variação %
+- [x] Gráfico de barras lado a lado por categoria
+- [x] Rota /fin/monthly-comparison e link no menu Financeiro

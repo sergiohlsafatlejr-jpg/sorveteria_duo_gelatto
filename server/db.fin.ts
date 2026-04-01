@@ -829,3 +829,57 @@ export async function populateForecastFromGoal(
 
   return { populated, skipped };
 }
+
+// ── Monthly Comparison by Category ──────────────────────────────────────────
+export async function getMonthlyComparison(
+  month1From: Date,
+  month1To: Date,
+  month2From: Date,
+  month2To: Date
+): Promise<{
+  categories: string[];
+  month1: Record<string, number>;
+  month2: Record<string, number>;
+  month1Total: number;
+  month2Total: number;
+}> {
+  const db = await getDb();
+  if (!db) return { categories: [], month1: {}, month2: {}, month1Total: 0, month2Total: 0 };
+
+  const [txMonth1, txMonth2, cats] = await Promise.all([
+    db.select().from(finTransactions)
+      .where(and(
+        gte(finTransactions.dueDate, month1From),
+        lte(finTransactions.dueDate, month1To)
+      )),
+    db.select().from(finTransactions)
+      .where(and(
+        gte(finTransactions.dueDate, month2From),
+        lte(finTransactions.dueDate, month2To)
+      )),
+    db.select().from(finCategories),
+  ]);
+
+  const categoryMap = new Map(cats.map(c => [c.id, c.name]));
+
+  const buildMap = (txs: typeof txMonth1) => {
+    const map: Record<string, number> = {};
+    txs.forEach(t => {
+      const cat = t.categoryId
+        ? (categoryMap.get(t.categoryId) ?? "Outros")
+        : "Sem categoria";
+      map[cat] = (map[cat] ?? 0) + Number(t.amount);
+    });
+    return map;
+  };
+
+  const m1 = buildMap(txMonth1);
+  const m2 = buildMap(txMonth2);
+
+  const allCats = Array.from(new Set([...Object.keys(m1), ...Object.keys(m2)])).sort();
+
+  const m1Total = Object.values(m1).reduce((s, v) => s + v, 0);
+  const m2Total = Object.values(m2).reduce((s, v) => s + v, 0);
+
+  return { categories: allCats, month1: m1, month2: m2, month1Total: m1Total, month2Total: m2Total };
+}
