@@ -63,6 +63,7 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
+import { usePermission, ROLE_LABELS } from "@/hooks/usePermission";
 
 // ─── Menu structure ──────────────────────────────────────────────────────────
 type MenuItem = { icon: React.ElementType; label: string; path: string; badgeKey?: string };
@@ -215,6 +216,7 @@ function DashboardLayoutContent({
   setSidebarWidth: (w: number) => void;
 }) {
   const { user, logout } = useAuth();
+  const { canAccess, filterMenu } = usePermission();
   const [location, setLocation] = useLocation();
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -236,10 +238,14 @@ function DashboardLayoutContent({
     totalFinancial: alertCounts?.totalFinancial ?? 0,
   };
 
+  // Filtrar menus por papel do usuário
+  const visibleTopItems = topItems.filter((item) => canAccess(item.path));
+  const visibleMenuGroups = filterMenu(menuGroups);
+
   // Track which groups are open — default open the group containing the current route
   const getDefaultOpenGroups = () => {
     const open: Record<string, boolean> = {};
-    menuGroups.forEach((g) => {
+    visibleMenuGroups.forEach((g) => {
       if (g.items.some((item) => location === item.path || (item.path !== "/" && location.startsWith(item.path)))) {
         open[g.label] = true;
       }
@@ -247,13 +253,6 @@ function DashboardLayoutContent({
     return open;
   };
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(getDefaultOpenGroups);
-
-  const roleLabel: Record<string, string> = {
-    admin: "Administrador",
-    manager: "Gerente",
-    attendant: "Atendente",
-    user: "Usuário",
-  };
 
   useEffect(() => {
     if (isCollapsed) setIsResizing(false);
@@ -317,7 +316,7 @@ function DashboardLayoutContent({
           <SidebarContent className="py-2 overflow-y-auto">
             <SidebarMenu>
               {/* Top-level single items (Dashboard) */}
-              {topItems.map((item) => {
+              {visibleTopItems.map((item) => {
                 const isActive = location === item.path;
                 return (
                   <SidebarMenuItem key={item.path}>
@@ -337,7 +336,7 @@ function DashboardLayoutContent({
               })}
 
               {/* Collapsible groups */}
-              {menuGroups.map((group) => {
+              {visibleMenuGroups.map((group) => {
                 const isGroupActive = group.items.some(
                   (item) => location === item.path || (item.path !== "/" && location.startsWith(item.path))
                 );
@@ -429,7 +428,7 @@ function DashboardLayoutContent({
                         {user?.name ?? "Usuário"}
                       </p>
                       <Badge variant="secondary" className="text-[10px] mt-0.5 h-4 px-1.5">
-                        {roleLabel[user?.role ?? "user"] ?? "Usuário"}
+                        {ROLE_LABELS[user?.role ?? "user"] ?? "Usuário"}
                       </Badge>
                     </div>
                   )}

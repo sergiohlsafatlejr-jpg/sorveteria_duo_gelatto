@@ -407,3 +407,13 @@
 - [x] Frontend: botão confirmar importação com desconto automático de estoque
 - [x] Frontend: histórico de importações com status (pendente/confirmada/cancelada)
 - [x] Rota /sales-import e link no menu Vendas
+
+## Controle de Acesso por Papel - RBAC (01/04)
+- [x] Definir matriz de permissões: admin / gerente / funcionário
+- [x] Criar hook usePermission com canAccess(path) e hasRole(role)
+- [x] Filtrar itens de menu do DashboardLayout por papel do usuário logado
+- [x] Proteger rotas no frontend: redirecionar para /unauthorized se sem permissão
+- [x] Criar página /unauthorized com mensagem amigável e botões de voltar/dashboard
+- [x] Atualizar tela de Usuários: labels corretos (Administrador, Gerente, Funcionário)
+- [x] Descrição de permissões exibida abaixo do badge de papel no card do usuário
+- [x] TypeScript 0 erros

@@ -36,6 +36,8 @@ import WhatsApp from "./pages/WhatsApp";
 import InstagramPage from "./pages/Instagram";
 import ProductsRegister from "./pages/ProductsRegister";
 import SalesImport from "./pages/SalesImport";
+import Unauthorized from "./pages/Unauthorized";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function Router() {
   return (
@@ -44,34 +46,42 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/customers" component={Customers} />
       <Route path="/points" component={Points} />
-      <Route path="/points-rules" component={PointsRules} />
-      <Route path="/products" component={Products} />
       <Route path="/nfe-import" component={NfeImport} />
       <Route path="/sales" component={Sales} />
       <Route path="/finance" component={Finance} />
-      <Route path="/reports" component={Reports} />
-      <Route path="/users" component={Users} />
-      <Route path="/connector" component={Connector} />
-      <Route path="/notifications" component={Notifications} />
-      {/* Finance module routes */}
-      <Route path="/fin/dashboard" component={FinanceDashboard} />
-      <Route path="/fin/payables" component={FinPayables} />
-      <Route path="/fin/receivables" component={FinReceivables} />
-      <Route path="/fin/bank-statements" component={FinBankStatements} />
-      <Route path="/fin/costs" component={FinCosts} />
-      <Route path="/fin/dre" component={FinDRE} />
-      <Route path="/fin/forecast" component={FinRevenueForecast} />
-      <Route path="/fin/settings" component={FinSettings} />
-      <Route path="/fin/categories" component={FinCategories} />
-      <Route path="/fin/banks" component={FinBanks} />
-      <Route path="/fin/costs-register" component={FinCostsRegister} />
-      <Route path="/fin/cashflow" component={FinCashflow} />
-      <Route path="/fin/monthly-comparison" component={FinMonthlyComparison} />
-      <Route path="/fin/goals" component={FinGoals} />
-      <Route path="/whatsapp" component={WhatsApp} />
-      <Route path="/instagram" component={InstagramPage} />
-      <Route path="/products-register" component={ProductsRegister} />
-      <Route path="/sales-import" component={SalesImport} />
+      {/* Rotas protegidas — Estoque (gerente+) */}
+      <Route path="/products-register">{() => <ProtectedRoute path="/products-register"><ProductsRegister /></ProtectedRoute>}</Route>
+      <Route path="/products">{() => <ProtectedRoute path="/products"><Products /></ProtectedRoute>}</Route>
+      <Route path="/reports">{() => <ProtectedRoute path="/reports"><Reports /></ProtectedRoute>}</Route>
+      {/* Pontos — regras e canais (gerente+) */}
+      <Route path="/points-rules">{() => <ProtectedRoute path="/points-rules"><PointsRules /></ProtectedRoute>}</Route>
+      <Route path="/whatsapp">{() => <ProtectedRoute path="/whatsapp"><WhatsApp /></ProtectedRoute>}</Route>
+      <Route path="/instagram">{() => <ProtectedRoute path="/instagram"><InstagramPage /></ProtectedRoute>}</Route>
+      {/* Vendas — importação e notificações (gerente+) */}
+      <Route path="/sales-import">{() => <ProtectedRoute path="/sales-import"><SalesImport /></ProtectedRoute>}</Route>
+      <Route path="/notifications">{() => <ProtectedRoute path="/notifications"><Notifications /></ProtectedRoute>}</Route>
+      {/* Finance module routes — admin only (financeiro sensível) */}
+      <Route path="/fin/dashboard">{() => <ProtectedRoute path="/fin/dashboard"><FinanceDashboard /></ProtectedRoute>}</Route>
+      <Route path="/fin/payables">{() => <ProtectedRoute path="/fin/payables"><FinPayables /></ProtectedRoute>}</Route>
+      <Route path="/fin/receivables">{() => <ProtectedRoute path="/fin/receivables"><FinReceivables /></ProtectedRoute>}</Route>
+      <Route path="/fin/bank-statements">{() => <ProtectedRoute path="/fin/bank-statements"><FinBankStatements /></ProtectedRoute>}</Route>
+      <Route path="/fin/costs">{() => <ProtectedRoute path="/fin/costs"><FinCosts /></ProtectedRoute>}</Route>
+      <Route path="/fin/dre">{() => <ProtectedRoute path="/fin/dre"><FinDRE /></ProtectedRoute>}</Route>
+      <Route path="/fin/categories">{() => <ProtectedRoute path="/fin/categories"><FinCategories /></ProtectedRoute>}</Route>
+      <Route path="/fin/banks">{() => <ProtectedRoute path="/fin/banks"><FinBanks /></ProtectedRoute>}</Route>
+      <Route path="/fin/costs-register">{() => <ProtectedRoute path="/fin/costs-register"><FinCostsRegister /></ProtectedRoute>}</Route>
+      <Route path="/fin/cashflow">{() => <ProtectedRoute path="/fin/cashflow"><FinCashflow /></ProtectedRoute>}</Route>
+      <Route path="/fin/settings">{() => <ProtectedRoute path="/fin/settings"><FinSettings /></ProtectedRoute>}</Route>
+      {/* Finance — gerente+ */}
+      <Route path="/fin/forecast">{() => <ProtectedRoute path="/fin/forecast"><FinRevenueForecast /></ProtectedRoute>}</Route>
+      <Route path="/fin/goals">{() => <ProtectedRoute path="/fin/goals"><FinGoals /></ProtectedRoute>}</Route>
+      <Route path="/fin/monthly-comparison">{() => <ProtectedRoute path="/fin/monthly-comparison"><FinMonthlyComparison /></ProtectedRoute>}</Route>
+      {/* Administração — admin only */}
+      <Route path="/users">{() => <ProtectedRoute path="/users"><Users /></ProtectedRoute>}</Route>
+      <Route path="/connector">{() => <ProtectedRoute path="/connector"><Connector /></ProtectedRoute>}</Route>
+      {/* Acesso negado */}
+      <Route path="/unauthorized" component={Unauthorized} />
+      <Route path="/nfe-import" component={NfeImport} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

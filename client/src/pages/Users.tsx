@@ -29,8 +29,15 @@ import { toast } from "sonner";
 const roleLabels: Record<string, string> = {
   admin: "Administrador",
   manager: "Gerente",
-  attendant: "Atendente",
-  user: "Usuário",
+  attendant: "Funcionário",
+  user: "Funcionário",
+};
+
+const roleDescriptions: Record<string, string> = {
+  admin: "Acesso total ao sistema",
+  manager: "Acesso a vendas, estoque, pontos e previsão financeira",
+  attendant: "Acesso a vendas e cadastro de clientes",
+  user: "Acesso a vendas e cadastro de clientes",
 };
 
 const roleColors: Record<string, string> = {
@@ -152,9 +159,12 @@ export default function Users() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[u.role]}`}>
-                          {roleLabels[u.role]}
-                        </span>
+                        <div className="flex flex-col">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[u.role]}`}>
+                            {roleLabels[u.role]}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground mt-0.5 max-w-[160px]">{roleDescriptions[u.role]}</span>
+                        </div>
                         <div className="flex items-center gap-1.5">
                           <Switch
                             checked={u.active}
@@ -174,8 +184,7 @@ export default function Users() {
                           <SelectContent>
                             <SelectItem value="admin">Administrador</SelectItem>
                             <SelectItem value="manager">Gerente</SelectItem>
-                            <SelectItem value="attendant">Atendente</SelectItem>
-                            <SelectItem value="user">Usuário</SelectItem>
+                            <SelectItem value="attendant">Funcionário</SelectItem>
                           </SelectContent>
                         </Select>
                         <Button
