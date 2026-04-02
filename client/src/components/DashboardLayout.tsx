@@ -102,6 +102,8 @@ const menuGroups: MenuGroup[] = [
     items: [
       { icon: ShoppingCart, label: "Vendas", path: "/sales" },
       { icon: FileSpreadsheet, label: "Importação de Vendas", path: "/sales-import" },
+      { icon: Tag, label: "Mapeamento PDV", path: "/sales/product-mapping" },
+      { icon: BarChart2, label: "Relatório de Vendas", path: "/sales/sales-report" },
       { icon: Bell, label: "Notificações", path: "/notifications" },
     ],
   },

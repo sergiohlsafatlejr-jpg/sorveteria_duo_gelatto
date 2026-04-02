@@ -363,3 +363,177 @@ export async function getProductsForLinking() {
     .where(eq(products.active, true))
     .orderBy(products.name);
 }
+
+// ─── Listar todos os mapeamentos PDV → Estoque ────────────────────────────────
+
+export async function getAllMappings() {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Produtos com externalCode definido (já mapeados)
+  const mapped = await db
+    .select({
+      productId: products.id,
+      productName: products.name,
+      externalCode: products.externalCode,
+      currentStock: products.currentStock,
+      unit: products.unit,
+      active: products.active,
+    })
+    .from(products)
+    .where(eq(products.active, true))
+    .orderBy(products.name);
+
+  // Buscar nomes do PDV para cada externalCode (da tabela sales_import_items)
+  const codesWithNames: Record<string, string> = {};
+  const allCodes = mapped.filter(p => p.externalCode).map(p => p.externalCode as string);
+  if (allCodes.length > 0) {
+    const items = await db
+      .select({ externalCode: salesImportItems.externalCode, externalName: salesImportItems.externalName })
+      .from(salesImportItems)
+      .where(inArray(salesImportItems.externalCode, allCodes));
+    for (const item of items) {
+      if (!codesWithNames[item.externalCode]) {
+        codesWithNames[item.externalCode] = item.externalName;
+      }
+    }
+  }
+
+  return mapped.map(p => ({
+    ...p,
+    externalName: p.externalCode ? (codesWithNames[p.externalCode] ?? null) : null,
+  }));
+}
+
+// ─── Atualizar mapeamento de um produto (externalCode) ────────────────────────
+
+export async function updateProductMapping(productId: number, externalCode: string | null) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+
+  await db.update(products).set({ externalCode }).where(eq(products.id, productId));
+  return { success: true };
+}
+
+// ─── Relatório de vendas por produto (top N por mês) ─────────────────────────
+
+export async function getSalesReport(referenceMonth: string, compareMonth?: string) {
+  const db = await getDb();
+  if (!db) return { current: [], previous: [] };
+
+  // Buscar itens confirmados do mês atual
+  const currentImports = await db
+    .select({ id: salesImports.id })
+    .from(salesImports)
+    .where(and(eq(salesImports.referenceMonth, referenceMonth), eq(salesImports.status, "confirmed")));
+
+  const currentImportIds = currentImports.map((i: { id: number }) => i.id);
+
+  let currentItems: any[] = [];
+  if (currentImportIds.length > 0) {
+    currentItems = await db
+      .select({
+        externalCode: salesImportItems.externalCode,
+        externalName: salesImportItems.externalName,
+        productId: salesImportItems.productId,
+        productName: products.name,
+        totalQuantity: salesImportItems.quantity,
+        totalRevenue: salesImportItems.totalPrice,
+        unitPrice: salesImportItems.unitPrice,
+      })
+      .from(salesImportItems)
+      .leftJoin(products, eq(salesImportItems.productId, products.id))
+      .where(inArray(salesImportItems.importId, currentImportIds));
+  }
+
+  // Agregar por produto
+  const currentAgg: Record<string, { externalCode: string; externalName: string; productName: string | null; totalQuantity: number; totalRevenue: number; unitPrice: number }> = {};
+  for (const item of currentItems) {
+    const key = item.externalCode;
+    if (!currentAgg[key]) {
+      currentAgg[key] = {
+        externalCode: item.externalCode,
+        externalName: item.externalName,
+        productName: item.productName,
+        totalQuantity: 0,
+        totalRevenue: 0,
+        unitPrice: Number(item.unitPrice),
+      };
+    }
+    currentAgg[key].totalQuantity += Number(item.totalQuantity);
+    currentAgg[key].totalRevenue += Number(item.totalRevenue);
+  }
+
+  const currentSorted = Object.values(currentAgg)
+    .sort((a, b) => b.totalRevenue - a.totalRevenue)
+    .slice(0, 20);
+
+  // Mês anterior para comparativo
+  let previousSorted: typeof currentSorted = [];
+  if (compareMonth) {
+    const prevImports = await db
+      .select({ id: salesImports.id })
+      .from(salesImports)
+      .where(and(eq(salesImports.referenceMonth, compareMonth), eq(salesImports.status, "confirmed")));
+
+    const prevImportIds = prevImports.map((i: { id: number }) => i.id);
+    if (prevImportIds.length > 0) {
+      const prevItems = await db
+        .select({
+          externalCode: salesImportItems.externalCode,
+          externalName: salesImportItems.externalName,
+          productId: salesImportItems.productId,
+          productName: products.name,
+          totalQuantity: salesImportItems.quantity,
+          totalRevenue: salesImportItems.totalPrice,
+          unitPrice: salesImportItems.unitPrice,
+        })
+        .from(salesImportItems)
+        .leftJoin(products, eq(salesImportItems.productId, products.id))
+        .where(inArray(salesImportItems.importId, prevImportIds));
+
+      const prevAgg: typeof currentAgg = {};
+      for (const item of prevItems) {
+        const key = item.externalCode;
+        if (!prevAgg[key]) {
+          prevAgg[key] = {
+            externalCode: item.externalCode,
+            externalName: item.externalName,
+            productName: item.productName,
+            totalQuantity: 0,
+            totalRevenue: 0,
+            unitPrice: Number(item.unitPrice),
+          };
+        }
+        prevAgg[key].totalQuantity += Number(item.totalQuantity);
+        prevAgg[key].totalRevenue += Number(item.totalRevenue);
+      }
+      previousSorted = Object.values(prevAgg)
+        .sort((a, b) => b.totalRevenue - a.totalRevenue)
+        .slice(0, 20);
+    }
+  }
+
+  return { current: currentSorted, previous: previousSorted };
+}
+
+// ─── Listar meses com importações confirmadas ─────────────────────────────────
+
+export async function getConfirmedMonths() {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({ referenceMonth: salesImports.referenceMonth })
+    .from(salesImports)
+    .where(eq(salesImports.status, "confirmed"))
+    .orderBy(desc(salesImports.referenceMonth));
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const r of rows) {
+    if (!seen.has(r.referenceMonth)) {
+      seen.add(r.referenceMonth);
+      unique.push(r.referenceMonth);
+    }
+  }
+  return unique;
+}

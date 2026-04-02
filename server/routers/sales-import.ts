@@ -15,6 +15,10 @@ import {
   confirmSalesImport,
   deleteSalesImport,
   getProductsForLinking,
+  getAllMappings,
+  updateProductMapping,
+  getSalesReport,
+  getConfirmedMonths,
 } from "../db.sales-import";
 import { invokeLLM } from "../_core/llm";
 
@@ -431,6 +435,143 @@ Use confiança > 0.7 apenas quando tiver certeza da correspondência.`;
         message: `IA analisou ${pendingItems.length} produtos em ${Math.ceil(pendingItems.length/BATCH_SIZE)} lotes. ${applied.length} vínculos aplicados automaticamente (confiança ≥ 70%). Os demais ficam pendentes para revisão manual.`,
       };
     }),
+
+  // ─── Mapeamento Permanente PDV → Estoque ──────────────────────────────────────
+
+  // Listar todos os mapeamentos
+  getMappings: protectedProcedure.query(async () => {
+    return getAllMappings();
+  }),
+
+  // Atualizar mapeamento de um produto
+  updateMapping: protectedProcedure
+    .input(z.object({
+      productId: z.number(),
+      externalCode: z.string().nullable(),
+    }))
+    .mutation(async ({ input }) => {
+      return updateProductMapping(input.productId, input.externalCode);
+    }),
+
+  // Sugerir mapeamentos com IA para produtos sem externalCode
+  bulkSuggestMappings: protectedProcedure.mutation(async () => {
+    const allProducts = await getAllMappings();
+    const unmapped = allProducts.filter(p => !p.externalCode);
+    if (unmapped.length === 0) {
+      return { suggestions: [], message: "Todos os produtos já possuem mapeamento." };
+    }
+
+    // Buscar todos os códigos PDV conhecidos (de importações passadas)
+    const { getDb } = await import("../db");
+    const { salesImportItems: sii } = await import("../../drizzle/schema");
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const allPdvItems = await db
+      .select({ externalCode: sii.externalCode, externalName: sii.externalName })
+      .from(sii)
+      .groupBy(sii.externalCode, sii.externalName);
+
+    const pdvMap: Record<string, string> = {};
+    for (const item of allPdvItems) {
+      if (!pdvMap[item.externalCode]) pdvMap[item.externalCode] = item.externalName;
+    }
+    const pdvList = Object.entries(pdvMap).map(([code, name]) => `CODE:${code} | ${name}`).join("\n");
+    const stockList = unmapped.map(p => `ID:${p.productId} | ${p.productName}`).join("\n");
+
+    const BATCH_SIZE = 30;
+    const allSuggestions: Array<{ productId: number; externalCode: string | null; confidence: number; reason: string }> = [];
+
+    for (let i = 0; i < unmapped.length; i += BATCH_SIZE) {
+      const batch = unmapped.slice(i, i + BATCH_SIZE);
+      const batchList = batch.map(p => `ID:${p.productId} | ${p.productName}`).join("\n");
+      const prompt = `Você é um especialista em vincular produtos de estoque de sorveteria a códigos de PDV.
+
+Códigos PDV disponíveis:
+${pdvList}
+
+Produtos do ESTOQUE para mapear (lote ${Math.floor(i/BATCH_SIZE)+1}):
+${batchList}
+
+Para cada produto do estoque (ID), encontre o código PDV (CODE) mais adequado.
+Se não houver correspondência razoável, retorne externalCode como null.`;
+
+      try {
+        const response = await invokeLLM({
+          messages: [
+            { role: "system", content: "Você é especialista em correspondência de produtos de sorveteria. Retorne JSON válido." },
+            { role: "user", content: prompt },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "bulk_mapping_suggestions",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: {
+                  suggestions: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        productId: { type: "integer" },
+                        externalCode: { type: ["string", "null"] },
+                        confidence: { type: "number" },
+                        reason: { type: "string" },
+                      },
+                      required: ["productId", "externalCode", "confidence", "reason"],
+                      additionalProperties: false,
+                    },
+                  },
+                },
+                required: ["suggestions"],
+                additionalProperties: false,
+              },
+            },
+          },
+        });
+        const rawContent = response?.choices?.[0]?.message?.content;
+        const content = typeof rawContent === "string" ? rawContent : null;
+        if (content) {
+          const parsed = JSON.parse(content) as { suggestions: Array<{ productId: number; externalCode: string | null; confidence: number; reason: string }> };
+          allSuggestions.push(...parsed.suggestions);
+        }
+      } catch (err) {
+        console.error(`Erro no lote ${i}-${i+BATCH_SIZE}:`, err);
+      }
+    }
+
+    // Aplicar sugestões com confiança >= 0.7
+    let applied = 0;
+    for (const sug of allSuggestions) {
+      if (sug.externalCode && sug.confidence >= 0.7) {
+        await updateProductMapping(sug.productId, sug.externalCode);
+        applied++;
+      }
+    }
+
+    return {
+      suggestions: allSuggestions,
+      applied,
+      total: unmapped.length,
+      message: `IA analisou ${unmapped.length} produtos sem mapeamento. ${applied} mapeamentos aplicados (confiança ≥ 70%).`,
+    };
+  }),
+
+  // ─── Relatório de Vendas por Produto ──────────────────────────────────────────
+
+  getSalesReport: protectedProcedure
+    .input(z.object({
+      referenceMonth: z.string().regex(/^\d{4}-\d{2}$/),
+      compareMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+    }))
+    .query(async ({ input }) => {
+      return getSalesReport(input.referenceMonth, input.compareMonth);
+    }),
+
+  getConfirmedMonths: protectedProcedure.query(async () => {
+    return getConfirmedMonths();
+  }),
 
   // Sugerir vínculos com IA a partir de produtos parseados (sem importId)
   // Usado no ReviewStep antes de salvar no banco

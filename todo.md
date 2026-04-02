@@ -447,3 +447,13 @@
 - [x] Botão "Sugerir com IA" adicionado no ReviewStep (antes de salvar importação)
 - [x] createSalesImport salva externalCode nos produtos vinculados para uso em futuras importações
 - [x] Fuzzy match threshold mantido em 0.75 (itens com score baixo ficam como "pending")
+
+## Tela de Mapeamento PDV → Estoque e Relatório de Vendas (02/04)
+- [x] Backend: endpoint salesImport.getMappings — listar todos os mapeamentos (externalCode + produto)
+- [x] Backend: endpoint salesImport.updateMapping — atualizar/remover mapeamento de um produto
+- [x] Backend: endpoint salesImport.bulkSuggestMappings — IA sugere vínculos para produtos sem externalCode
+- [x] Backend: endpoint salesImport.getSalesReport — top 10 produtos por mês com comparativo
+- [x] Frontend: tela /sales/product-mapping com tabela de mapeamentos, busca, edição inline e botão IA
+- [x] Frontend: tela /sales/sales-report com top 10 produtos, gráfico de barras e comparativo mensal
+- [x] Integrar relatório ao fluxo pós-confirmação de importação (link direto)
+- [x] Registrar rotas no App.tsx e itens no menu lateral
