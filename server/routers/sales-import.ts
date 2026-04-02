@@ -248,6 +248,8 @@ export const salesImportRouter = router({
             quantity: z.number(),
             unit_price: z.number(),
             total_price: z.number(),
+            productId: z.number().nullable().optional(),
+            linkStatus: z.enum(["linked", "pending", "ignored"]).optional(),
           })
         ),
         payments: z.array(
@@ -318,7 +320,7 @@ export const salesImportRouter = router({
     return getProductsForLinking();
   }),
 
-  // Sugerir vínculos com IA (LLM analisa PDV vs estoque)
+  // Sugerir vínculos com IA (LLM analisa PDV vs estoque em lotes)
   suggestLinksWithAI: protectedProcedure
     .input(z.object({ importId: z.number() }))
     .mutation(async ({ input }) => {
@@ -332,7 +334,7 @@ export const salesImportRouter = router({
       );
 
       if (pendingItems.length === 0) {
-        return { suggestions: [], message: "Nenhum item pendente para vincular." };
+        return { suggestions: [], applied: 0, total: 0, message: "Nenhum item pendente para vincular." };
       }
 
       // Montar lista de produtos do estoque para o LLM
@@ -340,96 +342,190 @@ export const salesImportRouter = router({
         .map((p: any) => `ID:${p.id} | ${p.name}`)
         .join("\n");
 
-      // Montar lista de itens PDV pendentes
-      const pdvList = pendingItems
-        .map((item: any) => `ITEM_ID:${item.id} | ${item.externalName}`)
-        .join("\n");
+      // Processar em lotes de 30 para não exceder limite de contexto
+      const BATCH_SIZE = 30;
+      const allSuggestions: Array<{ itemId: number; productId: number | null; confidence: number; reason: string }> = [];
 
-      const prompt = `Você é um especialista em vincular produtos de PDV de sorveteria ao catálogo de estoque.
+      for (let i = 0; i < pendingItems.length; i += BATCH_SIZE) {
+        const batch = pendingItems.slice(i, i + BATCH_SIZE);
+        const pdvList = batch
+          .map((item: any) => `ITEM_ID:${item.id} | ${item.externalName}`)
+          .join("\n");
 
-Produtos do ESTOQUE disponíveis:
+        const prompt = `Você é um especialista em vincular produtos de PDV de sorveteria ao catálogo de estoque.
+
+IMPORTANTE: Os nomes do PDV são nomes comerciais simplificados (ex: "ACAI COM BANANA 1,5L", "BALA", "AGUA MINERAL 500ML").
+Os nomes do estoque são nomes de fornecedor/marca (ex: "Docile Bala de Amoras", "Biomass Granola Super 1 Kg").
+Use o contexto e a categoria para fazer a correspondência correta.
+Se um produto do PDV não tiver correspondência no estoque (ex: serviços, combos, produtos sem estoque), retorne productId como null.
+
+Produtos do ESTOQUE disponíveis (${stockProducts.length} produtos):
 ${stockList}
 
-Produtos do PDV que precisam ser vinculados:
+Produtos do PDV para vincular (lote ${Math.floor(i/BATCH_SIZE)+1}):
 ${pdvList}
 
-Para cada produto do PDV, encontre o produto do ESTOQUE mais similar.
-Se não houver correspondência razoável, retorne productId como null.
+Para cada ITEM_ID do PDV, encontre o produto do ESTOQUE mais adequado.
+Use confiança > 0.7 apenas quando tiver certeza da correspondência.`;
 
-Retorne APENAS um JSON válido no formato:
-{
-  "suggestions": [
-    {
-      "itemId": <ITEM_ID do PDV>,
-      "productId": <ID do estoque ou null>,
-      "confidence": <0.0 a 1.0>,
-      "reason": "<breve justificativa em português>"
-    }
-  ]
-}`;
-
-      const response = await invokeLLM({
-        messages: [
-          { role: "system", content: "Você é um assistente especializado em correspondência de produtos. Responda APENAS com JSON válido, sem markdown, sem explicações extras." },
-          { role: "user", content: prompt },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "product_suggestions",
-            strict: true,
-            schema: {
-              type: "object",
-              properties: {
-                suggestions: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      itemId: { type: "integer" },
-                      productId: { type: ["integer", "null"] },
-                      confidence: { type: "number" },
-                      reason: { type: "string" },
+        try {
+          const response = await invokeLLM({
+            messages: [
+              { role: "system", content: "Você é um especialista em correspondência de produtos de sorveteria. Analise cuidadosamente os nomes e retorne JSON válido." },
+              { role: "user", content: prompt },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "product_suggestions",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    suggestions: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          itemId: { type: "integer" },
+                          productId: { type: ["integer", "null"] },
+                          confidence: { type: "number" },
+                          reason: { type: "string" },
+                        },
+                        required: ["itemId", "productId", "confidence", "reason"],
+                        additionalProperties: false,
+                      },
                     },
-                    required: ["itemId", "productId", "confidence", "reason"],
-                    additionalProperties: false,
                   },
+                  required: ["suggestions"],
+                  additionalProperties: false,
                 },
               },
-              required: ["suggestions"],
-              additionalProperties: false,
             },
-          },
-        },
-      });
+          });
 
-      const rawContent = response?.choices?.[0]?.message?.content;
-      const content = typeof rawContent === "string" ? rawContent : null;
-      if (!content) throw new Error("LLM não retornou resposta");
+          const rawContent = response?.choices?.[0]?.message?.content;
+          const content = typeof rawContent === "string" ? rawContent : null;
+          if (content) {
+            const parsed = JSON.parse(content) as { suggestions: Array<{ itemId: number; productId: number | null; confidence: number; reason: string }> };
+            allSuggestions.push(...parsed.suggestions);
+          }
+        } catch (err) {
+          console.error(`Erro no lote ${i}-${i+BATCH_SIZE}:`, err);
+        }
+      }
 
-      const parsed = JSON.parse(content) as {
-        suggestions: Array<{
-          itemId: number;
-          productId: number | null;
-          confidence: number;
-          reason: string;
-        }>;
-      };
-
-      // Aplicar sugestões com confiança >= 0.6 automaticamente
+      // Aplicar sugestões com confiança >= 0.7 automaticamente
       const applied: number[] = [];
-      for (const sug of parsed.suggestions) {
-        if (sug.productId && sug.confidence >= 0.6) {
-          await linkImportItem(sug.itemId, sug.productId, "linked", false);
+      for (const sug of allSuggestions) {
+        if (sug.productId && sug.confidence >= 0.7) {
+          await linkImportItem(sug.itemId, sug.productId, "linked", true); // salvar externalCode para próximas importações
           applied.push(sug.itemId);
         }
       }
 
       return {
-        suggestions: parsed.suggestions,
+        suggestions: allSuggestions,
         applied: applied.length,
         total: pendingItems.length,
-        message: `IA sugeriu ${parsed.suggestions.length} vínculos, ${applied.length} aplicados automaticamente (confiança ≥ 60%).`,
+        message: `IA analisou ${pendingItems.length} produtos em ${Math.ceil(pendingItems.length/BATCH_SIZE)} lotes. ${applied.length} vínculos aplicados automaticamente (confiança ≥ 70%). Os demais ficam pendentes para revisão manual.`,
+      };
+    }),
+
+  // Sugerir vínculos com IA a partir de produtos parseados (sem importId)
+  // Usado no ReviewStep antes de salvar no banco
+  suggestLinksFromParsed: protectedProcedure
+    .input(z.object({
+      products: z.array(z.object({
+        external_code: z.string(),
+        external_name: z.string(),
+      }))
+    }))
+    .mutation(async ({ input }) => {
+      const stockProducts = await getProductsForLinking();
+      const stockList = stockProducts
+        .map((p: any) => `ID:${p.id} | ${p.name}`)
+        .join("\n");
+
+      const BATCH_SIZE = 30;
+      const allSuggestions: Array<{ externalCode: string; productId: number | null; confidence: number; reason: string }> = [];
+
+      for (let i = 0; i < input.products.length; i += BATCH_SIZE) {
+        const batch = input.products.slice(i, i + BATCH_SIZE);
+        const pdvList = batch
+          .map((item) => `CODE:${item.external_code} | ${item.external_name}`)
+          .join("\n");
+
+        const prompt = `Você é um especialista em vincular produtos de PDV de sorveteria ao catálogo de estoque.
+
+IMPORTANTE: Os nomes do PDV são nomes comerciais simplificados (ex: "ACAI COM BANANA 1,5L", "BALA", "AGUA MINERAL 500ML").
+Os nomes do estoque são nomes de fornecedor/marca (ex: "Docile Bala de Amoras", "Biomass Granola Super 1 Kg").
+Use o contexto e a categoria para fazer a correspondência correta.
+Se um produto do PDV não tiver correspondência no estoque (ex: serviços, combos, produtos sem estoque), retorne productId como null.
+
+Produtos do ESTOQUE disponíveis (${stockProducts.length} produtos):
+${stockList}
+
+Produtos do PDV para vincular (lote ${Math.floor(i/BATCH_SIZE)+1}):
+${pdvList}
+
+Para cada CODE do PDV, encontre o produto do ESTOQUE mais adequado.
+Use confiança > 0.7 apenas quando tiver certeza da correspondência.`;
+
+        try {
+          const response = await invokeLLM({
+            messages: [
+              { role: "system", content: "Você é um especialista em correspondência de produtos de sorveteria. Analise cuidadosamente os nomes e retorne JSON válido." },
+              { role: "user", content: prompt },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "product_suggestions_parsed",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    suggestions: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          externalCode: { type: "string" },
+                          productId: { type: ["integer", "null"] },
+                          confidence: { type: "number" },
+                          reason: { type: "string" },
+                        },
+                        required: ["externalCode", "productId", "confidence", "reason"],
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  required: ["suggestions"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+
+          const rawContent = response?.choices?.[0]?.message?.content;
+          const content = typeof rawContent === "string" ? rawContent : null;
+          if (content) {
+            const parsed = JSON.parse(content) as { suggestions: Array<{ externalCode: string; productId: number | null; confidence: number; reason: string }> };
+            allSuggestions.push(...parsed.suggestions);
+          }
+        } catch (err) {
+          console.error(`Erro no lote ${i}-${i+BATCH_SIZE}:`, err);
+        }
+      }
+
+      // Retornar sugestões com confiança >= 0.7
+      const highConfidence = allSuggestions.filter(s => s.productId && s.confidence >= 0.7);
+      return {
+        suggestions: allSuggestions,
+        highConfidenceCount: highConfidence.length,
+        total: input.products.length,
+        message: `IA analisou ${input.products.length} produtos em ${Math.ceil(input.products.length/BATCH_SIZE)} lotes. ${highConfidence.length} vínculos com confiança ≥ 70% encontrados.`,
       };
     }),
 });

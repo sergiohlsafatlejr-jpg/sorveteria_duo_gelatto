@@ -273,6 +273,21 @@ function ReviewStep({
   const [showAll, setShowAll] = useState(false);
   const [filterStatus, setFilterStatus] = useState<"all" | "linked" | "pending" | "ignored">("all");
 
+  const aiSuggestMut = trpc.salesImport.suggestLinksFromParsed.useMutation({
+    onSuccess: (result) => {
+      // Aplicar sugestões com confiança >= 0.7 ao linkMap local
+      const newLinks: Record<string, { productId: number | null; status: "linked" | "pending" | "ignored" }> = {};
+      for (const sug of result.suggestions) {
+        if (sug.productId && sug.confidence >= 0.7) {
+          newLinks[sug.externalCode] = { productId: sug.productId, status: "linked" };
+        }
+      }
+      setLinkMap((prev) => ({ ...prev, ...newLinks }));
+      toast.success(result.message);
+    },
+    onError: (err) => toast.error(`Erro na IA: ${err.message}`),
+  });
+
   const items = data.produtos.items;
   const payments = data.caixa.payments_summary;
 
@@ -292,7 +307,7 @@ function ReviewStep({
   const ignoredCount = items.filter((i) => getItemStatus(i) === "ignored").length;
 
   const handleConfirm = () => {
-    // Merge dos itens com os vínculos locais
+    // Merge dos itens com os vínculos locais feitos pelo usuário
     const mergedItems = items.map((item) => ({
       ...item,
       productId: linkMap[item.external_code]?.productId ?? null,
@@ -301,7 +316,7 @@ function ReviewStep({
 
     createMut.mutate({
       referenceMonth,
-      items,
+      items: mergedItems,
       payments,
       totalRevenue: data.caixa.total_revenue,
       totalTransactions: data.caixa.total_transactions,
@@ -510,15 +525,33 @@ function ReviewStep({
       </Card>
 
       {/* Ações */}
-      <div className="flex gap-3">
-        <Button variant="outline" onClick={onBack} className="flex-1">
+      <div className="flex gap-3 flex-wrap">
+        <Button variant="outline" onClick={onBack} className="flex-1 min-w-[120px]">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Voltar
         </Button>
         <Button
+          variant="outline"
+          onClick={() => aiSuggestMut.mutate({ products: items.map(i => ({ external_code: i.external_code, external_name: i.external_name })) })}
+          disabled={aiSuggestMut.isPending}
+          className="flex-1 min-w-[160px] text-purple-600 border-purple-500/30 hover:bg-purple-500/10"
+        >
+          {aiSuggestMut.isPending ? (
+            <>
+              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+              IA analisando... ({items.length} produtos)
+            </>
+          ) : (
+            <>
+              <Sparkles className="h-4 w-4 mr-2" />
+              Sugerir com IA ({pendingCount} pendentes)
+            </>
+          )}
+        </Button>
+        <Button
           onClick={handleConfirm}
           disabled={createMut.isPending}
-          className="flex-2 bg-green-600 hover:bg-green-700 text-white"
+          className="flex-2 min-w-[200px] bg-green-600 hover:bg-green-700 text-white"
         >
           {createMut.isPending ? (
             <>

@@ -89,7 +89,7 @@ export async function matchProductsToStock(
       }
     }
 
-    const THRESHOLD = 0.5;
+    const THRESHOLD = 0.75;
     if (bestMatch && bestMatch.score >= THRESHOLD) {
       return {
         ...item,
@@ -109,7 +109,7 @@ export async function matchProductsToStock(
 export async function createSalesImport(
   userId: number,
   referenceMonth: string,
-  items: ParsedProduct[],
+  items: (ParsedProduct & { productId?: number | null; linkStatus?: string })[],
   payments: ParsedPayment[],
   totalRevenue: number,
   totalTransactions: number
@@ -117,7 +117,18 @@ export async function createSalesImport(
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
 
-  const matchedItems = await matchProductsToStock(items);
+  // Se os itens já vierem com vínculos do frontend, usar diretamente
+  // Caso contrário, tentar fuzzy match automático
+  const hasPreLinked = items.some((i) => i.productId !== undefined || i.linkStatus !== undefined);
+  const matchedItems = hasPreLinked
+    ? items.map((item) => ({
+        ...item,
+        productId: item.productId ?? null,
+        productName: null,
+        matchScore: item.productId ? 1.0 : 0,
+        linkStatus: (item.linkStatus ?? (item.productId ? "linked" : "pending")) as "linked" | "pending" | "ignored",
+      }))
+    : await matchProductsToStock(items);
   const linkedCount = matchedItems.filter((i) => i.linkStatus === "linked").length;
   const pendingCount = matchedItems.filter((i) => i.linkStatus === "pending").length;
 
@@ -150,6 +161,18 @@ export async function createSalesImport(
         linkStatus: item.linkStatus,
       }))
     );
+
+    // Salvar externalCode nos produtos vinculados para uso em futuras importações
+    const linkedItems = matchedItems.filter(i => i.linkStatus === "linked" && i.productId);
+    for (const item of linkedItems) {
+      if (!item.productId) continue;
+      // Verificar se o produto já tem um externalCode diferente
+      const [prod] = await db.select({ externalCode: products.externalCode }).from(products).where(eq(products.id, item.productId));
+      if (prod && !prod.externalCode) {
+        // Salvar apenas se ainda não tiver código externo
+        await db.update(products).set({ externalCode: item.external_code }).where(eq(products.id, item.productId));
+      }
+    }
   }
 
   // Inserir formas de pagamento

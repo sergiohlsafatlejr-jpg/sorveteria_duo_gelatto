@@ -439,3 +439,11 @@
 - [x] Frontend: feedback de progresso "IA analisando..." durante o processamento
 - [x] Frontend: toast com resumo de vínculos aplicados pela IA
 - [x] Usuário pode corrigir manualmente via select após a sugestão da IA
+
+## Correções Importação de Vendas XLS (02/04)
+- [x] Corrigido handleConfirm no ReviewStep: vínculos manuais do linkMap agora são enviados ao backend
+- [x] Endpoint suggestLinksWithAI melhorado: processa em lotes de 30, threshold 70%, salva externalCode
+- [x] Novo endpoint suggestLinksFromParsed: sugestão de IA antes de salvar no banco (ReviewStep)
+- [x] Botão "Sugerir com IA" adicionado no ReviewStep (antes de salvar importação)
+- [x] createSalesImport salva externalCode nos produtos vinculados para uso em futuras importações
+- [x] Fuzzy match threshold mantido em 0.75 (itens com score baixo ficam como "pending")
