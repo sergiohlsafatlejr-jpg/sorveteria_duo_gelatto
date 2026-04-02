@@ -417,3 +417,9 @@
 - [x] Atualizar tela de Usuários: labels corretos (Administrador, Gerente, Funcionário)
 - [x] Descrição de permissões exibida abaixo do badge de papel no card do usuário
 - [x] TypeScript 0 erros
+
+## Corrigir Parser XLS (01/04)
+- [x] Substituir parser Python por SheetJS (Node.js puro) para funcionar em produção
+- [x] Remover dependência de /usr/bin/python3.11 no router sales-import.ts
+- [x] Corrigir valor do Dinheiro: usar V. Pagamento como fallback quando V. Receber = 0
+- [x] Resultado: R$ 115.830,36 total, 3.200 transações, 7 formas de pagamento, 210 produtos

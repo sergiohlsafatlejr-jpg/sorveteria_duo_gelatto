@@ -1,13 +1,10 @@
 import { Router } from "express";
 import multer from "multer";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import path from "path";
-import { fileURLToPath } from "url";
 import fs from "fs";
+import XLSXModule from "xlsx";
+const XLSX = XLSXModule;
 
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 
 import {
@@ -20,14 +17,166 @@ import {
   getProductsForLinking,
 } from "../db.sales-import";
 
-// ESM-compatible __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const execFileAsync = promisify(execFile);
-
 // ─── Multer: upload para /tmp ─────────────────────────────────────────────────
 const upload = multer({ dest: "/tmp/sales-uploads/" });
+
+// ─── Parser de Caixa (vendas por forma de pagamento) ─────────────────────────
+function parseCaixaXls(filePath: string) {
+  try {
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+    // Encontrar linha de cabeçalho (contém "FORMA PGTO" ou "PAGAMENTO")
+    let headerRow = -1;
+    let colPagamento = -1;
+    let colVPagamento = -1;
+    let colVReceber = -1;
+
+    for (let i = 0; i < Math.min(rows.length, 25); i++) {
+      const row = rows[i].map((c: any) => String(c).toLowerCase());
+      const hasPgto = row.some((c) => c.includes("forma pgto") || c.includes("pagamento"));
+      if (hasPgto) {
+        headerRow = i;
+        // Mapear colunas pelos índices exatos
+        for (let j = 0; j < row.length; j++) {
+          const h = row[j];
+          if ((h.includes("forma") && h.includes("pgto")) || h === "forma de pagamento") colPagamento = j;
+          else if (h.includes("v. pagamento") || h === "v.pagamento" || (h.includes("pagamento") && !h.includes("forma"))) colVPagamento = j;
+          else if (h.includes("receber")) colVReceber = j;
+        }
+        break;
+      }
+    }
+
+    // Fallback: usar índices fixos conhecidos da estrutura do PDV
+    // Header row 12: col 14 = FORMA PGTO, col 20 = V. PAGAMENTO, col 27 = V.RECEBER
+    if (headerRow >= 0 && colPagamento === -1) {
+      const row = rows[headerRow];
+      for (let j = 0; j < row.length; j++) {
+        const h = String(row[j]).toLowerCase();
+        if (h.includes("pgto") || h.includes("forma")) { colPagamento = j; }
+        if (h.includes("v. pag") || (h.includes("pagamento") && j > 15)) { colVPagamento = j; }
+        if (h.includes("receber")) { colVReceber = j; }
+      }
+    }
+
+    // Agregar pagamentos
+    const paymentsMap: Record<string, { total: number; count: number }> = {};
+    let totalRevenue = 0;
+    let totalTransactions = 0;
+    const dataStart = headerRow >= 0 ? headerRow + 1 : 0;
+
+    for (let i = dataStart; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.every((c: any) => c === "" || c === null || c === undefined)) continue;
+
+      const method = colPagamento >= 0 ? String(row[colPagamento] || "").trim() : "";
+      if (!method || method.toLowerCase() === "total" || method.toLowerCase() === "forma pgto" || method.toLowerCase() === "forma de pagamento") continue;
+
+      // Usar V. Receber se disponível e > 0, senão usar V. Pagamento
+      let valor = 0;
+      if (colVReceber >= 0) {
+        const vr = row[colVReceber];
+        valor = typeof vr === "number" ? vr : parseFloat(String(vr).replace(/[^0-9.,]/g, "").replace(",", ".")) || 0;
+      }
+      if (valor === 0 && colVPagamento >= 0) {
+        const vp = row[colVPagamento];
+        valor = typeof vp === "number" ? vp : parseFloat(String(vp).replace(/[^0-9.,]/g, "").replace(",", ".")) || 0;
+      }
+
+      if (!paymentsMap[method]) paymentsMap[method] = { total: 0, count: 0 };
+      paymentsMap[method].total += valor;
+      paymentsMap[method].count += 1;
+      totalRevenue += valor;
+      totalTransactions += 1;
+    }
+
+    const payments_summary = Object.entries(paymentsMap).map(([method, data]) => ({
+      method,
+      total: Math.round(data.total * 100) / 100,
+      count: data.count,
+    }));
+
+    return {
+      payments_summary,
+      total_revenue: Math.round(totalRevenue * 100) / 100,
+      total_transactions: totalTransactions,
+    };
+  } catch (err) {
+    return { error: String(err), payments_summary: [], total_revenue: 0, total_transactions: 0 };
+  }
+}
+
+// ─── Parser de Produtos (vendas por item) ─────────────────────────────────────
+function parseProdutosXls(filePath: string) {
+  try {
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+    // Encontrar linha de cabeçalho (contém "Código" ou "Descrição")
+    let headerRow = -1;
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const row = rows[i].map((c: any) => String(c).toLowerCase());
+      if (row.some((c) => c.includes("descri") || c.includes("codigo") || c.includes("código"))) {
+        headerRow = i;
+        break;
+      }
+    }
+
+    if (headerRow === -1) return { error: "Cabeçalho não encontrado no arquivo de produtos", items: [] };
+
+    const headers = rows[headerRow].map((c: any) => String(c).toLowerCase().trim());
+
+    // Mapear colunas
+    const colCodigo = headers.findIndex((h) => h.includes("cod") || h === "código" || h === "codigo");
+    const colDescricao = headers.findIndex((h) => h.includes("descri") || h.includes("nome") || h.includes("produto"));
+    const colUnidade = headers.findIndex((h) => h.includes("unid") || h === "un" || h === "und");
+    const colQtd = headers.findIndex((h) => h.includes("qtd") || h.includes("quant"));
+    const colPreco = headers.findIndex((h) => (h.includes("pre") || h.includes("unit")) && !h.includes("total"));
+    const colTotal = headers.findIndex((h) => h.includes("total") || h.includes("valor"));
+
+    const items: any[] = [];
+
+    for (let i = headerRow + 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.every((c: any) => c === "" || c === null || c === undefined)) continue;
+
+      const descricao = colDescricao >= 0 ? String(row[colDescricao] || "").trim() : "";
+      if (!descricao || descricao.toLowerCase() === "total" || descricao.toLowerCase() === "descrição") continue;
+
+      const codigo = colCodigo >= 0 ? String(row[colCodigo] || "").trim() : "";
+      const unidade = colUnidade >= 0 ? String(row[colUnidade] || "UN").trim() : "UN";
+
+      const qtdRaw = colQtd >= 0 ? row[colQtd] : 0;
+      const qtd = typeof qtdRaw === "number" ? qtdRaw : parseFloat(String(qtdRaw).replace(",", ".")) || 0;
+
+      const precoRaw = colPreco >= 0 ? row[colPreco] : 0;
+      const preco = typeof precoRaw === "number" ? precoRaw : parseFloat(String(precoRaw).replace(/[^0-9.,]/g, "").replace(",", ".")) || 0;
+
+      const totalRaw = colTotal >= 0 ? row[colTotal] : 0;
+      const total = typeof totalRaw === "number" ? totalRaw : parseFloat(String(totalRaw).replace(/[^0-9.,]/g, "").replace(",", ".")) || 0;
+
+      if (qtd === 0 && total === 0) continue;
+
+      items.push({
+        external_code: codigo,
+        external_name: descricao,
+        unit: unidade,
+        quantity: Math.round(qtd * 1000) / 1000,
+        unit_price: Math.round(preco * 100) / 100,
+        total_price: Math.round(total * 100) / 100,
+      });
+    }
+
+    return { items };
+  } catch (err) {
+    return { error: String(err), items: [] };
+  }
+}
 
 // ─── Express Router para upload de arquivo ───────────────────────────────────
 export const salesImportExpressRouter = Router();
@@ -40,7 +189,6 @@ salesImportExpressRouter.post(
   ]),
   async (req, res) => {
     try {
-      // Verificar autenticação via cookie/session
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
       if (!files?.caixa?.[0] || !files?.produtos?.[0]) {
         return res.status(400).json({ error: "Envie os dois arquivos: caixa e produtos" });
@@ -48,36 +196,29 @@ salesImportExpressRouter.post(
 
       const caixaPath = files.caixa[0].path;
       const produtosPath = files.produtos[0].path;
-      // Em dev: tsx roda a partir de server/routers/ → cwd é a raiz do projeto
-      // Em prod: dist/index.js → cwd também é a raiz do projeto
-      const pythonScript = path.join(process.cwd(), "server/parse_sales_xls.py");
 
-      // Executar o parser Python
-      // Usar caminho absoluto e limpar PYTHONPATH para evitar conflito com Python 3.13 do uv
-      const cleanEnv = { ...process.env, PYTHONPATH: "", PYTHONHOME: "" };
-      const { stdout, stderr } = await execFileAsync("/usr/bin/python3.11", [pythonScript, caixaPath, produtosPath], {
-        timeout: 30000,
-        env: cleanEnv,
-      });
+      // Parsear com SheetJS (Node.js puro — sem Python)
+      const caixaData = parseCaixaXls(caixaPath);
+      const produtosData = parseProdutosXls(produtosPath);
 
       // Limpar arquivos temporários
-      fs.unlinkSync(caixaPath);
-      fs.unlinkSync(produtosPath);
+      try { fs.unlinkSync(caixaPath); } catch {}
+      try { fs.unlinkSync(produtosPath); } catch {}
 
-      if (stderr && !stdout) {
-        return res.status(500).json({ error: "Erro ao processar arquivo: " + stderr });
+      if (caixaData.error) {
+        return res.status(400).json({ error: "Erro no arquivo de caixa: " + caixaData.error });
+      }
+      if ((produtosData as any).error) {
+        return res.status(400).json({ error: "Erro no arquivo de produtos: " + (produtosData as any).error });
       }
 
-      const parsed = JSON.parse(stdout);
-
-      if (parsed.caixa?.error) {
-        return res.status(400).json({ error: "Erro no arquivo de caixa: " + parsed.caixa.error });
-      }
-      if (parsed.produtos?.error) {
-        return res.status(400).json({ error: "Erro no arquivo de produtos: " + parsed.produtos.error });
-      }
-
-      return res.json({ success: true, data: parsed });
+      return res.json({
+        success: true,
+        data: {
+          caixa: caixaData,
+          produtos: produtosData,
+        },
+      });
     } catch (err: unknown) {
       console.error("Sales import upload error:", err);
       return res.status(500).json({ error: String(err) });
