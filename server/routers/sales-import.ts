@@ -16,6 +16,7 @@ import {
   deleteSalesImport,
   getProductsForLinking,
 } from "../db.sales-import";
+import { invokeLLM } from "../_core/llm";
 
 // ─── Multer: upload para /tmp ─────────────────────────────────────────────────
 const upload = multer({ dest: "/tmp/sales-uploads/" });
@@ -316,4 +317,119 @@ export const salesImportRouter = router({
   getProductsForLinking: protectedProcedure.query(async () => {
     return getProductsForLinking();
   }),
+
+  // Sugerir vínculos com IA (LLM analisa PDV vs estoque)
+  suggestLinksWithAI: protectedProcedure
+    .input(z.object({ importId: z.number() }))
+    .mutation(async ({ input }) => {
+      const detail = await getSalesImportDetail(input.importId);
+      if (!detail) throw new Error("Importação não encontrada");
+      const stockProducts = await getProductsForLinking();
+
+      // Pegar apenas itens pendentes
+      const pendingItems = detail.items.filter(
+        (item: any) => item.linkStatus === "pending"
+      );
+
+      if (pendingItems.length === 0) {
+        return { suggestions: [], message: "Nenhum item pendente para vincular." };
+      }
+
+      // Montar lista de produtos do estoque para o LLM
+      const stockList = stockProducts
+        .map((p: any) => `ID:${p.id} | ${p.name}`)
+        .join("\n");
+
+      // Montar lista de itens PDV pendentes
+      const pdvList = pendingItems
+        .map((item: any) => `ITEM_ID:${item.id} | ${item.externalName}`)
+        .join("\n");
+
+      const prompt = `Você é um especialista em vincular produtos de PDV de sorveteria ao catálogo de estoque.
+
+Produtos do ESTOQUE disponíveis:
+${stockList}
+
+Produtos do PDV que precisam ser vinculados:
+${pdvList}
+
+Para cada produto do PDV, encontre o produto do ESTOQUE mais similar.
+Se não houver correspondência razoável, retorne productId como null.
+
+Retorne APENAS um JSON válido no formato:
+{
+  "suggestions": [
+    {
+      "itemId": <ITEM_ID do PDV>,
+      "productId": <ID do estoque ou null>,
+      "confidence": <0.0 a 1.0>,
+      "reason": "<breve justificativa em português>"
+    }
+  ]
+}`;
+
+      const response = await invokeLLM({
+        messages: [
+          { role: "system", content: "Você é um assistente especializado em correspondência de produtos. Responda APENAS com JSON válido, sem markdown, sem explicações extras." },
+          { role: "user", content: prompt },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "product_suggestions",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                suggestions: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      itemId: { type: "integer" },
+                      productId: { type: ["integer", "null"] },
+                      confidence: { type: "number" },
+                      reason: { type: "string" },
+                    },
+                    required: ["itemId", "productId", "confidence", "reason"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["suggestions"],
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+
+      const rawContent = response?.choices?.[0]?.message?.content;
+      const content = typeof rawContent === "string" ? rawContent : null;
+      if (!content) throw new Error("LLM não retornou resposta");
+
+      const parsed = JSON.parse(content) as {
+        suggestions: Array<{
+          itemId: number;
+          productId: number | null;
+          confidence: number;
+          reason: string;
+        }>;
+      };
+
+      // Aplicar sugestões com confiança >= 0.6 automaticamente
+      const applied: number[] = [];
+      for (const sug of parsed.suggestions) {
+        if (sug.productId && sug.confidence >= 0.6) {
+          await linkImportItem(sug.itemId, sug.productId, "linked", false);
+          applied.push(sug.itemId);
+        }
+      }
+
+      return {
+        suggestions: parsed.suggestions,
+        applied: applied.length,
+        total: pendingItems.length,
+        message: `IA sugeriu ${parsed.suggestions.length} vínculos, ${applied.length} aplicados automaticamente (confiança ≥ 60%).`,
+      };
+    }),
 });

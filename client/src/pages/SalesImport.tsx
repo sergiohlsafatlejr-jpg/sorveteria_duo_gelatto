@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import {
   Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Clock,
   Link2, Trash2, ChevronDown, ChevronUp, Package, CreditCard,
-  TrendingUp, ShoppingCart, ArrowLeft, RefreshCw, Eye
+  TrendingUp, ShoppingCart, ArrowLeft, RefreshCw, Eye, Sparkles
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -566,6 +566,14 @@ function ImportDetail({ importId, onClose }: { importId: number; onClose: () => 
     onError: (err) => toast.error(err.message),
   });
 
+  const aiSuggestMut = trpc.salesImport.suggestLinksWithAI.useMutation({
+    onSuccess: (result) => {
+      toast.success(result.message);
+      utils.salesImport.detail.invalidate({ importId });
+    },
+    onError: (err) => toast.error(`Erro na IA: ${err.message}`),
+  });
+
   if (isLoading) return <div className="p-8 text-center text-muted-foreground">Carregando...</div>;
   if (!data) return <div className="p-8 text-center text-muted-foreground">Importação não encontrada</div>;
 
@@ -600,6 +608,16 @@ function ImportDetail({ importId, onClose }: { importId: number; onClose: () => 
         <div className="flex gap-2">
           {isPending && (
             <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-purple-600 border-purple-500/30 hover:bg-purple-500/10"
+                onClick={() => aiSuggestMut.mutate({ importId })}
+                disabled={aiSuggestMut.isPending}
+              >
+                <Sparkles className="h-3 w-3 mr-1" />
+                {aiSuggestMut.isPending ? "IA analisando..." : "Sugerir com IA"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"

@@ -428,3 +428,14 @@
 - [x] Corrigir TypeError: Cannot read properties of undefined (reading 'toLocaleString') no ReviewStep
   - Adicionado total_units e total_revenue no retorno do parseProdutosXls
   - Protegidos todos os usos de toLocaleString com fallback ?? 0
+
+## Bug Fuzzy Match Importação de Vendas (02/04)
+- [ ] Corrigir algoritmo de fuzzy match: todos os 210 produtos estão sendo vinculados ao mesmo produto do estoque
+- [ ] Implementar similaridade de texto real (Levenshtein/token overlap) para matching automático
+
+## Vinculação com IA - Produtos PDV x Estoque (02/04)
+- [x] Endpoint backend: suggestLinksWithAI (LLM analisa PDV vs estoque em lote, confiança >= 60% aplicada automaticamente)
+- [x] Frontend: botão "Sugerir com IA" (roxo) no cabeçalho da tela de revisão
+- [x] Frontend: feedback de progresso "IA analisando..." durante o processamento
+- [x] Frontend: toast com resumo de vínculos aplicados pela IA
+- [x] Usuário pode corrigir manualmente via select após a sugestão da IA
