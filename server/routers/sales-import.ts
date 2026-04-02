@@ -172,9 +172,15 @@ function parseProdutosXls(filePath: string) {
       });
     }
 
-    return { items };
+    const total_units = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    const total_revenue = items.reduce((sum, item) => sum + (item.total_price || 0), 0);
+    return {
+      items,
+      total_units: Math.round(total_units * 1000) / 1000,
+      total_revenue: Math.round(total_revenue * 100) / 100,
+    };
   } catch (err) {
-    return { error: String(err), items: [] };
+    return { error: String(err), items: [], total_units: 0, total_revenue: 0 };
   }
 }
 

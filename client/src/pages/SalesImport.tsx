@@ -323,7 +323,7 @@ function ReviewStep({
         <Card className="p-3">
           <p className="text-xs text-muted-foreground">Produtos Distintos</p>
           <p className="text-lg font-bold">{items.length}</p>
-          <p className="text-xs text-muted-foreground">{data.produtos.total_units.toLocaleString("pt-BR")} unidades</p>
+          <p className="text-xs text-muted-foreground">{(data.produtos.total_units ?? 0).toLocaleString("pt-BR")} unidades</p>
         </Card>
         <Card className="p-3">
           <p className="text-xs text-muted-foreground">Vinculados ao Estoque</p>
@@ -406,7 +406,7 @@ function ReviewStep({
                       <td className="p-2 font-medium max-w-[200px] truncate" title={item.external_name}>
                         {item.external_name}
                       </td>
-                      <td className="p-2 text-right">{item.quantity.toLocaleString("pt-BR")}</td>
+                      <td className="p-2 text-right">{(item.quantity ?? 0).toLocaleString("pt-BR")}</td>
                       <td className="p-2 text-right font-medium">{fmt(item.total_price)}</td>
                       <td className="p-2 min-w-[200px]">
                         {status === "ignored" ? (
@@ -864,7 +864,7 @@ export default function SalesImport() {
                             {fmt(imp.totalRevenue)}
                           </td>
                           <td className="p-3 text-right text-muted-foreground">
-                            {imp.totalTransactions.toLocaleString("pt-BR")}
+                            {(imp.totalTransactions ?? 0).toLocaleString("pt-BR")}
                           </td>
                           <td className="p-3 text-right text-muted-foreground">
                             {imp.totalItems}
