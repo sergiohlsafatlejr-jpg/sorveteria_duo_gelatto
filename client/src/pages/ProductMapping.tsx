@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Link2, Search, Sparkles, RefreshCw, CheckCircle2, AlertCircle,
-  Unlink, ArrowLeft, Package, Tag
+  Unlink, ArrowLeft, Package, Tag, Download, Upload
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -93,23 +93,76 @@ export default function ProductMapping() {
             Vincule permanentemente os códigos do PDV aos produtos do estoque. Uma vez mapeado, o sistema reconhece automaticamente nas próximas importações.
           </p>
         </div>
-        <Button
-          onClick={() => bulkSuggestMut.mutate()}
-          disabled={bulkSuggestMut.isPending}
-          className="bg-purple-600 hover:bg-purple-700 text-white"
-        >
-          {bulkSuggestMut.isPending ? (
-            <>
-              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-              IA mapeando...
-            </>
-          ) : (
-            <>
-              <Sparkles className="h-4 w-4 mr-2" />
-              Sugerir Mapeamentos com IA
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => {
+              const a = document.createElement("a");
+              a.href = "/api/mapping/export";
+              a.download = "Mapeamento_PDV_Estoque.xlsx";
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              toast.success("✅ Excel exportado! Preencha as colunas verdes e reimporte.");
+            }}
+            variant="outline"
+            className="border-green-600 text-green-600 hover:bg-green-50"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Exportar Excel
+          </Button>
+          <Button
+            onClick={() => {
+              const input = document.createElement("input");
+              input.type = "file";
+              input.accept = ".xlsx,.xls";
+              input.onchange = async (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (!file) return;
+                const formData = new FormData();
+                formData.append("file", file);
+                try {
+                  toast.info("⏳ Importando mapeamentos...");
+                  const res = await fetch("/api/mapping/import", {
+                    method: "POST",
+                    body: formData,
+                  });
+                  const data = await res.json();
+                  if (data.success) {
+                    utils.salesImport.getMappings.invalidate();
+                    toast.success(data.message);
+                  } else {
+                    toast.error(data.error || "Erro ao importar");
+                  }
+                } catch (err) {
+                  toast.error("Erro ao importar: " + String(err));
+                }
+              };
+              input.click();
+            }}
+            variant="outline"
+            className="border-blue-600 text-blue-600 hover:bg-blue-50"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Importar Excel
+          </Button>
+          <Button
+            onClick={() => bulkSuggestMut.mutate()}
+            disabled={bulkSuggestMut.isPending}
+            className="bg-purple-600 hover:bg-purple-700 text-white"
+          >
+            {bulkSuggestMut.isPending ? (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                IA mapeando...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Sugerir com IA
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* KPIs */}

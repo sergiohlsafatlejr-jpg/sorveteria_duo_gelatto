@@ -457,3 +457,10 @@
 - [x] Frontend: tela /sales/sales-report com top 10 produtos, gráfico de barras e comparativo mensal
 - [x] Integrar relatório ao fluxo pós-confirmação de importação (link direto)
 - [x] Registrar rotas no App.tsx e itens no menu lateral
+
+## Exportar/Importar Mapeamento via Excel (02/04)
+- [x] Backend: endpoint GET /api/mapping/export — gera XLSX com produtos e colunas editáveis
+- [x] Backend: endpoint POST /api/mapping/import — lê XLSX e salva vínculos em lote
+- [x] Frontend: botão "Exportar Excel" na tela ProductMapping
+- [x] Frontend: botão "Importar Excel" com upload na tela ProductMapping
+- [x] Script Python mapping_excel.py para exportar/importar XLSX com formatação profissional
