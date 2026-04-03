@@ -24,6 +24,7 @@ export default function ProductMapping() {
   const updateMut = trpc.salesImport.updateMapping.useMutation({
     onSuccess: () => {
       utils.salesImport.getMappings.invalidate();
+      setEditingId(null);
       toast.success("Mapeamento atualizado!");
     },
     onError: (err) => toast.error(err.message),
@@ -259,14 +260,40 @@ export default function ProductMapping() {
                       </td>
                       <td className="p-3">
                         {editingId === m.productId ? (
-                          <Input
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            className="h-7 text-xs w-36"
-                            placeholder="Ex: 627"
-                            autoFocus
-                            list={`pdv-codes-${m.productId}`}
-                          />
+                          <div className="flex flex-col gap-1">
+                            <Input
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  updateMut.mutate({ productId: m.productId, externalCode: editValue || null });
+                                }
+                                if (e.key === "Escape") setEditingId(null);
+                              }}
+                              className="h-7 text-xs w-36"
+                              placeholder="Ex: 627"
+                              autoFocus
+                              list={`pdv-codes-${m.productId}`}
+                            />
+                            <div className="flex gap-1 mt-1">
+                              <Button
+                                size="sm"
+                                className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
+                                onClick={() => updateMut.mutate({ productId: m.productId, externalCode: editValue || null })}
+                                disabled={updateMut.isPending}
+                              >
+                                {updateMut.isPending ? "..." : "Salvar"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 text-xs px-2"
+                                onClick={() => setEditingId(null)}
+                              >
+                                ×
+                              </Button>
+                            </div>
+                          </div>
                         ) : (
                           <span className="font-mono text-xs text-muted-foreground">
                             {m.externalCode ?? "—"}
@@ -313,29 +340,7 @@ export default function ProductMapping() {
                       </td>
                       <td className="p-3 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          {editingId === m.productId ? (
-                            <>
-                              <Button
-                                size="sm"
-                                className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
-                                onClick={() => {
-                                  updateMut.mutate({ productId: m.productId, externalCode: editValue || null });
-                                  setEditingId(null);
-                                }}
-                                disabled={updateMut.isPending}
-                              >
-                                Salvar
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                                onClick={() => setEditingId(null)}
-                              >
-                                Cancelar
-                              </Button>
-                            </>
-                          ) : (
+                          {editingId !== m.productId && (
                             <>
                               <Button
                                 size="sm"

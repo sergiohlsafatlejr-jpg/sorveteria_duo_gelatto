@@ -475,3 +475,6 @@
 
 ## Correção: Mapeamento Manual - Digitar código PDV (03/04)
 - [x] Corrigir campo de mapeamento para aceitar código digitado manualmente sem exigir seleção do dropdown
+
+## Correção: Botão Salvar some ao editar mapeamento (03/04)
+- [x] Corrigir botão Salvar/Cancelar que desaparece ao editar produto já mapeado
