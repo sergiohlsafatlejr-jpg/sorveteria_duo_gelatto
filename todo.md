@@ -468,3 +468,7 @@
 ## Correção: Excel sem Python (02/04)
 - [x] Instalar exceljs e reescrever exportação/importação em TypeScript puro
 - [x] Remover dependência do script mapping_excel.py nos endpoints
+
+## Correção: Importação Excel - Planilha não encontrada (03/04)
+- [x] Corrigir importMappingFromBuffer para aceitar qualquer planilha/aba do Excel
+- [x] Suportar arquivos .xls (formato antigo) além de .xlsx (usando SheetJS)

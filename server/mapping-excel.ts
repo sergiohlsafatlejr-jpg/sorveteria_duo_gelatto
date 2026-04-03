@@ -1,9 +1,12 @@
 /**
  * mapping-excel.ts
  * Exportação e importação de mapeamento PDV→Estoque via Excel
- * Usa exceljs (TypeScript puro, sem dependência de Python)
+ * Exportação: exceljs (formatação profissional)
+ * Importação: SheetJS/xlsx (suporta .xls e .xlsx)
  */
 import ExcelJS from "exceljs";
+import XLSXModule from "xlsx";
+const XLSX = XLSXModule;
 
 export interface MappingRow {
   productId: number;
@@ -130,28 +133,59 @@ export async function exportMappingToBuffer(mappings: MappingRow[]): Promise<Buf
   return (wb.xlsx.writeBuffer() as unknown) as Promise<Buffer>;
 }
 
-// ─── Importar XLSX ────────────────────────────────────────────────────────────
+// ─── Importar XLS/XLSX (SheetJS — suporta .xls legado e .xlsx) ───────────────────────
 export async function importMappingFromBuffer(
   buffer: Buffer
 ): Promise<{ mappings: ImportedMapping[]; total: number; toLink: number; toUnlink: number }> {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+  // SheetJS suporta tanto .xls (BIFF8) quanto .xlsx (OOXML)
+  const wb = XLSX.read(buffer, { type: "buffer" });
 
-  const ws = wb.worksheets[0];
-  if (!ws) throw new Error("Planilha não encontrada no arquivo Excel.");
+  if (!wb.SheetNames || wb.SheetNames.length === 0) {
+    throw new Error("Nenhuma planilha encontrada no arquivo Excel.");
+  }
+
+  // Usar a primeira aba disponível
+  const sheetName = wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+
+  // Converter para array de arrays
+  const rows: (string | number | null)[][] = XLSX.utils.sheet_to_json(ws, {
+    header: 1,
+    defval: null,
+    raw: false, // valores como string para facilitar trim
+  });
 
   const mappings: ImportedMapping[] = [];
   let toLink = 0;
   let toUnlink = 0;
 
-  // Dados começam na linha 5 (1=título, 2=instrução, 3=vazia, 4=cabeçalho)
-  ws.eachRow((row, rowNum) => {
-    if (rowNum < 5) return;
+  // Detectar se é o arquivo exportado pelo sistema (tem cabeçalho na linha 4)
+  // ou outro formato. Procurar a linha de cabeçalho com "ID Produto"
+  let dataStartRow = 0;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const row = rows[i];
+    if (row && String(row[0] ?? "").includes("ID Produto")) {
+      dataStartRow = i + 1; // dados começam na próxima linha
+      break;
+    }
+  }
 
-    const productId = Number(row.getCell(1).value);
-    if (!productId || isNaN(productId)) return;
+  if (dataStartRow === 0) {
+    throw new Error(
+      'Formato de arquivo não reconhecido. Use o arquivo exportado pelo sistema (botão "Exportar Excel") e preencha as colunas verdes.'
+    );
+  }
 
-    const rawCode = row.getCell(5).value;
+  for (let i = dataStartRow; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+
+    // Coluna A (índice 0) = ID Produto
+    const productId = Number(row[0]);
+    if (!productId || isNaN(productId)) continue;
+
+    // Coluna E (índice 4) = Código PDV
+    const rawCode = row[4];
     let externalCode: string | null = null;
     if (rawCode !== null && rawCode !== undefined && String(rawCode).trim() !== "") {
       externalCode = String(rawCode).trim();
@@ -160,7 +194,7 @@ export async function importMappingFromBuffer(
     mappings.push({ productId, externalCode });
     if (externalCode) toLink++;
     else toUnlink++;
-  });
+  }
 
   return { mappings, total: mappings.length, toLink, toUnlink };
 }
