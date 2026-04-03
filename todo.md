@@ -464,3 +464,7 @@
 - [x] Frontend: botão "Exportar Excel" na tela ProductMapping
 - [x] Frontend: botão "Importar Excel" com upload na tela ProductMapping
 - [x] Script Python mapping_excel.py para exportar/importar XLSX com formatação profissional
+
+## Correção: Excel sem Python (02/04)
+- [x] Instalar exceljs e reescrever exportação/importação em TypeScript puro
+- [x] Remover dependência do script mapping_excel.py nos endpoints

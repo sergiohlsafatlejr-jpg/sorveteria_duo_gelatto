@@ -3,6 +3,7 @@ import multer from "multer";
 import fs from "fs";
 import XLSXModule from "xlsx";
 const XLSX = XLSXModule;
+import { exportMappingToBuffer, importMappingFromBuffer } from "../mapping-excel";
 
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -192,29 +193,21 @@ function parseProdutosXls(filePath: string) {
 // ─── Express Router para upload de arquivo ───────────────────────────────────
 export const salesImportExpressRouter = Router();
 
-// ─── Exportar mapeamento PDV→Estoque como XLSX ───────────────────────────────────────
+// ─── Exportar mapeamento PDV→Estoque como XLSX (TypeScript puro via exceljs) ─────────────
 salesImportExpressRouter.get("/api/mapping/export", async (req, res) => {
   try {
-    const { execSync } = await import("child_process");
     const mappings = await getAllMappings();
-    const jsonPath = "/tmp/mappings_export.json";
-    const xlsxPath = "/tmp/mapeamento_pdv_estoque.xlsx";
-    fs.writeFileSync(jsonPath, JSON.stringify(mappings, null, 2));
-    const scriptPath = "/home/ubuntu/sorveteria_duo_gelatto/server/mapping_excel.py";
-    const pyEnv = { ...process.env, PYTHONHOME: "", PYTHONPATH: "" };
-    execSync(`/usr/bin/python3.11 ${scriptPath} export ${jsonPath} ${xlsxPath}`, { env: pyEnv });
-    res.download(xlsxPath, "Mapeamento_PDV_Estoque.xlsx", (err) => {
-      try { fs.unlinkSync(jsonPath); } catch {}
-      try { fs.unlinkSync(xlsxPath); } catch {}
-      if (err) console.error("Download error:", err);
-    });
+    const buffer = await exportMappingToBuffer(mappings);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="Mapeamento_PDV_Estoque.xlsx"');
+    res.send(buffer);
   } catch (err) {
     console.error("Export mapping error:", err);
     return res.status(500).json({ error: String(err) });
   }
 });
 
-// ─── Importar mapeamento PDV→Estoque de XLSX ─────────────────────────────────────────
+// ─── Importar mapeamento PDV→Estoque de XLSX (TypeScript puro via exceljs) ─────────────
 salesImportExpressRouter.post(
   "/api/mapping/import",
   upload.single("file"),
@@ -223,25 +216,14 @@ salesImportExpressRouter.post(
       if (!req.file) {
         return res.status(400).json({ error: "Nenhum arquivo enviado" });
       }
-      const { execSync } = await import("child_process");
-      // Multer salva sem extensão; renomear para .xlsx para openpyxl aceitar
-      const origPath = req.file.path;
-      const xlsxPath = origPath + ".xlsx";
-      fs.renameSync(origPath, xlsxPath);
-      const jsonPath = "/tmp/mappings_import.json";
-      const scriptPath = "/home/ubuntu/sorveteria_duo_gelatto/server/mapping_excel.py";
-      const pyEnv = { ...process.env, PYTHONHOME: "", PYTHONPATH: "" };
-      execSync(`/usr/bin/python3.11 ${scriptPath} import ${xlsxPath} ${jsonPath}`, { env: pyEnv });
-      const result = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
-      // Salvar vínculos no banco
+      const fileBuffer = fs.readFileSync(req.file.path);
+      try { fs.unlinkSync(req.file.path); } catch {}
+      const result = await importMappingFromBuffer(fileBuffer);
       let updated = 0;
       for (const m of result.mappings) {
         await updateProductMapping(m.productId, m.externalCode);
         updated++;
       }
-      // Limpar arquivos temporários
-      try { fs.unlinkSync(xlsxPath); } catch {}
-      try { fs.unlinkSync(jsonPath); } catch {}
       return res.json({
         success: true,
         total: result.total,
