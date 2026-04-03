@@ -472,3 +472,6 @@
 ## Correção: Importação Excel - Planilha não encontrada (03/04)
 - [x] Corrigir importMappingFromBuffer para aceitar qualquer planilha/aba do Excel
 - [x] Suportar arquivos .xls (formato antigo) além de .xlsx (usando SheetJS)
+
+## Correção: Mapeamento Manual - Digitar código PDV (03/04)
+- [x] Corrigir campo de mapeamento para aceitar código digitado manualmente sem exigir seleção do dropdown

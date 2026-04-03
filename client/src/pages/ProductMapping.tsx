@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Link2, Search, Sparkles, RefreshCw, CheckCircle2, AlertCircle,
   Unlink, ArrowLeft, Package, Tag, Download, Upload
@@ -263,9 +262,10 @@ export default function ProductMapping() {
                           <Input
                             value={editValue}
                             onChange={(e) => setEditValue(e.target.value)}
-                            className="h-7 text-xs w-32"
-                            placeholder="Código PDV..."
+                            className="h-7 text-xs w-36"
+                            placeholder="Ex: 627"
                             autoFocus
+                            list={`pdv-codes-${m.productId}`}
                           />
                         ) : (
                           <span className="font-mono text-xs text-muted-foreground">
@@ -275,26 +275,23 @@ export default function ProductMapping() {
                       </td>
                       <td className="p-3 max-w-[200px]">
                         {editingId === m.productId ? (
-                          <Select
-                            value={editValue || "__none__"}
-                            onValueChange={(v) => {
-                              if (v !== "__none__") setEditValue(v);
-                            }}
-                          >
-                            <SelectTrigger className="h-7 text-xs">
-                              <SelectValue placeholder="Selecionar código PDV..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">— Digitar manualmente —</SelectItem>
+                          <div className="flex flex-col gap-1">
+                            <p className="text-xs text-muted-foreground">Nome PDV (opcional)</p>
+                            <datalist id={`pdv-codes-${m.productId}`}>
                               {pdvProducts
                                 ?.filter((p) => p.externalCode)
                                 .map((p) => (
-                                  <SelectItem key={p.externalCode!} value={p.externalCode!}>
-                                    {p.externalCode} — {p.name}
-                                  </SelectItem>
+                                  <option key={p.externalCode!} value={p.externalCode!}>
+                                    {p.name}
+                                  </option>
                                 ))}
-                            </SelectContent>
-                          </Select>
+                            </datalist>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {editValue
+                                ? pdvProducts?.find((p) => p.externalCode === editValue)?.name ?? "Código digitado manualmente"
+                                : "Sem vínculo"}
+                            </p>
+                          </div>
                         ) : (
                           <span className="text-xs truncate block max-w-[200px]" title={m.externalName ?? ""}>
                             {m.externalName ?? (m.externalCode ? "Nome não registrado" : "—")}
