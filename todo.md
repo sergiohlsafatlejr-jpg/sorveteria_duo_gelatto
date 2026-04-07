@@ -498,3 +498,7 @@
 - [x] Endpoint confirm: registra NF-e na tabela nfe_imports após importação bem-sucedida
 - [x] Frontend: aviso vermelho com data da importação anterior e botão "Importar mesmo assim"
 - [x] Botão Confirmar desabilitado quando NF-e é duplicata (requer confirmação explícita)
+
+## Correção Executada: Duplicatas NF-e (07/04)
+- [x] Executar script de correção: 293 movimentações duplicadas excluídas, 108 produtos com estoque corrigido
+- [x] Backup criado em tabela backup_stock_movements_dupes (293 registros preservados)
