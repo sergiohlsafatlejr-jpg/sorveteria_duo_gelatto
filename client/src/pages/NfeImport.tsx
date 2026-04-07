@@ -46,6 +46,7 @@ type ParsedItem = {
 type NfeInfo = {
   nNF: string;
   dhEmi: string;
+  chNFe: string;
   emitCnpj: string;
   emitNome: string;
   destCnpj: string;
@@ -61,13 +62,24 @@ export default function NfeImport() {
   const [items, setItems] = useState<ParsedItem[]>([]);
   const [step, setStep] = useState<"upload" | "review" | "done">("upload");
   const [doneResult, setDoneResult] = useState<{ imported: number; created: number } | null>(null);
+  const [isDuplicate, setIsDuplicate] = useState(false);
+  const [duplicateDate, setDuplicateDate] = useState<string | null>(null);
+  const [forceImport, setForceImport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: productsList } = trpc.nfe.productsList.useQuery();
   const parseMutation = trpc.nfe.parse.useMutation({
     onSuccess: (data) => {
-      setNfeInfo(data.info);
+      setNfeInfo(data.info as NfeInfo);
       setItems(data.items as ParsedItem[]);
+      setIsDuplicate(!!data.isDuplicate);
+      setForceImport(false);
+      if (data.isDuplicate && data.duplicateInfo) {
+        const d = new Date(data.duplicateInfo.createdAt);
+        setDuplicateDate(d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }));
+      } else {
+        setDuplicateDate(null);
+      }
       setStep("review");
     },
     onError: (e) => toast.error(`Erro ao processar XML: ${e.message}`),
@@ -118,10 +130,17 @@ export default function NfeImport() {
     );
   }
 
-  function handleConfirm() {
+  function handleConfirm(force = false) {
     confirmMutation.mutate({
       nfeDate: nfeInfo!.dhEmi,
       supplier: nfeInfo!.emitNome,
+      chNFe: nfeInfo!.chNFe || undefined,
+      nNF: nfeInfo!.nNF || undefined,
+      emitCnpj: nfeInfo!.emitCnpj || undefined,
+      emitNome: nfeInfo!.emitNome || undefined,
+      dhEmi: nfeInfo!.dhEmi || undefined,
+      vNF: nfeInfo!.vNF || undefined,
+      forceImport: force,
       items: items.map((i) => ({
         productId: i.matchedProductId,
         isNew: i.isNew,
@@ -258,6 +277,42 @@ export default function NfeImport() {
               </Card>
             </div>
 
+            {/* ⚠️ Aviso de NF-e Duplicada */}
+            {isDuplicate && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-bold text-red-700 text-sm">
+                    ⚠️ Esta NF-e já foi importada anteriormente!
+                  </p>
+                  <p className="text-xs text-red-600 mt-1">
+                    A NF-e nº <strong>{nfeInfo?.nNF}</strong> do emitente <strong>{nfeInfo?.emitNome}</strong> já foi processada
+                    {duplicateDate ? ` em ${duplicateDate}` : ""}. Importar novamente irá <strong>duplicar o estoque</strong> de todos os itens.
+                  </p>
+                  <div className="mt-3 flex items-center gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-red-300 text-red-700 hover:bg-red-100 gap-2"
+                      onClick={() => { setStep("upload"); setItems([]); setNfeInfo(null); setIsDuplicate(false); }}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="gap-2"
+                      disabled={confirmMutation.isPending}
+                      onClick={() => handleConfirm(true)}
+                    >
+                      {confirmMutation.isPending ? <RefreshCw className="h-3 w-3 animate-spin" /> : <AlertTriangle className="h-3 w-3" />}
+                      Importar mesmo assim (duplicar estoque)
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Aviso sobre criação automática */}
             {newCount > 0 && (
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
@@ -392,8 +447,8 @@ export default function NfeImport() {
                 Carregar outro XML
               </Button>
               <Button
-                onClick={handleConfirm}
-                disabled={confirmMutation.isPending || items.length === 0}
+                onClick={() => handleConfirm(false)}
+                disabled={confirmMutation.isPending || items.length === 0 || isDuplicate}
                 className="gap-2"
               >
                 {confirmMutation.isPending ? (

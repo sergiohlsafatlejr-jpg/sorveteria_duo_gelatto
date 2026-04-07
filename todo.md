@@ -478,3 +478,23 @@
 
 ## Correção: Botão Salvar some ao editar mapeamento (03/04)
 - [x] Corrigir botão Salvar/Cancelar que desaparece ao editar produto já mapeado
+
+## Correção: Erro 404 nas rotas (03/04)
+- [ ] Investigar e corrigir rotas que retornam 404
+
+## Proteção contra NF-e Duplicada (07/04)
+- [ ] Analisar schema e código do importador NF-e
+- [ ] Verificar notas duplicadas existentes no banco
+- [ ] Adicionar constraint unique na chave de acesso (chNFe) na tabela de NF-e
+- [ ] Validação no backend: retornar erro descritivo se nota já importada
+- [ ] Feedback visual no frontend: exibir aviso/badge "Já importada" antes de confirmar
+
+## Proteção contra NF-e Duplicada (07/04)
+- [x] Diagnóstico: 20 duplicatas encontradas no banco (NFs de 05/03 e 12/03 importadas 2x)
+- [x] Tabela nfe_imports criada com chave única (chNFe ou nNF+CNPJ) e migrada (pnpm db:push)
+- [x] Parser NF-e atualizado para extrair chNFe (chave de acesso de 44 dígitos)
+- [x] Endpoint parse: verifica duplicata antes de exibir revisão
+- [x] Endpoint confirm: bloqueia reimportação (TRPCError CONFLICT) com opção forceImport=true
+- [x] Endpoint confirm: registra NF-e na tabela nfe_imports após importação bem-sucedida
+- [x] Frontend: aviso vermelho com data da importação anterior e botão "Importar mesmo assim"
+- [x] Botão Confirmar desabilitado quando NF-e é duplicata (requer confirmação explícita)

@@ -534,6 +534,22 @@ export const finGoalExtraCosts = mysqlTable("fin_goal_extra_costs", {
 export type FinGoalExtraCost = typeof finGoalExtraCosts.$inferSelect;
 export type InsertFinGoalExtraCost = typeof finGoalExtraCosts.$inferInsert;
 
+// ─── NF-e Imports (Controle de NF-e importadas para evitar duplicatas) ───────────
+export const nfeImports = mysqlTable("nfe_imports", {
+  id: int("id").autoincrement().primaryKey(),
+  chNFe: varchar("chNFe", { length: 44 }).unique(), // Chave de acesso de 44 dígitos (única)
+  nNF: varchar("nNF", { length: 20 }).notNull(),    // Número da nota
+  emitCnpj: varchar("emitCnpj", { length: 14 }).notNull(), // CNPJ do emitente
+  emitNome: varchar("emitNome", { length: 255 }),
+  dhEmi: varchar("dhEmi", { length: 30 }),           // Data de emissão
+  vNF: decimal("vNF", { precision: 12, scale: 2 }).notNull().default("0"),
+  totalItems: int("totalItems").default(0).notNull(),
+  userId: int("userId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type NfeImport = typeof nfeImports.$inferSelect;
+export type InsertNfeImport = typeof nfeImports.$inferInsert;
+
 // ─── Sales Imports (Importação de Vendas via XLS) ──────────────────────────────
 export const salesImports = mysqlTable("sales_imports", {
   id: int("id").autoincrement().primaryKey(),

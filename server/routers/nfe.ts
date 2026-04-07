@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import * as db from "../db";
-import { products, stockMovements } from "../../drizzle/schema";
+import { products, stockMovements, nfeImports } from "../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
@@ -22,6 +23,7 @@ export type NfeItem = {
 export type NfeInfo = {
   nNF: string;
   dhEmi: string;
+  chNFe: string;   // Chave de acesso de 44 dígitos
   emitCnpj: string;
   emitNome: string;
   destCnpj: string;
@@ -57,9 +59,16 @@ function parseNfeXml(xmlContent: string): { info: NfeInfo; items: NfeItem[] } {
   const totalMatch = clean.match(/<ICMSTot>([\s\S]*?)<\/ICMSTot>/);
   const totalXml = totalMatch ? totalMatch[1] : "";
 
+  // Extrai chave de acesso (44 dígitos) do atributo Id da tag infNFe
+  const chNFeMatch = xmlContent.match(/Id="NFe(\d{44})"/i) ||
+                     xmlContent.match(/<chNFe>(\d{44})<\/chNFe>/i) ||
+                     xmlContent.match(/chNFe="(\d{44})"/i);
+  const chNFe = chNFeMatch ? chNFeMatch[1] : "";
+
   const info: NfeInfo = {
     nNF: getTag(ideXml, "nNF"),
     dhEmi: getTag(ideXml, "dhEmi"),
+    chNFe,
     emitCnpj: getTag(emitXml, "CNPJ"),
     emitNome: getTag(emitXml, "xNome"),
     destCnpj: getTag(destXml, "CNPJ"),
@@ -129,6 +138,33 @@ export const nfeRouter = router({
         };
       }
 
+      // ── Verificar se a NF-e já foi importada (por chave de acesso ou nNF+CNPJ) ──
+      let isDuplicate = false;
+      let duplicateInfo: { id: number; createdAt: Date } | null = null;
+
+      if (info.chNFe) {
+        const existing = await dbInstance
+          .select({ id: nfeImports.id, createdAt: nfeImports.createdAt })
+          .from(nfeImports)
+          .where(eq(nfeImports.chNFe, info.chNFe))
+          .limit(1);
+        if (existing.length > 0) {
+          isDuplicate = true;
+          duplicateInfo = existing[0];
+        }
+      } else if (info.nNF && info.emitCnpj) {
+        // Fallback: verificar por número + CNPJ emitente
+        const existing = await dbInstance
+          .select({ id: nfeImports.id, createdAt: nfeImports.createdAt })
+          .from(nfeImports)
+          .where(and(eq(nfeImports.nNF, info.nNF), eq(nfeImports.emitCnpj, info.emitCnpj)))
+          .limit(1);
+        if (existing.length > 0) {
+          isDuplicate = true;
+          duplicateInfo = existing[0];
+        }
+      }
+
       const enriched = await Promise.all(
         items.map(async (item) => {
           const suggestedFactor = extractConversionFromName(item.xProd);
@@ -167,7 +203,7 @@ export const nfeRouter = router({
         })
       );
 
-      return { info, items: enriched };
+      return { info, items: enriched, isDuplicate, duplicateInfo };
     }),
 
   // Confirma a importação: cria produtos novos e dá entrada no estoque
@@ -176,6 +212,14 @@ export const nfeRouter = router({
       z.object({
         nfeDate: z.string(),
         supplier: z.string().optional(),
+        // Dados da NF-e para controle de duplicatas
+        chNFe: z.string().optional(),
+        nNF: z.string().optional(),
+        emitCnpj: z.string().optional(),
+        emitNome: z.string().optional(),
+        dhEmi: z.string().optional(),
+        vNF: z.number().optional(),
+        forceImport: z.boolean().optional().default(false), // Permite reimportar mesmo duplicada
         items: z.array(
           z.object({
             productId: z.number().nullable(),
@@ -194,6 +238,31 @@ export const nfeRouter = router({
     .mutation(async ({ input, ctx }) => {
       const dbInstance = await getDb();
       if (!dbInstance) throw new Error("DB não disponível");
+
+      // ── Bloquear duplicata (a menos que forceImport=true) ──
+      if (!input.forceImport && (input.chNFe || (input.nNF && input.emitCnpj))) {
+        let existing: any[] = [];
+        if (input.chNFe) {
+          existing = await dbInstance
+            .select({ id: nfeImports.id, createdAt: nfeImports.createdAt })
+            .from(nfeImports)
+            .where(eq(nfeImports.chNFe, input.chNFe))
+            .limit(1);
+        } else {
+          existing = await dbInstance
+            .select({ id: nfeImports.id, createdAt: nfeImports.createdAt })
+            .from(nfeImports)
+            .where(and(eq(nfeImports.nNF, input.nNF!), eq(nfeImports.emitCnpj, input.emitCnpj!)))
+            .limit(1);
+        }
+        if (existing.length > 0) {
+          const importedAt = existing[0].createdAt;
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `Esta NF-e já foi importada em ${new Date(importedAt).toLocaleDateString("pt-BR")}. Use forceImport=true para reimportar mesmo assim.`,
+          });
+        }
+      }
 
       const purchaseDate = new Date(input.nfeDate);
       let imported = 0;
@@ -266,13 +335,32 @@ export const nfeRouter = router({
         imported++;
       }
 
+      // ── Registrar NF-e na tabela de controle para evitar futuras duplicatas ──
+      if (input.nNF && input.emitCnpj) {
+        try {
+          await dbInstance.insert(nfeImports).values({
+            chNFe: input.chNFe || null,
+            nNF: input.nNF,
+            emitCnpj: input.emitCnpj,
+            emitNome: input.emitNome || null,
+            dhEmi: input.dhEmi || null,
+            vNF: String(input.vNF ?? 0),
+            totalItems: imported,
+            userId: ctx.user.id,
+          });
+        } catch (e: any) {
+          // Ignora erro de unique constraint (pode acontecer em forceImport)
+          if (!e.message?.includes("Duplicate entry")) throw e;
+        }
+      }
+
       await db.createAuditLog({
         userId: ctx.user.id,
         userName: ctx.user.name ?? "Sistema",
         action: "create",
         module: "nfe_import",
         targetId: 0,
-        details: `NF-e importada: ${imported} produto(s) com entrada no estoque, ${created} produto(s) criado(s) automaticamente`,
+        details: `NF-e importada: ${imported} produto(s) com entrada no estoque, ${created} produto(s) criado(s) automaticamente${input.chNFe ? ` | chNFe: ${input.chNFe.substring(0, 10)}...` : ""}`,
       });
 
       return { imported, created };

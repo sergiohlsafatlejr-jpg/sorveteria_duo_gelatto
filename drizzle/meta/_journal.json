@@ -113,6 +113,13 @@
       "when": 1775080227859,
       "tag": "0015_material_power_man",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1775576106987,
+      "tag": "0016_common_energizer",
+      "breakpoints": true
     }
   ]
 }
