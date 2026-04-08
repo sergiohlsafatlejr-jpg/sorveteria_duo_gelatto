@@ -3,8 +3,10 @@ import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { TrendingDown, TrendingUp } from "lucide-react";
+import { TrendingDown, TrendingUp, ShoppingCart } from "lucide-react";
+import { Link } from "wouter";
 
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -25,6 +27,7 @@ interface DRERow {
   positive?: boolean;
   negative?: boolean;
   separator?: boolean;
+  badge?: string;
 }
 
 export default function FinDRE() {
@@ -34,22 +37,35 @@ export default function FinDRE() {
   const dateFrom = new Date(year, month, 1);
   const dateTo = new Date(year, month + 1, 0, 23, 59, 59);
 
+  // Mês no formato YYYY-MM para busca nas vendas PDV
+  const referenceMonth = `${year}-${String(month + 1).padStart(2, "0")}`;
+
   const { data: transactions = [] } = trpc.fin.transactions.list.useQuery({ dateFrom, dateTo });
   const { data: receivables = [] } = trpc.fin.receivables.list.useQuery({ dateFrom, dateTo });
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
 
+  // Dados de vendas PDV importadas
+  const { data: dreVendas } = trpc.reports.dre.useQuery({ referenceMonth });
+
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
 
-  // ── Receitas ──────────────────────────────────────────────────────────────
-  const totalRevenue = receivables
+  // ── Receitas Financeiras (Contas a Receber) ───────────────────────────────
+  const totalRevenueFin = receivables
     .filter(r => r.isReceived)
     .reduce((s, r) => s + Number(r.amount), 0);
-  const pendingRevenue = receivables
+  const pendingRevenueFin = receivables
     .filter(r => !r.isReceived)
     .reduce((s, r) => s + Number(r.amount), 0);
 
-  // ── Despesas (somente Contas a Pagar do período) ──────────────────────────
-  // Agrupadas por categoria para exibição detalhada
+  // ── Receita PDV (Vendas importadas do caixa) ──────────────────────────────
+  const totalRevenuePDV = dreVendas?.totalRevenue ?? 0;
+  const totalCMV = dreVendas?.totalCMV ?? 0;
+
+  // ── Receita Total Combinada ───────────────────────────────────────────────
+  const totalRevenue = totalRevenueFin + totalRevenuePDV;
+  const pendingRevenue = pendingRevenueFin;
+
+  // ── Despesas (Contas a Pagar) ─────────────────────────────────────────────
   const expensesByCategory = new Map<string, { paid: number; pending: number }>();
   transactions.forEach(t => {
     const cat = t.categoryId
@@ -73,10 +89,10 @@ export default function FinDRE() {
   const totalExpenses = totalExpensesPaid + totalExpensesPending;
 
   // ── Cálculos do DRE ───────────────────────────────────────────────────────
-  // Lucro Bruto = Receitas Recebidas - Despesas Pagas
-  const grossProfit = totalRevenue - totalExpensesPaid;
-  // Resultado Líquido = Receita Total (recebida + pendente) - Despesas Totais
-  const netResult = (totalRevenue + pendingRevenue) - totalExpenses;
+  // Lucro Bruto = Receita Total - CMV - Despesas Pagas
+  const grossProfit = totalRevenue - totalCMV - totalExpensesPaid;
+  // Resultado Líquido
+  const netResult = (totalRevenue + pendingRevenue) - totalCMV - totalExpenses;
   const margin = (totalRevenue + pendingRevenue) > 0
     ? (netResult / (totalRevenue + pendingRevenue)) * 100
     : 0;
@@ -94,17 +110,31 @@ export default function FinDRE() {
   });
 
   const dreRows: DRERow[] = [
-    { label: "RECEITA BRUTA", value: totalRevenue + pendingRevenue, bold: true, positive: true },
-    { label: "Receitas Recebidas", value: totalRevenue, indent: 1, positive: true },
-    { label: "Receitas Pendentes", value: pendingRevenue, indent: 1 },
+    // Receitas
+    { label: "RECEITA BRUTA TOTAL", value: totalRevenue + pendingRevenue, bold: true, positive: true },
+    ...(totalRevenuePDV > 0 ? [
+      { label: "Vendas PDV (Caixa)", value: totalRevenuePDV, indent: 1, positive: true, badge: "PDV" },
+    ] : []),
+    ...(totalRevenueFin > 0 || pendingRevenueFin > 0 ? [
+      { label: "Receitas Financeiras Recebidas", value: totalRevenueFin, indent: 1, positive: true },
+      { label: "Receitas Financeiras Pendentes", value: pendingRevenueFin, indent: 1 },
+    ] : []),
     { label: "", value: 0, separator: true },
-    { label: "(-) DESPESAS TOTAIS", value: totalExpenses, bold: true, negative: true },
+    // CMV
+    ...(totalCMV > 0 ? [
+      { label: "(-) CMV — Custo das Mercadorias Vendidas", value: totalCMV, bold: true, negative: true, badge: "PDV" },
+      { label: `Margem Bruta PDV: ${totalRevenuePDV > 0 ? (((totalRevenuePDV - totalCMV) / totalRevenuePDV) * 100).toFixed(1) : 0}%`, value: 0, indent: 1 },
+      { label: "", value: 0, separator: true },
+    ] : []),
+    // Despesas
+    { label: "(-) DESPESAS OPERACIONAIS", value: totalExpenses, bold: true, negative: true },
     { label: "Despesas Pagas", value: totalExpensesPaid, indent: 1, negative: true },
     { label: "Despesas Pendentes", value: totalExpensesPending, indent: 1 },
     ...categoryRows,
     { label: "", value: 0, separator: true },
+    // Resultado
     { label: "LUCRO BRUTO", value: grossProfit, bold: true, positive: grossProfit >= 0, negative: grossProfit < 0 },
-    { label: "(Receitas recebidas − Despesas pagas)", value: 0, indent: 1 },
+    { label: "(Receitas − CMV − Despesas pagas)", value: 0, indent: 1 },
     { label: "", value: 0, separator: true },
     { label: "RESULTADO LÍQUIDO", value: netResult, bold: true, positive: netResult >= 0, negative: netResult < 0 },
     { label: `Margem Líquida: ${margin.toFixed(1)}%`, value: netResult, indent: 1, positive: netResult >= 0, negative: netResult < 0 },
@@ -145,12 +175,38 @@ export default function FinDRE() {
         </div>
       </div>
 
+      {/* Banner PDV */}
+      {totalRevenuePDV > 0 && (
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-sm">
+          <ShoppingCart className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+          <span className="text-indigo-700 dark:text-indigo-300">
+            Vendas PDV de <strong>{MONTHS[month]}/{year}</strong> incluídas: <strong>{fmtBRL(totalRevenuePDV)}</strong>
+            {totalCMV > 0 && <> — CMV: <strong>{fmtBRL(totalCMV)}</strong></>}
+          </span>
+          <Link to="/gerencial" className="ml-auto text-xs text-indigo-500 underline underline-offset-2 hover:text-indigo-700">
+            Ver detalhes →
+          </Link>
+        </div>
+      )}
+
+      {totalRevenuePDV === 0 && (
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/50 text-sm">
+          <ShoppingCart className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+          <span className="text-muted-foreground">
+            Nenhuma venda PDV confirmada para <strong>{MONTHS[month]}/{year}</strong>.
+          </span>
+          <Link to="/sales-import" className="ml-auto text-xs text-primary underline underline-offset-2">
+            Importar vendas →
+          </Link>
+        </div>
+      )}
+
       {/* Result Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: "Receita Total", value: totalRevenue + pendingRevenue, color: "text-emerald-500" },
+          { label: "CMV (Custo Mercadorias)", value: totalCMV, color: "text-orange-500" },
           { label: "Despesas Totais", value: totalExpenses, color: "text-destructive" },
-          { label: "Lucro Bruto", value: grossProfit, color: grossProfit >= 0 ? "text-emerald-500" : "text-destructive" },
           { label: "Resultado Líquido", value: netResult, color: netResult >= 0 ? "text-emerald-500" : "text-destructive" },
         ].map(s => (
           <div key={s.label} className="rounded-xl border border-border/50 bg-card/50 p-4 text-center">
@@ -193,11 +249,16 @@ export default function FinDRE() {
                 )}
               >
                 <span className={cn(
-                  "text-sm",
+                  "text-sm flex items-center gap-2",
                   row.bold && "font-semibold",
                   !row.bold && "text-muted-foreground",
                 )}>
                   {row.label}
+                  {row.badge && (
+                    <Badge variant="outline" className="text-[10px] px-1 py-0 border-indigo-400 text-indigo-500">
+                      {row.badge}
+                    </Badge>
+                  )}
                 </span>
                 {row.value !== 0 && (
                   <span className={cn(

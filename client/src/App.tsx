@@ -17,6 +17,7 @@ import Connector from "./pages/Connector";
 import Notifications from "./pages/Notifications";
 import Dashboard from "./pages/Dashboard";
 import Reports from "./pages/Reports";
+import GerencialReports from "./pages/GerencialReports";
 // Finance module pages
 import FinanceDashboard from "./pages/fin/FinanceDashboard";
 import FinPayables from "./pages/fin/FinPayables";
@@ -55,6 +56,7 @@ function Router() {
       <Route path="/products-register">{() => <ProtectedRoute path="/products-register"><ProductsRegister /></ProtectedRoute>}</Route>
       <Route path="/products">{() => <ProtectedRoute path="/products"><Products /></ProtectedRoute>}</Route>
       <Route path="/reports">{() => <ProtectedRoute path="/reports"><Reports /></ProtectedRoute>}</Route>
+      <Route path="/gerencial">{() => <ProtectedRoute path="/gerencial"><GerencialReports /></ProtectedRoute>}</Route>
       {/* Pontos — regras e canais (gerente+) */}
       <Route path="/points-rules">{() => <ProtectedRoute path="/points-rules"><PointsRules /></ProtectedRoute>}</Route>
       <Route path="/whatsapp">{() => <ProtectedRoute path="/whatsapp"><WhatsApp /></ProtectedRoute>}</Route>

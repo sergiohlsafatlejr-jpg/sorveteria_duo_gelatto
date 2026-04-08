@@ -104,6 +104,7 @@ const menuGroups: MenuGroup[] = [
       { icon: FileSpreadsheet, label: "Importação de Vendas", path: "/sales-import" },
       { icon: Tag, label: "Mapeamento PDV", path: "/sales/product-mapping" },
       { icon: BarChart2, label: "Relatório de Vendas", path: "/sales/sales-report" },
+      { icon: TrendingUp, label: "Relatórios Gerenciais", path: "/gerencial" },
       { icon: Bell, label: "Notificações", path: "/notifications" },
     ],
   },

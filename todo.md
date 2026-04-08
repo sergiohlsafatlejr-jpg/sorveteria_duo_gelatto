@@ -559,3 +559,13 @@
 - [x] Backend: endpoint /upload agora executa matchProductsToStock e retorna productId/linkStatus em cada item
 - [x] Frontend: linkMap inicializado com os vínculos automáticos do backend (antes sempre iniciava vazio)
 - [x] Resultado: 210/210 produtos da planilha de março vinculados automaticamente (100%)
+
+## Módulo de Relatórios Gerenciais (08/04)
+- [x] Backend: endpoint reports.costVsSales — custo x venda por produto com margem
+- [x] Backend: endpoint reports.topProducts — ranking de produtos mais vendidos
+- [x] Backend: endpoint reports.paymentMethods — formas de pagamento do caixa por mês
+- [x] Backend: endpoint reports.dre — DRE integrado (receita de vendas + transações financeiras)
+- [x] Frontend: página /gerencial com abas: Custo x Venda, Mais Vendidos, Formas de Pagamento
+- [x] Frontend: DRE do Financeiro integrado com dados de vendas PDV (receita + CMV)
+- [x] Frontend: filtro por mês de referência
+- [x] Menu: item Relatórios Gerenciais no grupo Vendas
