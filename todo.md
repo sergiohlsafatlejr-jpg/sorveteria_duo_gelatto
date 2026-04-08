@@ -549,3 +549,8 @@
 - [x] Backend: arquivo de caixa agora é opcional no endpoint /api/sales-import/upload
 - [x] Frontend: arquivo "Vendas por Caixa" marcado como opcional na tela de importação
 - [x] Teste: 210 itens parseados, total R$ 116.148,61, todos com código preenchido
+
+## Correção de Matching por Código PDV (08/04)
+- [x] matchProductsToStock: busca código também em sku e supplierCode (antes só em externalCode)
+- [x] Resultado: 174/210 produtos vinculados automaticamente (83%) — 156 por SKU, 8 por externalCode, 3 por supplierCode, 7 por fuzzy
+- [x] 36 produtos pendentes (não têm código PDV cadastrado no banco)

@@ -69,20 +69,42 @@ export async function matchProductsToStock(
   if (!db) return items.map((i) => ({ ...i, productId: null, productName: null, matchScore: 0, linkStatus: "pending" as const }));
 
   const allProducts = await db
-    .select({ id: products.id, name: products.name, externalCode: products.externalCode })
+    .select({
+      id: products.id,
+      name: products.name,
+      externalCode: products.externalCode,
+      sku: products.sku,
+      supplierCode: products.supplierCode,
+    })
     .from(products)
     .where(eq(products.active, true));
 
   return items.map((item) => {
+    const code = item.external_code?.trim();
+
     // 1. Tentar por externalCode exato
-    const byCode = allProducts.find((p: { id: number; name: string; externalCode: string | null }) => p.externalCode === item.external_code);
-    if (byCode) {
-      return { ...item, productId: byCode.id, productName: byCode.name, matchScore: 1.0, linkStatus: "linked" as const };
+    if (code) {
+      const byExtCode = allProducts.find((p) => p.externalCode?.trim() === code);
+      if (byExtCode) {
+        return { ...item, productId: byExtCode.id, productName: byExtCode.name, matchScore: 1.0, linkStatus: "linked" as const };
+      }
+
+      // 2. Tentar por SKU (código PDV geralmente salvo aqui)
+      const bySku = allProducts.find((p) => p.sku?.trim() === code);
+      if (bySku) {
+        return { ...item, productId: bySku.id, productName: bySku.name, matchScore: 1.0, linkStatus: "linked" as const };
+      }
+
+      // 3. Tentar por supplierCode
+      const bySupplier = allProducts.find((p) => p.supplierCode?.trim() === code);
+      if (bySupplier) {
+        return { ...item, productId: bySupplier.id, productName: bySupplier.name, matchScore: 1.0, linkStatus: "linked" as const };
+      }
     }
 
-    // 2. Fuzzy match por nome
+    // 4. Fuzzy match por nome
     let bestMatch: { id: number; name: string; score: number } | null = null;
-    for (const p of allProducts as Array<{ id: number; name: string; externalCode: string | null }>) {
+    for (const p of allProducts) {
       const score = similarity(item.external_name, p.name);
       if (!bestMatch || score > bestMatch.score) {
         bestMatch = { id: p.id, name: p.name, score };
