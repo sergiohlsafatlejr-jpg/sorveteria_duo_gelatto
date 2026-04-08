@@ -20,6 +20,7 @@ import {
   updateProductMapping,
   getSalesReport,
   getConfirmedMonths,
+  matchProductsToStock,
 } from "../db.sales-import";
 import { invokeLLM } from "../_core/llm";
 
@@ -316,11 +317,21 @@ salesImportExpressRouter.post(
         }
       }
 
+      // Executar matching automático dos produtos com o estoque
+      const rawItems = (produtosData as any).items || [];
+      const matchedItems = await matchProductsToStock(rawItems);
+
+      // Substituir items pelo resultado do matching
+      const produtosDataWithMatch = {
+        ...(produtosData as any),
+        items: matchedItems,
+      };
+
       return res.json({
         success: true,
         data: {
           caixa: caixaData,
-          produtos: produtosData,
+          produtos: produtosDataWithMatch,
         },
       });
     } catch (err: unknown) {

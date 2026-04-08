@@ -554,3 +554,8 @@
 - [x] matchProductsToStock: busca código também em sku e supplierCode (antes só em externalCode)
 - [x] Resultado: 174/210 produtos vinculados automaticamente (83%) — 156 por SKU, 8 por externalCode, 3 por supplierCode, 7 por fuzzy
 - [x] 36 produtos pendentes (não têm código PDV cadastrado no banco)
+
+## Correção: Vínculos Automáticos na Tela de Revisão (08/04)
+- [x] Backend: endpoint /upload agora executa matchProductsToStock e retorna productId/linkStatus em cada item
+- [x] Frontend: linkMap inicializado com os vínculos automáticos do backend (antes sempre iniciava vazio)
+- [x] Resultado: 210/210 produtos da planilha de março vinculados automaticamente (100%)

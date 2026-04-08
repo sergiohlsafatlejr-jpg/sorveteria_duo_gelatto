@@ -29,6 +29,11 @@ interface ParsedItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  // Campos adicionados pelo matching automático no backend
+  productId?: number | null;
+  productName?: string | null;
+  matchScore?: number;
+  linkStatus?: "linked" | "pending" | "ignored";
 }
 
 interface ParsedPayment {
@@ -268,8 +273,16 @@ function ReviewStep({
     onError: (err) => toast.error(err.message),
   });
 
-  // Estado local de vinculação (antes de salvar no banco)
-  const [linkMap, setLinkMap] = useState<Record<string, { productId: number | null; status: "linked" | "pending" | "ignored" }>>({});
+  // Estado local de vinculação — inicializado com os vínculos automáticos do backend
+  const [linkMap, setLinkMap] = useState<Record<string, { productId: number | null; status: "linked" | "pending" | "ignored" }>>(() => {
+    const initial: Record<string, { productId: number | null; status: "linked" | "pending" | "ignored" }> = {};
+    for (const item of data.produtos.items) {
+      if (item.productId && item.linkStatus === "linked") {
+        initial[item.external_code] = { productId: item.productId, status: "linked" };
+      }
+    }
+    return initial;
+  });
   const [showAll, setShowAll] = useState(false);
   const [filterStatus, setFilterStatus] = useState<"all" | "linked" | "pending" | "ignored">("all");
 
