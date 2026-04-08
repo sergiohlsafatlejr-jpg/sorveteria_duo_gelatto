@@ -536,3 +536,8 @@
 - [x] Frontend: tela de revisão com Select para vincular itens "Novo" a produtos já cadastrados
 - [x] Frontend: opção "Criar novo produto" no Select de vinculação
 - [x] Correção: importMappingFromBuffer aceita qualquer formato sem exigir cabeçalho padrão
+
+## Correção de Custo na Importação NF-e (08/04)
+- [x] Backend: ao importar NF-e, atualiza costPrice dos produtos existentes (antes só atualizava currentStock)
+- [x] Backend: novo endpoint recalcCosts para recalcular custo de todos os produtos a partir do histórico de movimentações
+- [x] Frontend: botão "Recalcular Custos" na tela de importação NF-e para corrigir produtos já importados

@@ -125,6 +125,14 @@ export default function NfeImport() {
 
   const utils = trpc.useUtils();
 
+  const recalcCostsMutation = trpc.nfe.recalcCosts.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Custos recalculados: ${data.updated} produto(s) atualizados a partir do histórico de NF-es!`);
+      utils.products?.list?.invalidate?.();
+    },
+    onError: (e) => toast.error(`Erro ao recalcular custos: ${e.message}`),
+  });
+
   // ── Modo único: processar arquivo ──
   function handleFile(file: File) {
     if (!file.name.endsWith(".xml")) {
@@ -387,8 +395,8 @@ export default function NfeImport() {
             </p>
           </div>
 
-          {/* Seletor de modo */}
-          <div className="flex gap-2">
+          {/* Seletor de modo + Recalcular Custos */}
+          <div className="flex gap-2 flex-wrap justify-end">
             <Button
               variant={mode === "single" ? "default" : "outline"}
               size="sm"
@@ -406,6 +414,17 @@ export default function NfeImport() {
             >
               <Files className="h-4 w-4" />
               Lote (até 30)
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => recalcCostsMutation.mutate()}
+              disabled={recalcCostsMutation.isPending}
+              className="gap-2 border-amber-400 text-amber-700 hover:bg-amber-50"
+              title="Recalcula o preço de custo de todos os produtos a partir da última NF-e importada"
+            >
+              {recalcCostsMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Recalcular Custos
             </Button>
           </div>
         </div>

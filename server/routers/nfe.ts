@@ -373,10 +373,16 @@ export const nfeRouter = router({
         const previousStock = productRow.currentStock;
         const newStock = previousStock + item.stockQty;
 
-        // Atualiza estoque
+        // Atualiza estoque e custo unitário (custo da NF-e por unidade de estoque)
+        const newCostPrice = item.conversionFactor > 0
+          ? item.vUnCom / item.conversionFactor
+          : item.vUnCom;
         await dbInstance
           .update(products)
-          .set({ currentStock: newStock })
+          .set({
+            currentStock: newStock,
+            ...(newCostPrice > 0 ? { costPrice: String(newCostPrice.toFixed(2)) } : {}),
+          })
           .where(eq(products.id, productId));
 
         // Registra movimentação
@@ -434,6 +440,57 @@ export const nfeRouter = router({
 
       return { imported, created };
     }),
+
+  // Recalcula o costPrice de todos os produtos a partir da última movimentação de entrada com unitCost
+  recalcCosts: protectedProcedure.mutation(async ({ ctx }) => {
+    const dbInstance = await getDb();
+    if (!dbInstance) throw new Error("DB não disponível");
+
+    // Busca a última movimentação de entrada com unitCost para cada produto
+    const movements = await dbInstance
+      .select({
+        productId: stockMovements.productId,
+        unitCost: stockMovements.unitCost,
+        createdAt: stockMovements.createdAt,
+      })
+      .from(stockMovements)
+      .where(and(
+        eq(stockMovements.type, "in"),
+        sql`${stockMovements.unitCost} IS NOT NULL AND ${stockMovements.unitCost} > 0`
+      ))
+      .orderBy(sql`${stockMovements.createdAt} DESC`);
+
+    // Agrupa por produto, mantendo apenas a movimentação mais recente
+    const latestByProduct = new Map<number, string>();
+    for (const m of movements) {
+      if (!latestByProduct.has(m.productId) && m.unitCost) {
+        latestByProduct.set(m.productId, m.unitCost);
+      }
+    }
+
+    let updated = 0;
+    for (const [productId, unitCost] of Array.from(latestByProduct.entries())) {
+      const cost = parseFloat(unitCost);
+      if (cost > 0) {
+        await dbInstance
+          .update(products)
+          .set({ costPrice: String(cost.toFixed(2)) })
+          .where(eq(products.id, productId));
+        updated++;
+      }
+    }
+
+    await db.createAuditLog({
+      userId: ctx.user.id,
+      userName: ctx.user.name ?? "Sistema",
+      action: "update",
+      module: "nfe_import",
+      targetId: 0,
+      details: `Recalculo de custos: ${updated} produto(s) atualizados a partir do histórico de movimentações`,
+    });
+
+    return { updated };
+  }),
 
   // Lista todos os produtos cadastrados para mapeamento manual
   productsList: protectedProcedure.query(async () => {
