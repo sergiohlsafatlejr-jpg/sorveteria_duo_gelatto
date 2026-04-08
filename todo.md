@@ -517,3 +517,22 @@
 - [x] Frontend: relatório final com contadores (sucesso, duplicadas, erros, itens no estoque)
 - [x] Frontend: botão "Tentar novamente" para arquivos com erro
 - [x] Frontend: processamento sequencial com pausa de 300ms entre arquivos
+
+## Limpeza e Reimportação NF-e com Novos Produtos (08/04)
+- [ ] Verificar estado atual: produtos novos cadastrados, mapeamentos existentes, NF-es no banco
+- [ ] Executar limpeza das NF-es importadas (movimentações + nfe_imports)
+- [ ] Verificar e melhorar vinculação automática NF-e → produtos novos na importação
+
+## Vinculação Automática NF-e → Estoque na Importação (08/04)
+- [ ] Limpar NF-es existentes no banco (movimentações + nfe_imports)
+- [ ] Backend: ao parsear NF-e, sugerir produto do estoque para cada item (fuzzy match + externalCode)
+- [ ] Backend: endpoint nfe.confirmWithLinks que recebe mapa de vínculos confirmados
+- [ ] Frontend: tela de revisão de vínculos NF-e → Estoque antes de confirmar importação
+- [ ] Frontend: modo lote com vinculação automática (confiança alta) e revisão dos pendentes
+
+## Vinculação Automática NF-e → Estoque (08/04)
+- [x] Banco limpo: 317 movimentações e 19 registros de NF-e removidos para reimportação
+- [x] Backend: fuzzy match por nome como fallback no endpoint parse da NF-e
+- [x] Frontend: tela de revisão com Select para vincular itens "Novo" a produtos já cadastrados
+- [x] Frontend: opção "Criar novo produto" no Select de vinculação
+- [x] Correção: importMappingFromBuffer aceita qualquer formato sem exigir cabeçalho padrão

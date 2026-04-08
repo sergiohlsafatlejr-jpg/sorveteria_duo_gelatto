@@ -557,21 +557,31 @@ export default function NfeImport() {
                               <td className="p-3 text-center">
                                 <Badge variant={item.isNew ? "secondary" : "default"} className={`text-xs ${item.isNew ? "bg-blue-100 text-blue-700 border-blue-200" : ""}`}>{item.stockQty} un</Badge>
                               </td>
-                              <td className="p-3 min-w-[200px]">
-                                {item.isNew ? (
-                                  <div className="flex items-center gap-2">
+                              <td className="p-3 min-w-[220px]">
+                                <div className="flex items-center gap-2">
+                                  {item.isNew ? (
                                     <Badge className="bg-blue-600 text-white text-xs shrink-0">Novo</Badge>
-                                    <span className="text-xs text-blue-700 font-medium truncate">Será criado automaticamente</span>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-2">
+                                  ) : (
                                     <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                                    <Select value={String(item.matchedProductId)} onValueChange={(v) => { const prod = productsList?.find((p) => p.id === parseInt(v)); updateItem(idx, { matchedProductId: parseInt(v), matchedProductName: prod?.name ?? null, isNew: false, stockUnit: prod?.unit ?? "un", conversionFactor: prod?.conversionFactor ?? item.conversionFactor, stockQty: Math.round(item.qCom * (prod?.conversionFactor ?? item.conversionFactor)) }); }}>
-                                      <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                                      <SelectContent>{productsList?.map((p) => (<SelectItem key={p.id} value={String(p.id)} className="text-xs">{p.name}</SelectItem>))}</SelectContent>
-                                    </Select>
-                                  </div>
-                                )}
+                                  )}
+                                  <Select
+                                    value={item.isNew ? "__new__" : String(item.matchedProductId)}
+                                    onValueChange={(v) => {
+                                      if (v === "__new__") {
+                                        updateItem(idx, { matchedProductId: null, matchedProductName: null, isNew: true });
+                                      } else {
+                                        const prod = productsList?.find((p) => p.id === parseInt(v));
+                                        updateItem(idx, { matchedProductId: parseInt(v), matchedProductName: prod?.name ?? null, isNew: false, stockUnit: prod?.unit ?? "un", conversionFactor: prod?.conversionFactor ?? item.conversionFactor, stockQty: Math.round(item.qCom * (prod?.conversionFactor ?? item.conversionFactor)) });
+                                      }
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__new__" className="text-xs text-blue-600 font-medium">➕ Criar novo produto</SelectItem>
+                                      {productsList?.map((p) => (<SelectItem key={p.id} value={String(p.id)} className="text-xs">{p.name}</SelectItem>))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
                               </td>
                               <td className="p-3 text-right text-xs text-muted-foreground">{fmt(item.vUnCom)}</td>
                             </tr>

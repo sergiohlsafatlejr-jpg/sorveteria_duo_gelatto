@@ -7,6 +7,49 @@ import { products, stockMovements, nfeImports } from "../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
+// ─── Fuzzy match simples por similaridade de nome ─────────────────────────────
+function normalizeStr(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function similarity(a: string, b: string): number {
+  const na = normalizeStr(a);
+  const nb = normalizeStr(b);
+  if (na === nb) return 1.0;
+  // Verifica se todos os tokens de um estão no outro
+  const tokensA = na.split(" ").filter(t => t.length > 2);
+  const tokensB = nb.split(" ").filter(t => t.length > 2);
+  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+  const matchAinB = tokensA.filter(t => nb.includes(t)).length;
+  const matchBinA = tokensB.filter(t => na.includes(t)).length;
+  const scoreAB = matchAinB / tokensA.length;
+  const scoreBA = matchBinA / tokensB.length;
+  return Math.max(scoreAB, scoreBA);
+}
+
+function findBestMatch(
+  xProd: string,
+  productList: { id: number; name: string; unit: string; conversionFactor: number | null; supplierCode: string | null }[]
+): { product: typeof productList[0]; score: number } | null {
+  let best: typeof productList[0] | null = null;
+  let bestScore = 0;
+  for (const p of productList) {
+    const score = similarity(xProd, p.name);
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  if (best && bestScore >= 0.6) return { product: best, score: bestScore };
+  return null;
+}
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 export type NfeItem = {
   nItem: number;
@@ -165,17 +208,18 @@ export const nfeRouter = router({
         }
       }
 
+      // Carregar todos os produtos ativos para fuzzy match
+      const allProducts = await dbInstance
+        .select({ id: products.id, name: products.name, unit: products.unit, conversionFactor: products.conversionFactor, supplierCode: products.supplierCode })
+        .from(products)
+        .where(eq(products.active, true));
+
       const enriched = await Promise.all(
         items.map(async (item) => {
           const suggestedFactor = extractConversionFromName(item.xProd);
 
-          // Busca APENAS por supplierCode exato — nunca por nome parcial
-          const byCode = await dbInstance
-            .select({ id: products.id, name: products.name, unit: products.unit, conversionFactor: products.conversionFactor })
-            .from(products)
-            .where(eq(products.supplierCode, item.cProd))
-            .limit(1);
-
+          // 1º: Busca por supplierCode exato (código do fornecedor)
+          const byCode = allProducts.filter(p => p.supplierCode && p.supplierCode === item.cProd);
           if (byCode.length > 0) {
             const p = byCode[0];
             const factor = p.conversionFactor ?? suggestedFactor;
@@ -183,19 +227,44 @@ export const nfeRouter = router({
               ...item,
               matchedProductId: p.id,
               matchedProductName: p.name,
+              matchScore: 1.0,
+              matchMethod: "code" as const,
               isNew: false,
+              needsReview: false,
               stockUnit: p.unit,
               conversionFactor: factor,
               stockQty: Math.round(item.qCom * factor),
             };
           }
 
-          // Não encontrado por código → será criado automaticamente
+          // 2º: Fuzzy match por nome
+          const fuzzy = findBestMatch(item.xProd, allProducts);
+          if (fuzzy) {
+            const p = fuzzy.product;
+            const factor = p.conversionFactor ?? suggestedFactor;
+            return {
+              ...item,
+              matchedProductId: p.id,
+              matchedProductName: p.name,
+              matchScore: fuzzy.score,
+              matchMethod: "name" as const,
+              isNew: false,
+              needsReview: fuzzy.score < 0.85, // Confiança baixa → pede revisão
+              stockUnit: p.unit,
+              conversionFactor: factor,
+              stockQty: Math.round(item.qCom * factor),
+            };
+          }
+
+          // 3º: Não encontrado → marcar para revisão manual
           return {
             ...item,
             matchedProductId: null,
             matchedProductName: null,
+            matchScore: 0,
+            matchMethod: "none" as const,
             isNew: true,
+            needsReview: true,
             stockUnit: "un",
             conversionFactor: suggestedFactor,
             stockQty: Math.round(item.qCom * suggestedFactor),
@@ -203,7 +272,7 @@ export const nfeRouter = router({
         })
       );
 
-      return { info, items: enriched, isDuplicate, duplicateInfo };
+      return { info, items: enriched, isDuplicate, duplicateInfo, allProducts: allProducts.map(p => ({ id: p.id, name: p.name })) };
     }),
 
   // Confirma a importação: cria produtos novos e dá entrada no estoque

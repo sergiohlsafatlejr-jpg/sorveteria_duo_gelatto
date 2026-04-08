@@ -170,10 +170,24 @@ export async function importMappingFromBuffer(
     }
   }
 
+  // Se não encontrou o cabeçalho padrão, tentar detectar qualquer linha com número na col A
   if (dataStartRow === 0) {
-    throw new Error(
-      'Formato de arquivo não reconhecido. Use o arquivo exportado pelo sistema (botão "Exportar Excel") e preencha as colunas verdes.'
-    );
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const row = rows[i];
+      if (row && row[0] !== null && !isNaN(Number(row[0])) && Number(row[0]) > 0) {
+        dataStartRow = i;
+        break;
+      }
+    }
+  }
+
+  if (dataStartRow === 0 && rows.length > 0) {
+    // Última tentativa: começar da linha 1 (ignorar cabeçalho)
+    dataStartRow = 1;
+  }
+
+  if (rows.length === 0) {
+    throw new Error('Arquivo Excel vazio ou sem dados reconhecíveis.');
   }
 
   for (let i = dataStartRow; i < rows.length; i++) {
