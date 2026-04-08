@@ -84,14 +84,14 @@ function UploadStep({
   );
 
   const handleSubmit = async () => {
-    if (!caixaFile || !produtosFile) {
-      toast.error("Selecione os dois arquivos XLS");
+    if (!produtosFile) {
+      toast.error("Selecione ao menos o arquivo de Produtos Vendidos");
       return;
     }
     setLoading(true);
     try {
       const formData = new FormData();
-      formData.append("caixa", caixaFile);
+      if (caixaFile) formData.append("caixa", caixaFile);
       formData.append("produtos", produtosFile);
 
       const res = await fetch("/api/sales-import/upload", {
@@ -186,10 +186,10 @@ function UploadStep({
           />
           <CreditCard className={`h-8 w-8 mx-auto mb-2 ${caixaFile ? "text-green-500" : "text-muted-foreground"}`} />
           <p className="text-sm font-medium">
-            {caixaFile ? caixaFile.name : "Vendas por Caixa"}
+            {caixaFile ? caixaFile.name : "Vendas por Caixa (opcional)"}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            {caixaFile ? "Arquivo selecionado ✓" : "Arraste ou clique para selecionar o XLS de movimentação de recebimentos"}
+            {caixaFile ? "Arquivo selecionado ✓" : "Opcional: XLS de movimentação de recebimentos por forma de pagamento"}
           </p>
         </div>
 
@@ -226,7 +226,7 @@ function UploadStep({
 
       <Button
         onClick={handleSubmit}
-        disabled={!caixaFile || !produtosFile || loading}
+        disabled={!produtosFile || loading}
         className="w-full"
       >
         {loading ? (

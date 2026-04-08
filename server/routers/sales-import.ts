@@ -137,13 +137,51 @@ function parseProdutosXls(filePath: string) {
 
     const headers = rows[headerRow].map((c: any) => String(c).toLowerCase().trim());
 
-    // Mapear colunas
-    const colCodigo = headers.findIndex((h) => h.includes("cod") || h === "código" || h === "codigo");
+    // Mapear colunas — busca flexível por nome
+    const colCodigo = headers.findIndex((h) => h.includes("cód") || h.includes("cod") || h === "código" || h === "codigo");
     const colDescricao = headers.findIndex((h) => h.includes("descri") || h.includes("nome") || h.includes("produto"));
     const colUnidade = headers.findIndex((h) => h.includes("unid") || h === "un" || h === "und");
     const colQtd = headers.findIndex((h) => h.includes("qtd") || h.includes("quant"));
-    const colPreco = headers.findIndex((h) => (h.includes("pre") || h.includes("unit")) && !h.includes("total"));
+    // Pr. Venda (sem "total") — busca específica para o formato do PDV
+    const colPreco = (() => {
+      // Primeiro tenta achar coluna de preço unitário que não seja total
+      const idx = headers.findIndex((h) => (h.includes("pr.") || h.includes("preço") || h.includes("preco") || h.includes("unit")) && !h.includes("total"));
+      if (idx >= 0) return idx;
+      // Fallback: coluna imediatamente antes da coluna de total
+      const totalIdx = headers.findIndex((h) => h.includes("total") || h.includes("valor"));
+      if (totalIdx > 0) {
+        // Procura a coluna não-vazia antes do total
+        for (let k = totalIdx - 1; k >= 0; k--) {
+          if (headers[k] && headers[k].trim()) return k;
+        }
+      }
+      return -1;
+    })();
     const colTotal = headers.findIndex((h) => h.includes("total") || h.includes("valor"));
+
+    // Fallback: se código não foi encontrado pelo cabeçalho, verificar se a coluna antes da descrição tem dados numéricos
+    // (formato PDV: código pode estar em coluna sem rótulo exato)
+    const effectiveColCodigo = (() => {
+      if (colCodigo >= 0) {
+        // Verificar se a coluna tem dados (não é toda vazia)
+        const hasData = rows.slice(headerRow + 1, headerRow + 10).some((r) => {
+          const v = r[colCodigo];
+          return v !== undefined && v !== null && String(v).trim() !== "";
+        });
+        if (hasData) return colCodigo;
+      }
+      // Tentar colunas vizinhas à descrição
+      if (colDescricao > 0) {
+        for (let k = colDescricao - 1; k >= 0; k--) {
+          const hasData = rows.slice(headerRow + 1, headerRow + 10).some((r) => {
+            const v = r[k];
+            return v !== undefined && v !== null && String(v).trim() !== "" && !isNaN(Number(v));
+          });
+          if (hasData) return k;
+        }
+      }
+      return colCodigo;
+    })();
 
     const items: any[] = [];
 
@@ -154,7 +192,13 @@ function parseProdutosXls(filePath: string) {
       const descricao = colDescricao >= 0 ? String(row[colDescricao] || "").trim() : "";
       if (!descricao || descricao.toLowerCase() === "total" || descricao.toLowerCase() === "descrição") continue;
 
-      const codigo = colCodigo >= 0 ? String(row[colCodigo] || "").trim() : "";
+      // Limpar código: remover .0 de valores float (ex: "146.0" → "146")
+      const codigoRaw = effectiveColCodigo >= 0 ? row[effectiveColCodigo] : "";
+      const codigo = (() => {
+        if (typeof codigoRaw === "number") return String(Math.round(codigoRaw));
+        const s = String(codigoRaw || "").trim();
+        return s.endsWith(".0") ? s.slice(0, -2) : s;
+      })();
       const unidade = colUnidade >= 0 ? String(row[colUnidade] || "UN").trim() : "UN";
 
       const qtdRaw = colQtd >= 0 ? row[colQtd] : 0;
@@ -248,26 +292,28 @@ salesImportExpressRouter.post(
   async (req, res) => {
     try {
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-      if (!files?.caixa?.[0] || !files?.produtos?.[0]) {
-        return res.status(400).json({ error: "Envie os dois arquivos: caixa e produtos" });
+      // Arquivo de produtos é obrigatório; caixa é opcional
+      if (!files?.produtos?.[0]) {
+        return res.status(400).json({ error: "Envie ao menos o arquivo de produtos" });
       }
 
-      const caixaPath = files.caixa[0].path;
       const produtosPath = files.produtos[0].path;
-
-      // Parsear com SheetJS (Node.js puro — sem Python)
-      const caixaData = parseCaixaXls(caixaPath);
       const produtosData = parseProdutosXls(produtosPath);
-
-      // Limpar arquivos temporários
-      try { fs.unlinkSync(caixaPath); } catch {}
       try { fs.unlinkSync(produtosPath); } catch {}
 
-      if (caixaData.error) {
-        return res.status(400).json({ error: "Erro no arquivo de caixa: " + caixaData.error });
-      }
       if ((produtosData as any).error) {
         return res.status(400).json({ error: "Erro no arquivo de produtos: " + (produtosData as any).error });
+      }
+
+      // Caixa é opcional
+      let caixaData: ReturnType<typeof parseCaixaXls> = { payments_summary: [], total_revenue: 0, total_transactions: 0 };
+      if (files?.caixa?.[0]) {
+        const caixaPath = files.caixa[0].path;
+        caixaData = parseCaixaXls(caixaPath);
+        try { fs.unlinkSync(caixaPath); } catch {}
+        if (caixaData.error) {
+          return res.status(400).json({ error: "Erro no arquivo de caixa: " + caixaData.error });
+        }
       }
 
       return res.json({

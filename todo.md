@@ -541,3 +541,11 @@
 - [x] Backend: ao importar NF-e, atualiza costPrice dos produtos existentes (antes só atualizava currentStock)
 - [x] Backend: novo endpoint recalcCosts para recalcular custo de todos os produtos a partir do histórico de movimentações
 - [x] Frontend: botão "Recalcular Custos" na tela de importação NF-e para corrigir produtos já importados
+
+## Importação de Planilha de Vendas por Produto (08/04)
+- [x] Parser parseProdutosXls corrigido: detecção de colunas "Pr. Venda" e "Pr. Venda Total" do PDV
+- [x] Parser: fallback inteligente para encontrar coluna de código PDV (coluna antes da descrição com dados numéricos)
+- [x] Parser: limpeza de código PDV float (146.0 → 146)
+- [x] Backend: arquivo de caixa agora é opcional no endpoint /api/sales-import/upload
+- [x] Frontend: arquivo "Vendas por Caixa" marcado como opcional na tela de importação
+- [x] Teste: 210 itens parseados, total R$ 116.148,61, todos com código preenchido
