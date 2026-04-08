@@ -502,3 +502,18 @@
 ## Correção Executada: Duplicatas NF-e (07/04)
 - [x] Executar script de correção: 293 movimentações duplicadas excluídas, 108 produtos com estoque corrigido
 - [x] Backup criado em tabela backup_stock_movements_dupes (293 registros preservados)
+
+## Importação em Lote de NF-es (08/04)
+- [ ] Backend: endpoint /api/nfe/batch-import para processar múltiplos XMLs de uma vez
+- [ ] Frontend: seleção múltipla de arquivos (até 30) com drag-and-drop
+- [ ] Frontend: barra de progresso mostrando arquivo atual / total
+- [ ] Frontend: relatório final com sucesso/erro por arquivo
+
+## Importação em Lote de NF-e (08/04)
+- [x] Frontend: modo "1 arquivo" (revisão detalhada) e modo "Lote (até 30)" com toggle
+- [x] Frontend: drag-and-drop múltiplo de XMLs no modo lote
+- [x] Frontend: fila de arquivos com status por arquivo (pendente/processando/sucesso/duplicada/erro)
+- [x] Frontend: barra de progresso com percentual durante processamento
+- [x] Frontend: relatório final com contadores (sucesso, duplicadas, erros, itens no estoque)
+- [x] Frontend: botão "Tentar novamente" para arquivos com erro
+- [x] Frontend: processamento sequencial com pausa de 300ms entre arquivos
