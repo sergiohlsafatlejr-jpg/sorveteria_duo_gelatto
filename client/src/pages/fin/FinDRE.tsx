@@ -3,7 +3,6 @@ import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { TrendingDown, TrendingUp, ShoppingCart } from "lucide-react";
 import { Link } from "wouter";
@@ -27,7 +26,7 @@ interface DRERow {
   positive?: boolean;
   negative?: boolean;
   separator?: boolean;
-  badge?: string;
+  note?: string;
 }
 
 export default function FinDRE() {
@@ -44,7 +43,7 @@ export default function FinDRE() {
   const { data: receivables = [] } = trpc.fin.receivables.list.useQuery({ dateFrom, dateTo });
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
 
-  // Dados de vendas PDV importadas
+  // Dados de vendas PDV importadas (apenas receita — CMV já está nas despesas)
   const { data: dreVendas } = trpc.reports.dre.useQuery({ referenceMonth });
 
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
@@ -58,14 +57,14 @@ export default function FinDRE() {
     .reduce((s, r) => s + Number(r.amount), 0);
 
   // ── Receita PDV (Vendas importadas do caixa) ──────────────────────────────
+  // CMV NÃO é subtraído aqui — já está incluído nas despesas operacionais (NF-e de compras)
   const totalRevenuePDV = dreVendas?.totalRevenue ?? 0;
-  const totalCMV = dreVendas?.totalCMV ?? 0;
 
   // ── Receita Total Combinada ───────────────────────────────────────────────
   const totalRevenue = totalRevenueFin + totalRevenuePDV;
   const pendingRevenue = pendingRevenueFin;
 
-  // ── Despesas (Contas a Pagar) ─────────────────────────────────────────────
+  // ── Despesas (Contas a Pagar — já incluem custo de mercadorias via NF-e) ──
   const expensesByCategory = new Map<string, { paid: number; pending: number }>();
   transactions.forEach(t => {
     const cat = t.categoryId
@@ -89,10 +88,10 @@ export default function FinDRE() {
   const totalExpenses = totalExpensesPaid + totalExpensesPending;
 
   // ── Cálculos do DRE ───────────────────────────────────────────────────────
-  // Lucro Bruto = Receita Total - CMV - Despesas Pagas
-  const grossProfit = totalRevenue - totalCMV - totalExpensesPaid;
-  // Resultado Líquido
-  const netResult = (totalRevenue + pendingRevenue) - totalCMV - totalExpenses;
+  // Lucro Bruto = Receitas Recebidas - Despesas Pagas (CMV já está nas despesas)
+  const grossProfit = totalRevenue - totalExpensesPaid;
+  // Resultado Líquido = Receita Total - Despesas Totais
+  const netResult = (totalRevenue + pendingRevenue) - totalExpenses;
   const margin = (totalRevenue + pendingRevenue) > 0
     ? (netResult / (totalRevenue + pendingRevenue)) * 100
     : 0;
@@ -113,28 +112,22 @@ export default function FinDRE() {
     // Receitas
     { label: "RECEITA BRUTA TOTAL", value: totalRevenue + pendingRevenue, bold: true, positive: true },
     ...(totalRevenuePDV > 0 ? [
-      { label: "Vendas PDV (Caixa)", value: totalRevenuePDV, indent: 1, positive: true, badge: "PDV" },
+      { label: "Vendas PDV (Caixa)", value: totalRevenuePDV, indent: 1, positive: true, note: "Importado do PDV" },
     ] : []),
     ...(totalRevenueFin > 0 || pendingRevenueFin > 0 ? [
       { label: "Receitas Financeiras Recebidas", value: totalRevenueFin, indent: 1, positive: true },
       { label: "Receitas Financeiras Pendentes", value: pendingRevenueFin, indent: 1 },
     ] : []),
     { label: "", value: 0, separator: true },
-    // CMV
-    ...(totalCMV > 0 ? [
-      { label: "(-) CMV — Custo das Mercadorias Vendidas", value: totalCMV, bold: true, negative: true, badge: "PDV" },
-      { label: `Margem Bruta PDV: ${totalRevenuePDV > 0 ? (((totalRevenuePDV - totalCMV) / totalRevenuePDV) * 100).toFixed(1) : 0}%`, value: 0, indent: 1 },
-      { label: "", value: 0, separator: true },
-    ] : []),
-    // Despesas
-    { label: "(-) DESPESAS OPERACIONAIS", value: totalExpenses, bold: true, negative: true },
+    // Despesas (incluem custo de mercadorias)
+    { label: "(-) DESPESAS TOTAIS", value: totalExpenses, bold: true, negative: true, note: "Inclui custo de mercadorias" },
     { label: "Despesas Pagas", value: totalExpensesPaid, indent: 1, negative: true },
     { label: "Despesas Pendentes", value: totalExpensesPending, indent: 1 },
     ...categoryRows,
     { label: "", value: 0, separator: true },
     // Resultado
     { label: "LUCRO BRUTO", value: grossProfit, bold: true, positive: grossProfit >= 0, negative: grossProfit < 0 },
-    { label: "(Receitas − CMV − Despesas pagas)", value: 0, indent: 1 },
+    { label: "(Receitas recebidas − Despesas pagas)", value: 0, indent: 1 },
     { label: "", value: 0, separator: true },
     { label: "RESULTADO LÍQUIDO", value: netResult, bold: true, positive: netResult >= 0, negative: netResult < 0 },
     { label: `Margem Líquida: ${margin.toFixed(1)}%`, value: netResult, indent: 1, positive: netResult >= 0, negative: netResult < 0 },
@@ -181,10 +174,10 @@ export default function FinDRE() {
           <ShoppingCart className="w-4 h-4 text-indigo-500 flex-shrink-0" />
           <span className="text-indigo-700 dark:text-indigo-300">
             Vendas PDV de <strong>{MONTHS[month]}/{year}</strong> incluídas: <strong>{fmtBRL(totalRevenuePDV)}</strong>
-            {totalCMV > 0 && <> — CMV: <strong>{fmtBRL(totalCMV)}</strong></>}
+            <span className="text-xs ml-2 opacity-70">(custo das mercadorias já está nas despesas)</span>
           </span>
           <Link to="/gerencial" className="ml-auto text-xs text-indigo-500 underline underline-offset-2 hover:text-indigo-700">
-            Ver detalhes →
+            Ver relatório gerencial →
           </Link>
         </div>
       )}
@@ -202,15 +195,15 @@ export default function FinDRE() {
       )}
 
       {/* Result Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {[
           { label: "Receita Total", value: totalRevenue + pendingRevenue, color: "text-emerald-500" },
-          { label: "CMV (Custo Mercadorias)", value: totalCMV, color: "text-orange-500" },
-          { label: "Despesas Totais", value: totalExpenses, color: "text-destructive" },
+          { label: "Despesas Totais", value: totalExpenses, color: "text-destructive", note: "incl. custo mercadorias" },
           { label: "Resultado Líquido", value: netResult, color: netResult >= 0 ? "text-emerald-500" : "text-destructive" },
         ].map(s => (
           <div key={s.label} className="rounded-xl border border-border/50 bg-card/50 p-4 text-center">
             <p className="text-xs text-muted-foreground">{s.label}</p>
+            {s.note && <p className="text-[10px] text-muted-foreground/60">{s.note}</p>}
             <p className={cn("text-xl font-bold", s.color)}>{fmtBRL(s.value)}</p>
           </div>
         ))}
@@ -254,10 +247,8 @@ export default function FinDRE() {
                   !row.bold && "text-muted-foreground",
                 )}>
                   {row.label}
-                  {row.badge && (
-                    <Badge variant="outline" className="text-[10px] px-1 py-0 border-indigo-400 text-indigo-500">
-                      {row.badge}
-                    </Badge>
+                  {row.note && (
+                    <span className="text-[10px] text-muted-foreground/60 italic">({row.note})</span>
                   )}
                 </span>
                 {row.value !== 0 && (

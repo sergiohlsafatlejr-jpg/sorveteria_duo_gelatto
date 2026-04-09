@@ -5,6 +5,7 @@ import {
   salesImportItems,
   salesImports,
   salesImportPayments,
+  stockMovements,
   finTransactions,
   finCategories,
   finCosts,
@@ -295,4 +296,176 @@ export async function getAvailableMonths() {
     .orderBy(desc(salesImports.referenceMonth));
 
   return rows.map((r) => r.referenceMonth);
+}
+
+// ─── Relatório: Produtos Mais Comprados (via NF-e / Movimentações de Entrada) ──
+export async function getMostPurchasedReport(limit = 30) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+
+  const rows = await db
+    .select({
+      productId: products.id,
+      productName: products.name,
+      categoryId: products.categoryId,
+      currentStock: products.currentStock,
+      minStock: products.minStock,
+      costPrice: products.costPrice,
+      totalQtyIn: sql<number>`SUM(${stockMovements.quantity})`,
+      totalCostIn: sql<number>`SUM(${stockMovements.quantity} * COALESCE(${stockMovements.unitCost}, ${products.costPrice}, 0))`,
+      movCount: sql<number>`COUNT(*)`,
+      lastPurchase: sql<string>`MAX(${stockMovements.createdAt})`,
+    })
+    .from(stockMovements)
+    .innerJoin(products, eq(stockMovements.productId, products.id))
+    .where(eq(stockMovements.type, "in"))
+    .groupBy(products.id, products.name, products.categoryId, products.currentStock, products.minStock, products.costPrice)
+    .orderBy(desc(sql`SUM(${stockMovements.quantity})`))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    productId: r.productId,
+    productName: r.productName,
+    currentStock: Number(r.currentStock) || 0,
+    minStock: Number(r.minStock) || 0,
+    costPrice: Number(r.costPrice) || 0,
+    totalQtyIn: Number(r.totalQtyIn) || 0,
+    totalCostIn: Number(r.totalCostIn) || 0,
+    movCount: Number(r.movCount) || 0,
+    lastPurchase: r.lastPurchase,
+  }));
+}
+
+// ─── Relatório: Giro de Estoque + Cobertura + Compras x Vendas ────────────────
+export async function getStockTurnoverReport() {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+
+  // Entradas (compras via NF-e)
+  const inRows = await db
+    .select({
+      productId: stockMovements.productId,
+      totalQtyIn: sql<number>`SUM(${stockMovements.quantity})`,
+      totalCostIn: sql<number>`SUM(${stockMovements.quantity} * COALESCE(${stockMovements.unitCost}, 0))`,
+    })
+    .from(stockMovements)
+    .where(eq(stockMovements.type, "in"))
+    .groupBy(stockMovements.productId);
+
+  // Saídas por vendas (sales_import_items confirmados)
+  const outRows = await db
+    .select({
+      productId: salesImportItems.productId,
+      totalQtySold: sql<number>`SUM(${salesImportItems.quantity})`,
+      totalRevenue: sql<number>`SUM(${salesImportItems.totalPrice})`,
+    })
+    .from(salesImportItems)
+    .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+    .where(
+      and(
+        eq(salesImportItems.linkStatus, "linked"),
+        eq(salesImports.status, "confirmed"),
+        isNotNull(salesImportItems.productId)
+      )
+    )
+    .groupBy(salesImportItems.productId);
+
+  // Produtos com estoque atual
+  const allProducts = await db
+    .select({
+      id: products.id,
+      name: products.name,
+      currentStock: products.currentStock,
+      minStock: products.minStock,
+      costPrice: products.costPrice,
+      salePrice: products.salePrice,
+    })
+    .from(products)
+    .where(gt(products.currentStock, 0))
+    .orderBy(products.name);
+
+  // Montar mapa
+  const inMap = new Map(inRows.map(r => [r.productId, r]));
+  const outMap = new Map(outRows.map(r => [r.productId, r]));
+
+  return allProducts.map((p) => {
+    const inData = inMap.get(p.id);
+    const outData = outMap.get(p.id);
+
+    const totalQtyIn = Number(inData?.totalQtyIn) || 0;
+    const totalCostIn = Number(inData?.totalCostIn) || 0;
+    const totalQtySold = Number(outData?.totalQtySold) || 0;
+    const totalRevenue = Number(outData?.totalRevenue) || 0;
+    const currentStock = Number(p.currentStock) || 0;
+    const costPrice = Number(p.costPrice) || 0;
+    const salePrice = Number(p.salePrice) || 0;
+
+    // Giro de estoque = qtd vendida / estoque atual (quanto o estoque "gira" por período)
+    const turnover = currentStock > 0 ? parseFloat((totalQtySold / currentStock).toFixed(2)) : 0;
+
+    // Cobertura = estoque atual / (qtd vendida / meses com vendas) — estimativa em dias
+    // Usa média diária de vendas (considerando 30 dias por mês)
+    const avgDailySales = totalQtySold > 0 ? totalQtySold / 30 : 0;
+    const coverageDays = avgDailySales > 0 ? Math.round(currentStock / avgDailySales) : 999;
+
+    // Margem bruta
+    const totalCostSold = costPrice * totalQtySold;
+    const grossProfit = totalRevenue - totalCostSold;
+    const margin = totalRevenue > 0 ? parseFloat(((grossProfit / totalRevenue) * 100).toFixed(1)) : 0;
+
+    // Status de estoque
+    const minStock = Number(p.minStock) || 0;
+    const stockStatus =
+      currentStock <= 0 ? "sem_estoque" :
+      currentStock <= minStock ? "critico" :
+      currentStock <= minStock * 1.5 ? "baixo" :
+      coverageDays < 7 ? "baixo" :
+      "ok";
+
+    return {
+      productId: p.id,
+      productName: p.name,
+      currentStock,
+      minStock,
+      costPrice,
+      salePrice,
+      totalQtyIn,
+      totalCostIn,
+      totalQtySold,
+      totalRevenue,
+      grossProfit,
+      margin,
+      turnover,
+      coverageDays,
+      stockStatus,
+    };
+  });
+}
+
+// ─── Relatório: Resumo Executivo de Estoque ───────────────────────────────────
+export async function getStockSummaryReport() {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+
+  const rows = await db
+    .select({
+      totalProducts: sql<number>`COUNT(*)`,
+      totalStockValue: sql<number>`SUM(${products.currentStock} * COALESCE(${products.costPrice}, 0))`,
+      totalSaleValue: sql<number>`SUM(${products.currentStock} * COALESCE(${products.salePrice}, 0))`,
+      lowStockCount: sql<number>`SUM(CASE WHEN ${products.currentStock} <= ${products.minStock} AND ${products.minStock} > 0 THEN 1 ELSE 0 END)`,
+      zeroStockCount: sql<number>`SUM(CASE WHEN ${products.currentStock} = 0 THEN 1 ELSE 0 END)`,
+      withCostCount: sql<number>`SUM(CASE WHEN ${products.costPrice} > 0 THEN 1 ELSE 0 END)`,
+    })
+    .from(products);
+
+  const r = rows[0];
+  return {
+    totalProducts: Number(r.totalProducts) || 0,
+    totalStockValue: Number(r.totalStockValue) || 0,
+    totalSaleValue: Number(r.totalSaleValue) || 0,
+    potentialProfit: (Number(r.totalSaleValue) || 0) - (Number(r.totalStockValue) || 0),
+    lowStockCount: Number(r.lowStockCount) || 0,
+    zeroStockCount: Number(r.zeroStockCount) || 0,
+    withCostCount: Number(r.withCostCount) || 0,
+  };
 }

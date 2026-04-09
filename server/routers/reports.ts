@@ -7,6 +7,9 @@ import {
   getDREReport,
   getMonthlySalesEvolution,
   getAvailableMonths,
+  getMostPurchasedReport,
+  getStockTurnoverReport,
+  getStockSummaryReport,
 } from "../db.reports";
 
 export const reportsRouter = router({
@@ -52,4 +55,21 @@ export const reportsRouter = router({
     .query(async ({ input }) => {
       return getDREReport(input.referenceMonth);
     }),
+
+  // Produtos mais comprados (via NF-e / movimentações de entrada)
+  mostPurchased: protectedProcedure
+    .input(z.object({ limit: z.number().min(5).max(100).default(30) }))
+    .query(async ({ input }) => {
+      return getMostPurchasedReport(input.limit);
+    }),
+
+  // Giro de estoque + cobertura + compras x vendas
+  stockTurnover: protectedProcedure.query(async () => {
+    return getStockTurnoverReport();
+  }),
+
+  // Resumo executivo de estoque
+  stockSummary: protectedProcedure.query(async () => {
+    return getStockSummaryReport();
+  }),
 });

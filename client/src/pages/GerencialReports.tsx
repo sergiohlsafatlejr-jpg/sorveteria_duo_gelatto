@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import {
   TrendingUp, TrendingDown, DollarSign, ShoppingCart, Package,
-  CreditCard, BarChart2, Search,
+  CreditCard, BarChart2, Search, Warehouse, AlertTriangle, CheckCircle2, Clock,
 } from "lucide-react";
 
 const MONTHS_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -416,6 +416,202 @@ function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
   );
 }
 
+// ─── Aba: Estoque Gerencial ──────────────────────────────────────────────────
+function StockGerencialTab() {
+  const { data: summary, isLoading: loadingSummary } = trpc.reports.stockSummary.useQuery();
+  const { data: purchased = [], isLoading: loadingPurchased } = trpc.reports.mostPurchased.useQuery({ limit: 30 });
+  const { data: turnover = [], isLoading: loadingTurnover } = trpc.reports.stockTurnover.useQuery();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "critico" | "baixo" | "ok">("all");
+  const [view, setView] = useState<"compras" | "giro">("giro");
+
+  const filteredTurnover = useMemo(() => {
+    return turnover
+      .filter((r) => {
+        const matchSearch = r.productName?.toLowerCase().includes(search.toLowerCase());
+        const matchStatus = statusFilter === "all" || r.stockStatus === statusFilter;
+        return matchSearch && matchStatus;
+      })
+      .sort((a, b) => b.totalQtySold - a.totalQtySold);
+  }, [turnover, search, statusFilter]);
+
+  const statusBadge = (s: string) => {
+    if (s === "critico") return <Badge variant="destructive" className="text-[10px]">Crítico</Badge>;
+    if (s === "baixo") return <Badge className="text-[10px] bg-amber-500">Baixo</Badge>;
+    if (s === "sem_estoque") return <Badge variant="outline" className="text-[10px] border-red-400 text-red-500">Zerado</Badge>;
+    return <Badge variant="outline" className="text-[10px] border-green-500 text-green-600">OK</Badge>;
+  };
+
+  const coverageColor = (days: number) =>
+    days < 7 ? "text-red-500" : days < 15 ? "text-amber-500" : "text-green-600";
+
+  if (loadingSummary || loadingTurnover) return <div className="text-center py-12 text-muted-foreground">Carregando...</div>;
+
+  return (
+    <div className="space-y-6">
+      {/* KPIs de estoque */}
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <KpiCard title="Valor em Estoque (Custo)" value={fmt(summary.totalStockValue)} sub="Custo total dos produtos" icon={Warehouse} color="bg-indigo-500" />
+          <KpiCard title="Valor em Estoque (Venda)" value={fmt(summary.totalSaleValue)} sub={`Lucro potencial: ${fmt(summary.potentialProfit)}`} icon={TrendingUp} color="bg-green-500" />
+          <KpiCard title="Estoque Crítico" value={String(summary.lowStockCount)} sub="produtos abaixo do mínimo" icon={AlertTriangle} color="bg-red-500" />
+          <KpiCard title="Sem Custo Cadastrado" value={String(summary.totalProducts - summary.withCostCount)} sub="produtos sem preço de custo" icon={Package} color="bg-amber-500" />
+        </div>
+      )}
+
+      {/* Seletor de visão */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setView("giro")}
+          className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+            view === "giro" ? "bg-indigo-500 text-white" : "bg-muted text-muted-foreground hover:bg-muted/80"
+          }`}
+        >
+          Giro + Cobertura
+        </button>
+        <button
+          onClick={() => setView("compras")}
+          className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+            view === "compras" ? "bg-indigo-500 text-white" : "bg-muted text-muted-foreground hover:bg-muted/80"
+          }`}
+        >
+          Mais Comprados (NF-e)
+        </button>
+      </div>
+
+      {view === "compras" && (
+        <>
+          {/* Gráfico top 10 mais comprados */}
+          {purchased.length > 0 && (
+            <Card>
+              <CardHeader><CardTitle className="text-base">Top 10 Produtos Mais Comprados (Qtd. Entrada)</CardTitle></CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={purchased.slice(0, 10)} margin={{ left: 8, right: 16 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="productName" tick={{ fontSize: 10 }} tickFormatter={(v: string) => v?.substring(0, 14)} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip formatter={(v: number) => [fmtQty(v), "Unidades compradas"]} />
+                    <Bar dataKey="totalQtyIn" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+          <Card>
+            <CardHeader><CardTitle className="text-base">Produtos Mais Comprados via NF-e ({purchased.length})</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium">#</th>
+                      <th className="text-left px-4 py-3 font-medium">Produto</th>
+                      <th className="text-right px-4 py-3 font-medium">Qtd. Comprada</th>
+                      <th className="text-right px-4 py-3 font-medium">Custo Total</th>
+                      <th className="text-right px-4 py-3 font-medium">Custo Unit.</th>
+                      <th className="text-right px-4 py-3 font-medium">Estoque Atual</th>
+                      <th className="text-right px-4 py-3 font-medium">Entradas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {purchased.map((r, i) => (
+                      <tr key={r.productId} className="border-b hover:bg-muted/10 transition-colors">
+                        <td className="px-4 py-2.5 text-muted-foreground">{i + 1}</td>
+                        <td className="px-4 py-2.5 font-medium">{r.productName}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{fmtQty(r.totalQtyIn)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{fmt(r.totalCostIn)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmt(r.costPrice)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{fmtQty(r.currentStock)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{r.movCount}x</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {view === "giro" && (
+        <>
+          {/* Filtros */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-2 top-2.5 w-4 h-4 text-muted-foreground" />
+              <Input placeholder="Buscar produto..." className="pl-8 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+              <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os status</SelectItem>
+                <SelectItem value="critico">Crítico</SelectItem>
+                <SelectItem value="baixo">Baixo</SelectItem>
+                <SelectItem value="ok">OK</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Giro de Estoque + Cobertura ({filteredTurnover.length} produtos)</CardTitle>
+              <p className="text-xs text-muted-foreground">Cobertura = dias estimados de estoque com base nas vendas. Giro = qtd vendida ÷ estoque atual.</p>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium">Produto</th>
+                      <th className="text-right px-4 py-3 font-medium">Estoque</th>
+                      <th className="text-right px-4 py-3 font-medium">Qtd Vendida</th>
+                      <th className="text-right px-4 py-3 font-medium">Qtd Comprada</th>
+                      <th className="text-right px-4 py-3 font-medium">Giro</th>
+                      <th className="text-right px-4 py-3 font-medium">Cobertura</th>
+                      <th className="text-right px-4 py-3 font-medium">Margem</th>
+                      <th className="text-center px-4 py-3 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTurnover.map((r) => (
+                      <tr key={r.productId} className="border-b hover:bg-muted/10 transition-colors">
+                        <td className="px-4 py-2.5 font-medium max-w-[200px] truncate">{r.productName}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{fmtQty(r.currentStock)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{fmtQty(r.totalQtySold)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtQty(r.totalQtyIn)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          {r.turnover > 0 ? (
+                            <span className={r.turnover >= 2 ? "text-green-600 font-medium" : "text-amber-500"}>{r.turnover.toFixed(1)}x</span>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className={`px-4 py-2.5 text-right tabular-nums font-medium ${coverageColor(r.coverageDays)}`}>
+                          {r.coverageDays >= 999 ? "∞" : `${r.coverageDays}d`}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          {r.totalQtySold > 0 ? (
+                            <span className={r.margin >= 30 ? "text-green-600" : r.margin >= 15 ? "text-amber-500" : "text-red-500"}>
+                              {fmtPct(r.margin)}
+                            </span>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">{statusBadge(r.stockStatus)}</td>
+                      </tr>
+                    ))}
+                    {filteredTurnover.length === 0 && (
+                      <tr><td colSpan={8} className="text-center py-8 text-muted-foreground">Nenhum produto encontrado</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Página Principal ─────────────────────────────────────────────────────────
 export default function GerencialReports() {
   const { data: months = [] } = trpc.reports.availableMonths.useQuery();
@@ -451,13 +647,17 @@ export default function GerencialReports() {
           </Select>
         </div>
 
-        <Tabs defaultValue="custo">
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs defaultValue="estoque">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="estoque">Estoque Gerencial</TabsTrigger>
             <TabsTrigger value="custo">Custo x Venda</TabsTrigger>
             <TabsTrigger value="ranking">Mais Vendidos</TabsTrigger>
             <TabsTrigger value="pagamentos">Formas de Pagamento</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="estoque" className="mt-6">
+            <StockGerencialTab />
+          </TabsContent>
           <TabsContent value="custo" className="mt-6">
             <CostVsSalesTab referenceMonth={refMonth} />
           </TabsContent>

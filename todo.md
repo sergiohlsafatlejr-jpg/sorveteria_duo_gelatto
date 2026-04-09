@@ -569,3 +569,14 @@
 - [x] Frontend: DRE do Financeiro integrado com dados de vendas PDV (receita + CMV)
 - [x] Frontend: filtro por mês de referência
 - [x] Menu: item Relatórios Gerenciais no grupo Vendas
+
+## Correção DRE + Relatórios Gerenciais de Estoque (08/04)
+- [x] DRE: remover linha CMV (já está incluído nas despesas operacionais)
+- [x] DRE: ajustar cálculo de Resultado Líquido sem duplicar CMV
+- [x] Backend: relatório de produtos mais comprados (via NF-e / stock_movements entrada)
+- [x] Backend: relatório de giro de estoque (qtd vendida / estoque atual)
+- [x] Backend: relatório de cobertura de estoque (dias de estoque disponível)
+- [x] Backend: relatório compras x vendas por produto (comparativo)
+- [x] Frontend: nova aba "Estoque Gerencial" na página /gerencial
+- [x] Frontend: gráfico top produtos mais comprados
+- [x] Frontend: tabela comparativa compras x vendas com giro e cobertura
