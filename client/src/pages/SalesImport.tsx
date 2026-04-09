@@ -58,6 +58,181 @@ interface ParsedData {
   };
 }
 
+// ─── Componente: Importação Diária Express ────────────────────────────────────────────────────────────────────────
+function ImportacaoDiariaStep({ onBack }: { onBack: () => void }) {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [saleDate, setSaleDate] = useState(todayStr);
+  const [produtosFile, setProdutosFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [result, setResult] = useState<null | {
+    importId: number;
+    stockUpdated: number;
+    notLinked: Array<{ external_code: string; external_name: string; quantity: number }>;
+    message: string;
+  }>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const utils = trpc.useUtils();
+
+  const importMut = trpc.salesImport.importDiario.useMutation({
+    onSuccess: () => {
+      utils.salesImport.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleImport = async () => {
+    if (!produtosFile) { toast.error("Selecione o arquivo de produtos"); return; }
+    if (!saleDate) { toast.error("Selecione a data"); return; }
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("produtos", produtosFile);
+      const res = await fetch("/api/sales-import/upload-produtos-dia", { method: "POST", body: formData });
+      const json = await res.json();
+      if (!res.ok || json.error) { toast.error(json.error || "Erro ao processar arquivo"); return; }
+      const data = json.data;
+      const result = await importMut.mutateAsync({
+        saleDate,
+        items: data.items,
+        totalRevenue: data.total_revenue,
+      });
+      setResult(result);
+      toast.success(result.message);
+    } catch (err) {
+      toast.error("Erro de conexão");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (result) {
+    const dateLabel = new Date(saleDate + "T12:00:00").toLocaleDateString("pt-BR");
+    return (
+      <div className="space-y-4">
+        <Card className="border-green-500/30 bg-green-500/5">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3 mb-4">
+              <CheckCircle2 className="h-8 w-8 text-green-600" />
+              <div>
+                <p className="font-semibold text-green-700">Importação diária concluída!</p>
+                <p className="text-sm text-muted-foreground">{result.message}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="bg-muted/30 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-green-600">{result.stockUpdated}</p>
+                <p className="text-xs text-muted-foreground">Produtos com estoque baixado</p>
+              </div>
+              <div className="bg-muted/30 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-amber-600">{result.notLinked.length}</p>
+                <p className="text-xs text-muted-foreground">Produtos sem vínculo</p>
+              </div>
+            </div>
+            {result.notLinked.length > 0 && (
+              <div>
+                <p className="text-sm font-medium mb-2 text-amber-700">Produtos sem vínculo (vincule manualmente em Histórico):</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-2">Código PDV</th>
+                        <th className="text-left p-2">Nome PDV</th>
+                        <th className="text-right p-2">Qtd</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.notLinked.map((item, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="p-2 font-mono">{item.external_code}</td>
+                          <td className="p-2">{item.external_name}</td>
+                          <td className="p-2 text-right">{item.quantity}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={onBack} className="flex-1">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Voltar ao Histórico
+          </Button>
+          <Button onClick={() => { setResult(null); setProdutosFile(null); }} className="flex-1 bg-green-600 hover:bg-green-700 text-white">
+            <Upload className="h-4 w-4 mr-2" />
+            Importar Outro Dia
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Importação Diária Express</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Importe o relatório de produtos vendidos de <strong>um dia específico</strong>. O sistema vincula automaticamente
+            os produtos ao estoque e dá baixa imediata nas quantidades vendidas.
+          </p>
+          <div>
+            <label className="text-sm font-medium mb-1.5 block">Data das Vendas</label>
+            <input
+              type="date"
+              value={saleDate}
+              onChange={(e) => setSaleDate(e.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-1.5 block">Arquivo de Produtos Vendidos</label>
+            <div
+              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+                dragOver ? "border-green-400 bg-green-50 dark:bg-green-950/20"
+                : produtosFile ? "border-green-400 bg-green-50 dark:bg-green-950/20"
+                : "border-muted-foreground/30 hover:border-green-400 hover:bg-green-50/50 dark:hover:bg-green-950/10"
+              }`}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) setProdutosFile(f); }}
+            >
+              <input ref={fileRef} type="file" accept=".xls,.xlsx" className="hidden" onChange={(e) => setProdutosFile(e.target.files?.[0] ?? null)} />
+              <Package className={`h-10 w-10 mx-auto mb-3 ${produtosFile ? "text-green-500" : "text-muted-foreground"}`} />
+              <p className="text-sm font-medium">{produtosFile ? produtosFile.name : "Arraste ou clique para selecionar"}</p>
+              <p className="text-xs text-muted-foreground mt-1">{produtosFile ? "Arquivo selecionado ✓" : "Relatório de Produtos Vendidos (XLS/XLSX)"}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      <div className="flex gap-3">
+        <Button variant="outline" onClick={onBack} className="flex-1">
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Voltar
+        </Button>
+        <Button
+          onClick={handleImport}
+          disabled={!produtosFile || !saleDate || loading}
+          className="flex-2 min-w-[220px] bg-green-600 hover:bg-green-700 text-white"
+        >
+          {loading ? (
+            <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Processando...</>
+          ) : (
+            <><TrendingUp className="h-4 w-4 mr-2" />Importar e Baixar Estoque</>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Componente: Apenas Caixa ────────────────────────────────────────────────────────────────────────
 function CaixaOnlyStep({ onBack }: { onBack: () => void }) {
   const [caixaFile, setCaixaFile] = useState<File | null>(null);
@@ -1000,7 +1175,7 @@ function ImportDetail({ importId, onClose }: { importId: number; onClose: () => 
 
 // ─── Página Principal ─────────────────────────────────────────────────────────
 export default function SalesImport() {
-  const [step, setStep] = useState<"upload" | "review" | "history" | "caixa-only">("history");
+  const [step, setStep] = useState<"upload" | "review" | "history" | "caixa-only" | "importacao-diaria">("history");
   const [parsedData, setParsedData] = useState<ParsedData | null>(null);
   const [referenceMonth, setReferenceMonth] = useState("");
   const [importMode, setImportMode] = useState<"monthly" | "daily">("monthly");
@@ -1038,6 +1213,10 @@ export default function SalesImport() {
         </div>
         {step === "history" && (
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setStep("importacao-diaria")} className="border-green-500/40 text-green-700 hover:bg-green-500/10">
+              <TrendingUp className="h-4 w-4 mr-2" />
+              Importação Diária
+            </Button>
             <Button variant="outline" onClick={() => setStep("caixa-only")} className="border-blue-500/40 text-blue-600 hover:bg-blue-500/10">
               <CreditCard className="h-4 w-4 mr-2" />
               Importar Caixa
@@ -1048,7 +1227,7 @@ export default function SalesImport() {
             </Button>
           </div>
         )}
-        {(step === "upload" || step === "review" || step === "caixa-only") && (
+        {(step === "upload" || step === "review" || step === "caixa-only" || step === "importacao-diaria") && (
           <Button variant="outline" onClick={() => setStep("history")}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Voltar ao Histórico
@@ -1057,6 +1236,9 @@ export default function SalesImport() {
       </div>
 
       {/* Conteúdo por step */}
+      {step === "importacao-diaria" && (
+        <ImportacaoDiariaStep onBack={() => setStep("history")} />
+      )}
       {step === "caixa-only" && (
         <CaixaOnlyStep onBack={() => setStep("history")} />
       )}

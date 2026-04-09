@@ -596,8 +596,106 @@ export async function getSalesReport(referenceMonth: string, compareMonth?: stri
   return { current: currentSorted, previous: previousSorted };
 }
 
-// ─── Listar meses com importações confirmadas ─────────────────────────────────
+// ─── Importação Diária Express: parseia, vincula e baixa estoque em uma operação ──
+export async function importDiarioExpress(
+  items: ParsedProduct[],
+  saleDate: string, // YYYY-MM-DD
+  userId: number,
+  totalRevenue: number
+): Promise<{
+  importId: number;
+  stockUpdated: number;
+  notLinked: Array<{ external_code: string; external_name: string; quantity: number }>;
+  message: string;
+}> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
 
+  // 1. Fazer matching automático
+  const matched = await matchProductsToStock(items);
+  const linked = matched.filter((i) => i.linkStatus === "linked" && i.productId);
+  const notLinked = matched
+    .filter((i) => i.linkStatus === "pending" || !i.productId)
+    .map((i) => ({ external_code: i.external_code, external_name: i.external_name, quantity: i.quantity }));
+
+  // 2. Criar registro de importação (modo diário, já confirmado)
+  const referenceMonth = saleDate.slice(0, 7);
+  const [result] = await db.insert(salesImports).values({
+    userId,
+    referenceMonth,
+    importMode: "daily",
+    saleDate: new Date(saleDate + "T12:00:00Z"),
+    status: "confirmed",
+    totalRevenue: String(Math.round(totalRevenue * 100) / 100),
+    totalItems: items.length,
+    totalTransactions: 0,
+    linkedItems: linked.length,
+    pendingItems: notLinked.length,
+    confirmedAt: new Date(),
+  }).$returningId();
+  const importId = (result as unknown as { id: number }).id;
+
+  // 3. Salvar itens e baixar estoque
+  let stockUpdated = 0;
+  for (const item of matched) {
+    await db.insert(salesImportItems).values({
+      importId,
+      externalCode: item.external_code,
+      externalName: item.external_name,
+      unit: item.unit,
+      quantity: String(item.quantity),
+      unitPrice: String(item.unit_price),
+      totalPrice: String(item.total_price),
+      productId: item.productId ?? null,
+      linkStatus: item.linkStatus,
+    });
+    if (item.productId && item.linkStatus === "linked") {
+      const qty = Math.round(item.quantity);
+      if (qty <= 0) continue;
+      const [prod] = await db.select({ currentStock: products.currentStock }).from(products).where(eq(products.id, item.productId));
+      if (!prod) continue;
+      const newStock = Math.max(0, prod.currentStock - qty);
+      await db.update(products).set({ currentStock: newStock }).where(eq(products.id, item.productId));
+      await db.insert(stockMovements).values({
+        productId: item.productId,
+        type: "sale",
+        quantity: qty,
+        previousStock: prod.currentStock,
+        newStock,
+        unitCost: String(item.unit_price),
+        reason: `Importação diária ${saleDate} (ID: ${importId})`,
+        userId,
+      });
+      // Salvar externalCode no produto para futuras importações
+      if (item.external_code) {
+        const [p] = await db.select({ externalCode: products.externalCode }).from(products).where(eq(products.id, item.productId));
+        if (p && !p.externalCode) {
+          await db.update(products).set({ externalCode: item.external_code }).where(eq(products.id, item.productId));
+        }
+      }
+      stockUpdated++;
+    }
+  }
+
+  // 4. Popular Previsão de Faturamento
+  const note = `Importação diária ${saleDate} (ID: ${importId})`;
+  const realAmount = String(Math.round(totalRevenue * 100) / 100);
+  const existing = await db.select().from(finDailyRevenue).where(eq(finDailyRevenue.revenueDate, saleDate)).limit(1);
+  if (existing.length > 0) {
+    await db.update(finDailyRevenue).set({ realAmount, note, updatedAt: new Date() }).where(eq(finDailyRevenue.revenueDate, saleDate));
+  } else {
+    await db.insert(finDailyRevenue).values({ userId, revenueDate: saleDate, realAmount, note });
+  }
+
+  return {
+    importId,
+    stockUpdated,
+    notLinked,
+    message: `${stockUpdated} produto(s) com estoque baixado.${notLinked.length > 0 ? ` ${notLinked.length} produto(s) sem vínculo — vincule manualmente.` : " Todos os produtos foram vinculados automaticamente!"}`,
+  };
+}
+
+// ─── Listar meses com importações confirmadas ─────────────────────────────────
 export async function getConfirmedMonths() {
   const db = await getDb();
   if (!db) return [];

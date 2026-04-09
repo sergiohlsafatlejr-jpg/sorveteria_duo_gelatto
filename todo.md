@@ -612,3 +612,13 @@
 - [x] Frontend: tela CaixaOnlyStep com upload, processamento e resumo dos dias populados
 - [x] Frontend: exibir tabela de dias inseridos/atualizados após confirmar importação de caixa
 - [x] 29/29 testes passando
+
+## Importação Diária Express com Baixa Automática de Estoque (09/04)
+- [x] Backend: endpoint /api/sales-import/upload-produtos-dia para importar produtos de um dia específico
+- [x] Backend: função importDiarioExpress no db.sales-import.ts (matching + baixa + previsão)
+- [x] Backend: procedimento tRPC salesImport.importDiario que parseia, vincula automaticamente (por código PDV) e confirma em uma única operação
+- [x] Backend: ao confirmar importação diária, baixar estoque automaticamente para produtos já vinculados e retornar lista de não vinculados
+- [x] Frontend: componente ImportacaoDiariaStep com seletor de data + upload + drag-and-drop
+- [x] Frontend: botão "Importação Diária" na tela principal de importação
+- [x] Frontend: exibir resumo de produtos baixados no estoque e produtos sem vínculo após importação
+- [x] 29/29 testes passando

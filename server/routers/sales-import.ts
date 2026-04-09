@@ -21,6 +21,7 @@ import {
   getSalesReport,
   getConfirmedMonths,
   matchProductsToStock,
+  importDiarioExpress,
 } from "../db.sales-import";
 import { invokeLLM } from "../_core/llm";
 
@@ -332,12 +333,32 @@ salesImportExpressRouter.post(
       return res.status(500).json({ error: String(err) });
     }
   }
+);// ─── Endpoint para Importação Diária Express (produtos + baixa automática de estoque) ────
+salesImportExpressRouter.post(
+  "/api/sales-import/upload-produtos-dia",
+  upload.single("produtos"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Envie o arquivo de produtos" });
+      }
+      const produtosPath = req.file.path;
+      const produtosData = parseProdutosXls(produtosPath);
+      try { fs.unlinkSync(produtosPath); } catch {}
+      if ((produtosData as any).error) {
+        return res.status(400).json({ error: "Erro no arquivo de produtos: " + (produtosData as any).error });
+      }
+      return res.json({ success: true, data: produtosData });
+    } catch (err: unknown) {
+      console.error("Produtos dia upload error:", err);
+      return res.status(500).json({ error: String(err) });
+    }
+  }
 );
 
-// ─── Endpoint para importar APENAS arquivo de caixa (sem produtos) ─────────────
+// ─── Endpoint para importar APENAS arquivo de caixa (sem produtos) ─────────────────
 salesImportExpressRouter.post(
-  "/api/sales-import/upload-caixa",
-  upload.single("caixa"),
+  "/api/sales-import/upload-caixa", upload.single("caixa"),
   async (req, res) => {
     try {
       if (!req.file) {
@@ -762,6 +783,27 @@ Se não houver correspondência razoável, retorne externalCode como null.`;
   }),
 
   // Confirmar importação de caixa (apenas popular fin_daily_revenue, sem criar salesImport)
+  importDiario: protectedProcedure
+    .input(
+      z.object({
+        saleDate: z.string(), // YYYY-MM-DD
+        items: z.array(
+          z.object({
+            external_code: z.string(),
+            external_name: z.string(),
+            unit: z.string(),
+            quantity: z.number(),
+            unit_price: z.number(),
+            total_price: z.number(),
+          })
+        ),
+        totalRevenue: z.number(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      return importDiarioExpress(input.items, input.saleDate, ctx.user.id, input.totalRevenue);
+    }),
+
   confirmCaixa: protectedProcedure
     .input(z.object({
       dailySummary: z.array(z.object({
