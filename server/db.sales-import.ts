@@ -129,6 +129,13 @@ export async function matchProductsToStock(
 
 // ─── Criar importação ─────────────────────────────────────────────────────────
 
+export interface DailySummaryEntry {
+  date: string;
+  total: number;
+  transactions: number;
+  payments: Record<string, number | unknown>;
+}
+
 export async function createSalesImport(
   userId: number,
   referenceMonth: string,
@@ -137,7 +144,8 @@ export async function createSalesImport(
   totalRevenue: number,
   totalTransactions: number,
   importMode: "monthly" | "daily" = "monthly",
-  saleDate?: string
+  saleDate?: string,
+  dailySummary?: DailySummaryEntry[]
 ) {
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
@@ -169,6 +177,7 @@ export async function createSalesImport(
     totalTransactions,
     linkedItems: linkedCount,
     pendingItems: pendingCount,
+    caixaDailySummary: dailySummary && dailySummary.length > 0 ? dailySummary : null,
   });
 
   const importId = (result as unknown as { insertId: number }).insertId;
@@ -359,13 +368,15 @@ export async function confirmSalesImport(importId: number, userId: number) {
     .set({ status: "confirmed", confirmedAt: new Date() })
     .where(eq(salesImports.id, importId));
 
-  // Se for importação diária, popular automaticamente o faturamento real na Previsão de Faturamento
+  // Popular automaticamente o faturamento real na Previsão de Faturamento
+  const note = `Importado automaticamente da planilha PDV (ID: ${importId})`;
+
   if (header.importMode === "daily" && header.saleDate) {
+    // Modo diário: usar a data específica da importação
     const revenueDate = header.saleDate instanceof Date
       ? header.saleDate.toISOString().slice(0, 10)
       : String(header.saleDate).slice(0, 10);
     const realAmount = String(header.totalRevenue);
-    const note = `Importado automaticamente da planilha PDV (ID: ${importId})`;
 
     const existing = await db.select().from(finDailyRevenue)
       .where(eq(finDailyRevenue.revenueDate, revenueDate))
@@ -377,6 +388,26 @@ export async function confirmSalesImport(importId: number, userId: number) {
         .where(eq(finDailyRevenue.revenueDate, revenueDate));
     } else {
       await db.insert(finDailyRevenue).values({ userId, revenueDate, realAmount, note });
+    }
+  } else if (header.caixaDailySummary && Array.isArray(header.caixaDailySummary) && header.caixaDailySummary.length > 0) {
+    // Modo mensal com arquivo de caixa: popular cada dia individualmente
+    const dailyEntries = header.caixaDailySummary as DailySummaryEntry[];
+    for (const entry of dailyEntries) {
+      if (!entry.date || !entry.total) continue;
+      const revenueDate = entry.date; // já está no formato YYYY-MM-DD
+      const realAmount = String(Math.round(entry.total * 100) / 100);
+
+      const existing = await db.select().from(finDailyRevenue)
+        .where(eq(finDailyRevenue.revenueDate, revenueDate))
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db.update(finDailyRevenue)
+          .set({ realAmount, note, updatedAt: new Date() })
+          .where(eq(finDailyRevenue.revenueDate, revenueDate));
+      } else {
+        await db.insert(finDailyRevenue).values({ userId, revenueDate, realAmount, note });
+      }
     }
   }
 

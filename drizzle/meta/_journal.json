@@ -127,6 +127,13 @@
       "when": 1775732588800,
       "tag": "0017_strong_molecule_man",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1775751150042,
+      "tag": "0018_sudden_ultragirl",
+      "breakpoints": true
     }
   ]
 }

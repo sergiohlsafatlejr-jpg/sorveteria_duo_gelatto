@@ -565,6 +565,7 @@ export const salesImports = mysqlTable("sales_imports", {
   linkedItems: int("linkedItems").default(0).notNull(),
   pendingItems: int("pendingItems").default(0).notNull(),
   notes: text("notes"),
+  caixaDailySummary: json("caixaDailySummary"), // Resumo diário do caixa (array de {date, total, payments})
   confirmedAt: timestamp("confirmedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

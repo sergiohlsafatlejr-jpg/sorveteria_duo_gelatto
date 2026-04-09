@@ -501,7 +501,7 @@ export async function getSalesChartData(days = 30) {
   // Importações diárias confirmadas (modo daily)
   const importDailySales = await db
     .select({
-      date: sql<string>`DATE(${salesImports.saleDate})`,
+      date: sql<string>`DATE(MIN(${salesImports.saleDate}))`,
       total: sql<string>`COALESCE(SUM(${salesImports.totalRevenue}), 0)`,
       count: sql<number>`COUNT(*)`,
     })

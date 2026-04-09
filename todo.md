@@ -596,3 +596,11 @@
 - [x] Frontend: Dashboard KPI "Vendas do Mês" e "Vendas Hoje" incluem dados PDV com indicador
 - [x] Frontend: Dashboard gráfico "Últimos 30 dias" inclui dados de importações
 - [x] Frontend: Previsão de Faturamento recebe faturamento real automaticamente ao confirmar importação diária
+
+## Parser de Caixa por Dia → Previsão de Faturamento (09/04)
+- [x] Backend: adaptar parser de caixa XLSX para agrupar V.RECEBER por DATA TRANSAÇÃO
+- [x] Backend: normalização de acentos no parser para detectar "DATA TRANSAÇÃO" corretamente
+- [x] Backend: ao confirmar importação com arquivo de caixa, popular fin_daily_revenue por dia
+- [x] Backend: salvar formas de pagamento por dia nas movimentações diárias
+- [x] Backend: correção de query GROUP BY incompatível com sql_mode=only_full_group_by
+- [x] Testes: 6 testes do parser de caixa criados e passando (29/29 total)

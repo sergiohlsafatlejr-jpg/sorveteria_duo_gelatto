@@ -46,6 +46,7 @@ interface ParsedData {
   caixa: {
     transactions: unknown[];
     payments_summary: ParsedPayment[];
+    daily_summary: Array<{ date: string; total: number; transactions: number; payments: Record<string, number> }>;
     total_revenue: number;
     total_transactions: number;
   };
@@ -380,6 +381,7 @@ function ReviewStep({
       payments,
       totalRevenue: data.caixa.total_revenue,
       totalTransactions: data.caixa.total_transactions,
+      dailySummary: data.caixa.daily_summary,
     });
   };
 

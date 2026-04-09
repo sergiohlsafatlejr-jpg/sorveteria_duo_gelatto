@@ -35,6 +35,10 @@ function parseCaixaXls(filePath: string) {
     const sheet = workbook.Sheets[sheetName];
     const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
+    // Normalizar string: remover acentos e converter para minúsculas
+    const normalize = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
     // Encontrar linha de cabeçalho (contém "FORMA PGTO" ou "PAGAMENTO")
     let headerRow = -1;
     let colPagamento = -1;
@@ -42,7 +46,7 @@ function parseCaixaXls(filePath: string) {
     let colVReceber = -1;
 
     for (let i = 0; i < Math.min(rows.length, 25); i++) {
-      const row = rows[i].map((c: any) => String(c).toLowerCase());
+      const row = rows[i].map((c: any) => normalize(String(c)));
       const hasPgto = row.some((c) => c.includes("forma pgto") || c.includes("pagamento"));
       if (hasPgto) {
         headerRow = i;
@@ -58,19 +62,32 @@ function parseCaixaXls(filePath: string) {
     }
 
     // Fallback: usar índices fixos conhecidos da estrutura do PDV
-    // Header row 12: col 14 = FORMA PGTO, col 20 = V. PAGAMENTO, col 27 = V.RECEBER
     if (headerRow >= 0 && colPagamento === -1) {
       const row = rows[headerRow];
       for (let j = 0; j < row.length; j++) {
-        const h = String(row[j]).toLowerCase();
+        const h = normalize(String(row[j]));
         if (h.includes("pgto") || h.includes("forma")) { colPagamento = j; }
         if (h.includes("v. pag") || (h.includes("pagamento") && j > 15)) { colVPagamento = j; }
         if (h.includes("receber")) { colVReceber = j; }
       }
     }
 
-    // Agregar pagamentos
+    // Detectar coluna de DATA TRANSAÇÃO (normalizado: "data transacao")
+    let colDataTransacao = -1;
+    if (headerRow >= 0) {
+      const hrow = rows[headerRow];
+      for (let j = 0; j < hrow.length; j++) {
+        const h = normalize(String(hrow[j]));
+        if (h.includes("data") && h.includes("transa")) {
+          colDataTransacao = j;
+          break;
+        }
+      }
+    }
+
+    // Agregar pagamentos e totais por dia
     const paymentsMap: Record<string, { total: number; count: number }> = {};
+    const dailyMap: Record<string, { total: number; payments: Record<string, number>; transactions: number }> = {};
     let totalRevenue = 0;
     let totalTransactions = 0;
     const dataStart = headerRow >= 0 ? headerRow + 1 : 0;
@@ -98,6 +115,27 @@ function parseCaixaXls(filePath: string) {
       paymentsMap[method].count += 1;
       totalRevenue += valor;
       totalTransactions += 1;
+
+      // Extrair data da transação para agrupar por dia
+      if (valor > 0 && colDataTransacao >= 0) {
+        const rawDate = row[colDataTransacao];
+        let dateKey = "";
+        if (rawDate) {
+          const dateStr = String(rawDate).trim();
+          // Formato: "01/04/2026 11:04:10" ou "01/04/2026"
+          const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+          if (match) {
+            dateKey = `${match[3]}-${match[2]}-${match[1]}`; // YYYY-MM-DD
+          }
+        }
+        if (dateKey) {
+          if (!dailyMap[dateKey]) dailyMap[dateKey] = { total: 0, payments: {}, transactions: 0 };
+          dailyMap[dateKey].total += valor;
+          dailyMap[dateKey].transactions += 1;
+          if (!dailyMap[dateKey].payments[method]) dailyMap[dateKey].payments[method] = 0;
+          dailyMap[dateKey].payments[method] += valor;
+        }
+      }
     }
 
     const payments_summary = Object.entries(paymentsMap).map(([method, data]) => ({
@@ -106,13 +144,25 @@ function parseCaixaXls(filePath: string) {
       count: data.count,
     }));
 
+    const daily_summary = Object.entries(dailyMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, d]) => ({
+        date,
+        total: Math.round(d.total * 100) / 100,
+        transactions: d.transactions,
+        payments: Object.fromEntries(
+          Object.entries(d.payments).map(([k, v]) => [k, Math.round(v * 100) / 100])
+        ),
+      }));
+
     return {
       payments_summary,
+      daily_summary,
       total_revenue: Math.round(totalRevenue * 100) / 100,
       total_transactions: totalTransactions,
     };
   } catch (err) {
-    return { error: String(err), payments_summary: [], total_revenue: 0, total_transactions: 0 };
+    return { error: String(err), payments_summary: [], daily_summary: [], total_revenue: 0, total_transactions: 0 };
   }
 }
 
@@ -307,7 +357,7 @@ salesImportExpressRouter.post(
       }
 
       // Caixa é opcional
-      let caixaData: ReturnType<typeof parseCaixaXls> = { payments_summary: [], total_revenue: 0, total_transactions: 0 };
+      let caixaData: ReturnType<typeof parseCaixaXls> = { payments_summary: [], daily_summary: [], total_revenue: 0, total_transactions: 0 };
       if (files?.caixa?.[0]) {
         const caixaPath = files.caixa[0].path;
         caixaData = parseCaixaXls(caixaPath);
@@ -371,6 +421,12 @@ export const salesImportRouter = router({
         ),
         totalRevenue: z.number(),
         totalTransactions: z.number(),
+        dailySummary: z.array(z.object({
+          date: z.string(),
+          total: z.number(),
+          transactions: z.number(),
+          payments: z.record(z.string(), z.number()),
+        })).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -382,7 +438,8 @@ export const salesImportRouter = router({
         input.totalRevenue,
         input.totalTransactions,
         input.importMode,
-        input.saleDate
+        input.saleDate,
+        input.dailySummary
       );
       return result;
     }),
