@@ -38,6 +38,7 @@ import {
   stockMovements,
   userPermissions,
   users,
+  salesImports,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -437,14 +438,44 @@ export async function getDashboardMetrics() {
   const [todaySales] = await db.select({ total: sql<string>`COALESCE(SUM(${sales.finalTotal}), 0)`, count: sql<number>`COUNT(*)` }).from(sales).where(and(gte(sales.createdAt, today), eq(sales.status, "completed")));
   const [monthSales] = await db.select({ total: sql<string>`COALESCE(SUM(${sales.finalTotal}), 0)`, count: sql<number>`COUNT(*)` }).from(sales).where(and(gte(sales.createdAt, monthStart), eq(sales.status, "completed")));
 
+  // Vendas importadas (PDV) confirmadas
+  const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD
+  const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`; // YYYY-MM
+
+  // Importações mensais confirmadas do mês atual
+  const [importMonthSales] = await db
+    .select({ total: sql<string>`COALESCE(SUM(${salesImports.totalRevenue}), 0)`, count: sql<number>`COUNT(*)` })
+    .from(salesImports)
+    .where(and(eq(salesImports.status, "confirmed"), eq(salesImports.referenceMonth, monthStr)));
+
+  // Importações diárias confirmadas de hoje
+  const [importTodaySales] = await db
+    .select({ total: sql<string>`COALESCE(SUM(${salesImports.totalRevenue}), 0)`, count: sql<number>`COUNT(*)` })
+    .from(salesImports)
+    .where(and(
+      eq(salesImports.status, "confirmed"),
+      eq(salesImports.importMode, "daily"),
+      sql`DATE(${salesImports.saleDate}) = ${todayStr}`,
+    ));
+
+  const importMonthTotal = parseFloat(importMonthSales?.total ?? "0");
+  const importMonthCount = importMonthSales?.count ?? 0;
+  const importTodayTotal = parseFloat(importTodaySales?.total ?? "0");
+  const importTodayCount = importTodaySales?.count ?? 0;
+
   return {
     totalCustomers: totalCustomers?.count ?? 0,
     totalProducts: totalProducts?.count ?? 0,
     lowStockCount: lowStock?.count ?? 0,
-    todaySalesTotal: parseFloat(todaySales?.total ?? "0"),
-    todaySalesCount: todaySales?.count ?? 0,
-    monthSalesTotal: parseFloat(monthSales?.total ?? "0"),
-    monthSalesCount: monthSales?.count ?? 0,
+    todaySalesTotal: parseFloat(todaySales?.total ?? "0") + importTodayTotal,
+    todaySalesCount: (todaySales?.count ?? 0) + importTodayCount,
+    monthSalesTotal: parseFloat(monthSales?.total ?? "0") + importMonthTotal,
+    monthSalesCount: (monthSales?.count ?? 0) + importMonthCount,
+    // dados separados para o frontend mostrar a origem
+    importMonthTotal,
+    importMonthCount,
+    importTodayTotal,
+    importTodayCount,
   };
 }
 
@@ -453,7 +484,10 @@ export async function getSalesChartData(days = 30) {
   if (!db) return [];
   const from = new Date();
   from.setDate(from.getDate() - days);
-  return db
+  const fromStr = from.toISOString().slice(0, 10);
+
+  // Vendas manuais do sistema
+  const manualSales = await db
     .select({
       date: sql<string>`DATE(MIN(${sales.createdAt}))`,
       total: sql<string>`COALESCE(SUM(${sales.finalTotal}), 0)`,
@@ -463,6 +497,67 @@ export async function getSalesChartData(days = 30) {
     .where(and(gte(sales.createdAt, from), eq(sales.status, "completed")))
     .groupBy(sql`DATE(${sales.createdAt})`)
     .orderBy(sql`DATE(${sales.createdAt})`);
+
+  // Importações diárias confirmadas (modo daily)
+  const importDailySales = await db
+    .select({
+      date: sql<string>`DATE(${salesImports.saleDate})`,
+      total: sql<string>`COALESCE(SUM(${salesImports.totalRevenue}), 0)`,
+      count: sql<number>`COUNT(*)`,
+    })
+    .from(salesImports)
+    .where(and(
+      eq(salesImports.status, "confirmed"),
+      eq(salesImports.importMode, "daily"),
+      sql`DATE(${salesImports.saleDate}) >= ${fromStr}`,
+    ))
+    .groupBy(sql`DATE(${salesImports.saleDate})`);
+
+  // Importações mensais confirmadas — distribuir pelo mês de referência
+  const importMonthlySales = await db
+    .select({
+      referenceMonth: salesImports.referenceMonth,
+      total: sql<string>`COALESCE(SUM(${salesImports.totalRevenue}), 0)`,
+      count: sql<number>`COUNT(*)`,
+    })
+    .from(salesImports)
+    .where(and(
+      eq(salesImports.status, "confirmed"),
+      eq(salesImports.importMode, "monthly"),
+    ))
+    .groupBy(salesImports.referenceMonth);
+
+  // Combinar: usar data como chave
+  const map = new Map<string, { total: number; count: number }>();
+
+  for (const row of manualSales) {
+    const key = row.date;
+    const prev = map.get(key) ?? { total: 0, count: 0 };
+    map.set(key, { total: prev.total + parseFloat(row.total), count: prev.count + row.count });
+  }
+
+  for (const row of importDailySales) {
+    const key = row.date;
+    if (!key) continue;
+    const prev = map.get(key) ?? { total: 0, count: 0 };
+    map.set(key, { total: prev.total + parseFloat(row.total), count: prev.count + row.count });
+  }
+
+  // Para importações mensais, colocar no último dia do mês de referência (ou dia 1 se futuro)
+  for (const row of importMonthlySales) {
+    const [y, m] = row.referenceMonth.split("-").map(Number);
+    const lastDay = new Date(y, m, 0);
+    const today = new Date();
+    const targetDate = lastDay <= today ? lastDay : new Date(y, m - 1, 1);
+    const key = targetDate.toISOString().slice(0, 10);
+    if (key < fromStr) continue;
+    const prev = map.get(key) ?? { total: 0, count: 0 };
+    map.set(key, { total: prev.total + parseFloat(row.total), count: prev.count + row.count });
+  }
+
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, { total, count }]) => ({ date, total: String(total.toFixed(2)), count }));
 }
 
 export async function getTopProducts(limit = 10) {

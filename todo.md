@@ -588,3 +588,11 @@
 - [x] Frontend: seletor de modo (Por Mês / Por Dia) no UploadStep
 - [x] Frontend: campo de data específica quando modo Diário
 - [x] Frontend: histórico mostra data específica e badge "Diário" para importações diárias
+
+## Integração de Vendas Importadas no Dashboard e Previsão (09/04)
+- [x] Backend: getDashboardMetrics soma salesImports confirmados ao total de vendas do mês/dia
+- [x] Backend: getSalesChartData inclui importações diárias e mensais no gráfico de 30 dias
+- [x] Backend: confirmSalesImport popula automaticamente fin_daily_revenue para importações diárias
+- [x] Frontend: Dashboard KPI "Vendas do Mês" e "Vendas Hoje" incluem dados PDV com indicador
+- [x] Frontend: Dashboard gráfico "Últimos 30 dias" inclui dados de importações
+- [x] Frontend: Previsão de Faturamento recebe faturamento real automaticamente ao confirmar importação diária

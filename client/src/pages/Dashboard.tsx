@@ -116,14 +116,18 @@ export default function Dashboard() {
           <StatCard
             title="Vendas Hoje"
             value={formatCurrency(metrics?.todaySalesTotal ?? 0)}
-            subtitle={`${metrics?.todaySalesCount ?? 0} transações`}
+            subtitle={(metrics?.importTodayTotal ?? 0) > 0
+              ? `incl. R$ ${(metrics!.importTodayTotal!).toFixed(2).replace('.', ',')} PDV`
+              : `${metrics?.todaySalesCount ?? 0} transações`}
             icon={ShoppingCart}
             gradient="bg-gradient-to-br from-violet-600 to-purple-700"
           />
           <StatCard
             title="Vendas do Mês"
             value={formatCurrency(metrics?.monthSalesTotal ?? 0)}
-            subtitle={`${metrics?.monthSalesCount ?? 0} transações`}
+            subtitle={(metrics?.importMonthTotal ?? 0) > 0
+              ? `incl. ${formatCurrency(metrics!.importMonthTotal!)} PDV`
+              : `${metrics?.monthSalesCount ?? 0} transações`}
             icon={TrendingUp}
             gradient="bg-gradient-to-br from-pink-500 to-rose-600"
           />

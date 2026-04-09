@@ -5,6 +5,7 @@ import {
   salesImportPayments,
   products,
   stockMovements,
+  finDailyRevenue,
 } from "../drizzle/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 
@@ -357,6 +358,27 @@ export async function confirmSalesImport(importId: number, userId: number) {
     .update(salesImports)
     .set({ status: "confirmed", confirmedAt: new Date() })
     .where(eq(salesImports.id, importId));
+
+  // Se for importação diária, popular automaticamente o faturamento real na Previsão de Faturamento
+  if (header.importMode === "daily" && header.saleDate) {
+    const revenueDate = header.saleDate instanceof Date
+      ? header.saleDate.toISOString().slice(0, 10)
+      : String(header.saleDate).slice(0, 10);
+    const realAmount = String(header.totalRevenue);
+    const note = `Importado automaticamente da planilha PDV (ID: ${importId})`;
+
+    const existing = await db.select().from(finDailyRevenue)
+      .where(eq(finDailyRevenue.revenueDate, revenueDate))
+      .limit(1);
+
+    if (existing.length > 0) {
+      await db.update(finDailyRevenue)
+        .set({ realAmount, note, updatedAt: new Date() })
+        .where(eq(finDailyRevenue.revenueDate, revenueDate));
+    } else {
+      await db.insert(finDailyRevenue).values({ userId, revenueDate, realAmount, note });
+    }
+  }
 
   return { success: true, stockUpdated, itemsLinked: items.length };
 }
