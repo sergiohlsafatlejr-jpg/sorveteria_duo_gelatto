@@ -58,7 +58,153 @@ interface ParsedData {
   };
 }
 
-// ─── Componente: Upload de Arquivos ───────────────────────────────────────────
+// ─── Componente: Apenas Caixa ────────────────────────────────────────────────────────────────────────
+function CaixaOnlyStep({ onBack }: { onBack: () => void }) {
+  const [caixaFile, setCaixaFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<null | { daysInserted: number; daysUpdated: number; total: number; message: string; dailySummary: Array<{ date: string; total: number; transactions: number }> }>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const caixaRef = useRef<HTMLInputElement>(null);
+
+  const confirmMut = trpc.salesImport.confirmCaixa.useMutation({
+    onSuccess: (data) => {
+      toast.success(data.message);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleUpload = async () => {
+    if (!caixaFile) {
+      toast.error("Selecione o arquivo de caixa");
+      return;
+    }
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("caixa", caixaFile);
+      const res = await fetch("/api/sales-import/upload-caixa", { method: "POST", body: formData });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        toast.error(json.error || "Erro ao processar arquivo de caixa");
+        return;
+      }
+      const data = json.data;
+      // Confirmar automaticamente (popular fin_daily_revenue)
+      const confirmResult = await confirmMut.mutateAsync({ dailySummary: data.daily_summary });
+      setResult({ ...confirmResult, dailySummary: data.daily_summary });
+    } catch (err) {
+      toast.error("Erro de conexão");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (result) {
+    return (
+      <div className="space-y-4">
+        <Card className="border-green-500/30 bg-green-500/5">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3 mb-4">
+              <CheckCircle2 className="h-8 w-8 text-green-600" />
+              <div>
+                <p className="font-semibold text-green-700">Caixa importado com sucesso!</p>
+                <p className="text-sm text-muted-foreground">{result.message}</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left p-2 font-medium">Data</th>
+                    <th className="text-right p-2 font-medium">Total (R$)</th>
+                    <th className="text-right p-2 font-medium">Transações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.dailySummary.map((d) => (
+                    <tr key={d.date} className="border-t">
+                      <td className="p-2">{new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR")}</td>
+                      <td className="p-2 text-right font-medium">{fmt(d.total)}</td>
+                      <td className="p-2 text-right text-muted-foreground">{d.transactions}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+        <Button variant="outline" onClick={onBack} className="w-full">
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Voltar ao Histórico
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Importar Apenas Caixa</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Importe o arquivo de movimentação de caixa para popular automaticamente a
+            <strong> Previsão de Faturamento</strong> com os valores reais por dia.
+          </p>
+          <div
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+              dragOver
+                ? "border-blue-400 bg-blue-50 dark:bg-blue-950/20"
+                : caixaFile
+                ? "border-green-400 bg-green-50 dark:bg-green-950/20"
+                : "border-muted-foreground/30 hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/10"
+            }`}
+            onClick={() => caixaRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) setCaixaFile(f); }}
+          >
+            <input
+              ref={caixaRef}
+              type="file"
+              accept=".xls,.xlsx"
+              className="hidden"
+              onChange={(e) => setCaixaFile(e.target.files?.[0] ?? null)}
+            />
+            <CreditCard className={`h-10 w-10 mx-auto mb-3 ${caixaFile ? "text-green-500" : "text-muted-foreground"}`} />
+            <p className="text-sm font-medium">
+              {caixaFile ? caixaFile.name : "Arraste ou clique para selecionar o arquivo de caixa"}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {caixaFile ? "Arquivo selecionado ✓" : "Formato XLS/XLSX — Relatório de Movimentação de Recebimentos"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex gap-3">
+        <Button variant="outline" onClick={onBack} className="flex-1">
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Voltar
+        </Button>
+        <Button
+          onClick={handleUpload}
+          disabled={!caixaFile || loading}
+          className="flex-2 min-w-[200px] bg-blue-600 hover:bg-blue-700 text-white"
+        >
+          {loading ? (
+            <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Processando...</>
+          ) : (
+            <><Upload className="h-4 w-4 mr-2" />Importar Caixa → Previsão</>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Componente: Upload de Arquivos ─────────────────────────────────────────────────────
 function UploadStep({
   onParsed,
 }: {
@@ -854,7 +1000,7 @@ function ImportDetail({ importId, onClose }: { importId: number; onClose: () => 
 
 // ─── Página Principal ─────────────────────────────────────────────────────────
 export default function SalesImport() {
-  const [step, setStep] = useState<"upload" | "review" | "history">("history");
+  const [step, setStep] = useState<"upload" | "review" | "history" | "caixa-only">("history");
   const [parsedData, setParsedData] = useState<ParsedData | null>(null);
   const [referenceMonth, setReferenceMonth] = useState("");
   const [importMode, setImportMode] = useState<"monthly" | "daily">("monthly");
@@ -891,12 +1037,18 @@ export default function SalesImport() {
           </p>
         </div>
         {step === "history" && (
-          <Button onClick={() => setStep("upload")} className="bg-green-600 hover:bg-green-700 text-white">
-            <Upload className="h-4 w-4 mr-2" />
-            Nova Importação
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setStep("caixa-only")} className="border-blue-500/40 text-blue-600 hover:bg-blue-500/10">
+              <CreditCard className="h-4 w-4 mr-2" />
+              Importar Caixa
+            </Button>
+            <Button onClick={() => setStep("upload")} className="bg-green-600 hover:bg-green-700 text-white">
+              <Upload className="h-4 w-4 mr-2" />
+              Nova Importação
+            </Button>
+          </div>
         )}
-        {(step === "upload" || step === "review") && (
+        {(step === "upload" || step === "review" || step === "caixa-only") && (
           <Button variant="outline" onClick={() => setStep("history")}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Voltar ao Histórico
@@ -905,6 +1057,10 @@ export default function SalesImport() {
       </div>
 
       {/* Conteúdo por step */}
+      {step === "caixa-only" && (
+        <CaixaOnlyStep onBack={() => setStep("history")} />
+      )}
+
       {step === "upload" && (
         <UploadStep onParsed={handleParsed} />
       )}

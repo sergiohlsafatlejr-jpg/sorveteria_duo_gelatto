@@ -334,6 +334,29 @@ salesImportExpressRouter.post(
   }
 );
 
+// ─── Endpoint para importar APENAS arquivo de caixa (sem produtos) ─────────────
+salesImportExpressRouter.post(
+  "/api/sales-import/upload-caixa",
+  upload.single("caixa"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Envie o arquivo de caixa" });
+      }
+      const caixaPath = req.file.path;
+      const caixaData = parseCaixaXls(caixaPath);
+      try { fs.unlinkSync(caixaPath); } catch {}
+      if ((caixaData as any).error) {
+        return res.status(400).json({ error: "Erro no arquivo de caixa: " + (caixaData as any).error });
+      }
+      return res.json({ success: true, data: caixaData });
+    } catch (err: unknown) {
+      console.error("Caixa upload error:", err);
+      return res.status(500).json({ error: String(err) });
+    }
+  }
+);
+
 salesImportExpressRouter.post(
   "/api/sales-import/upload",
   upload.fields([
@@ -737,6 +760,58 @@ Se não houver correspondência razoável, retorne externalCode como null.`;
   getConfirmedMonths: protectedProcedure.query(async () => {
     return getConfirmedMonths();
   }),
+
+  // Confirmar importação de caixa (apenas popular fin_daily_revenue, sem criar salesImport)
+  confirmCaixa: protectedProcedure
+    .input(z.object({
+      dailySummary: z.array(z.object({
+        date: z.string(),
+        total: z.number(),
+        transactions: z.number(),
+        payments: z.record(z.string(), z.number()),
+      })),
+      note: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { getDb } = await import("../db");
+      const { finDailyRevenue } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      let updated = 0;
+      let inserted = 0;
+      for (const entry of input.dailySummary) {
+        if (!entry.date || !entry.total) continue;
+        const revenueDate = entry.date;
+        const realAmount = String(Math.round(entry.total * 100) / 100);
+        const note = input.note || `Caixa importado`;
+        const existing = await db.select().from(finDailyRevenue)
+          .where(eq(finDailyRevenue.revenueDate, revenueDate))
+          .limit(1);
+        if (existing.length > 0) {
+          await db.update(finDailyRevenue)
+            .set({ realAmount, note, updatedAt: new Date() })
+            .where(eq(finDailyRevenue.revenueDate, revenueDate));
+          updated++;
+        } else {
+          await db.insert(finDailyRevenue).values({
+            userId: ctx.user.id,
+            revenueDate,
+            realAmount,
+            note,
+          });
+          inserted++;
+        }
+      }
+      return {
+        success: true,
+        daysInserted: inserted,
+        daysUpdated: updated,
+        total: input.dailySummary.length,
+        message: `${inserted} dias inseridos, ${updated} dias atualizados na Previsão de Faturamento.`,
+      };
+    }),
 
   // Sugerir vínculos com IA a partir de produtos parseados (sem importId)
   // Usado no ReviewStep antes de salvar no banco

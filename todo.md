@@ -604,3 +604,11 @@
 - [x] Backend: salvar formas de pagamento por dia nas movimentações diárias
 - [x] Backend: correção de query GROUP BY incompatível com sql_mode=only_full_group_by
 - [x] Testes: 6 testes do parser de caixa criados e passando (29/29 total)
+
+## Importação Somente de Caixa (09/04)
+- [x] Backend: endpoint /api/sales-import/upload-caixa para processar apenas arquivo de caixa
+- [x] Backend: endpoint tRPC salesImport.confirmCaixa para salvar fin_daily_revenue sem criar salesImport
+- [x] Frontend: botão "Importar Caixa" na tela de importação (sem precisar do arquivo de produtos)
+- [x] Frontend: tela CaixaOnlyStep com upload, processamento e resumo dos dias populados
+- [x] Frontend: exibir tabela de dias inseridos/atualizados após confirmar importação de caixa
+- [x] 29/29 testes passando
