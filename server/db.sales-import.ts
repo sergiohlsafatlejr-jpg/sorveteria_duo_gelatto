@@ -134,7 +134,9 @@ export async function createSalesImport(
   items: (ParsedProduct & { productId?: number | null; linkStatus?: string })[],
   payments: ParsedPayment[],
   totalRevenue: number,
-  totalTransactions: number
+  totalTransactions: number,
+  importMode: "monthly" | "daily" = "monthly",
+  saleDate?: string
 ) {
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
@@ -158,6 +160,8 @@ export async function createSalesImport(
   const [result] = await db.insert(salesImports).values({
     userId,
     referenceMonth,
+    importMode,
+    saleDate: saleDate ? new Date(saleDate) : null,
     status: "pending",
     totalRevenue: String(totalRevenue),
     totalItems: items.length,

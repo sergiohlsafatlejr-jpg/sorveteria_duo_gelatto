@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   decimal,
   int,
   json,
@@ -555,6 +556,8 @@ export const salesImports = mysqlTable("sales_imports", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   referenceMonth: varchar("referenceMonth", { length: 7 }).notNull(), // "2026-03"
+  importMode: mysqlEnum("importMode", ["monthly", "daily"]).default("monthly").notNull(), // mensal ou diário
+  saleDate: date("saleDate"), // data específica para modo diário (ex: 2026-04-09)
   status: mysqlEnum("status", ["pending", "confirmed", "cancelled"]).default("pending").notNull(),
   totalRevenue: decimal("totalRevenue", { precision: 12, scale: 2 }).default("0").notNull(),
   totalItems: int("totalItems").default(0).notNull(),

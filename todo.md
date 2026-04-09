@@ -580,3 +580,11 @@
 - [x] Frontend: nova aba "Estoque Gerencial" na página /gerencial
 - [x] Frontend: gráfico top produtos mais comprados
 - [x] Frontend: tabela comparativa compras x vendas com giro e cobertura
+
+## Importação de Vendas por Dia (09/04)
+- [x] Schema: campos importMode e saleDate na tabela salesImports + migração executada
+- [x] Backend: createSalesImport aceita importMode e saleDate
+- [x] Backend: endpoint tRPC create aceita importMode e saleDate
+- [x] Frontend: seletor de modo (Por Mês / Por Dia) no UploadStep
+- [x] Frontend: campo de data específica quando modo Diário
+- [x] Frontend: histórico mostra data específica e badge "Diário" para importações diárias

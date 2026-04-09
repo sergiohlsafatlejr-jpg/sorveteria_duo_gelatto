@@ -348,6 +348,8 @@ export const salesImportRouter = router({
     .input(
       z.object({
         referenceMonth: z.string().regex(/^\d{4}-\d{2}$/),
+        importMode: z.enum(["monthly", "daily"]).default("monthly"),
+        saleDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         items: z.array(
           z.object({
             external_code: z.string(),
@@ -378,7 +380,9 @@ export const salesImportRouter = router({
         input.items,
         input.payments,
         input.totalRevenue,
-        input.totalTransactions
+        input.totalTransactions,
+        input.importMode,
+        input.saleDate
       );
       return result;
     }),

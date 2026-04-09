@@ -61,10 +61,15 @@ interface ParsedData {
 function UploadStep({
   onParsed,
 }: {
-  onParsed: (data: ParsedData, month: string) => void;
+  onParsed: (data: ParsedData, month: string, mode: "monthly" | "daily", saleDate?: string) => void;
 }) {
   const [caixaFile, setCaixaFile] = useState<File | null>(null);
   const [produtosFile, setProdutosFile] = useState<File | null>(null);
+  const [importMode, setImportMode] = useState<"monthly" | "daily">("monthly");
+  const [saleDate, setSaleDate] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
   const [referenceMonth, setReferenceMonth] = useState(() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -108,7 +113,9 @@ function UploadStep({
         toast.error(json.error || "Erro ao processar arquivos");
         return;
       }
-      onParsed(json.data, referenceMonth);
+      // Para modo diário, derivar o referenceMonth da data selecionada
+      const effectiveMonth = importMode === "daily" ? saleDate.slice(0, 7) : referenceMonth;
+      onParsed(json.data, effectiveMonth, importMode, importMode === "daily" ? saleDate : undefined);
     } catch (err) {
       toast.error("Erro de conexão ao fazer upload");
     } finally {
@@ -121,48 +128,83 @@ function UploadStep({
 
   return (
     <div className="space-y-6">
-      {/* Seletor de mês de referência */}
+      {/* Seletor de modo: Mensal ou Diário */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">Mês de Referência</CardTitle>
+          <CardTitle className="text-sm font-medium">Tipo de Importação</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-3">
-            <Select
-              value={String(month)}
-              onValueChange={(v) =>
-                setReferenceMonth(`${year}-${String(v).padStart(2, "0")}`)
-              }
+          <div className="flex gap-3 flex-wrap">
+            <Button
+              variant={importMode === "monthly" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setImportMode("monthly")}
             >
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MONTHS.map((m, i) => (
-                  <SelectItem key={i} value={String(i + 1)}>
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={String(year)}
-              onValueChange={(v) =>
-                setReferenceMonth(`${v}-${String(month).padStart(2, "0")}`)
-              }
+              📅 Por Mês
+            </Button>
+            <Button
+              variant={importMode === "daily" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setImportMode("daily")}
             >
-              <SelectTrigger className="w-28">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[2024, 2025, 2026].map((y) => (
-                  <SelectItem key={y} value={String(y)}>
-                    {y}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              🗓️ Por Dia
+            </Button>
           </div>
+
+          {importMode === "monthly" && (
+            <div className="flex gap-3 mt-3">
+              <Select
+                value={String(month)}
+                onValueChange={(v) =>
+                  setReferenceMonth(`${year}-${String(v).padStart(2, "0")}`)
+                }
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MONTHS.map((m, i) => (
+                    <SelectItem key={i} value={String(i + 1)}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={String(year)}
+                onValueChange={(v) =>
+                  setReferenceMonth(`${v}-${String(month).padStart(2, "0")}`)
+                }
+              >
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[2024, 2025, 2026].map((y) => (
+                    <SelectItem key={y} value={String(y)}>
+                      {y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {importMode === "daily" && (
+            <div className="mt-3">
+              <p className="text-xs text-muted-foreground mb-2">Selecione a data das vendas:</p>
+              <Input
+                type="date"
+                value={saleDate}
+                onChange={(e) => setSaleDate(e.target.value)}
+                className="w-48"
+                max={new Date().toISOString().slice(0, 10)}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Mês de referência: <strong>{saleDate.slice(0, 7)}</strong> (derivado da data)
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -249,16 +291,19 @@ function UploadStep({
     </div>
   );
 }
-
-// ─── Componente: Revisão e Vinculação ─────────────────────────────────────────
+// ─── Componente: Revisão e Vinculação ───────────────────────────────────────────────
 function ReviewStep({
   data,
   referenceMonth,
+  importMode = "monthly",
+  saleDate,
   onConfirm,
   onBack,
 }: {
   data: ParsedData;
   referenceMonth: string;
+  importMode?: "monthly" | "daily";
+  saleDate?: string;
   onConfirm: (importId: number) => void;
   onBack: () => void;
 }) {
@@ -329,6 +374,8 @@ function ReviewStep({
 
     createMut.mutate({
       referenceMonth,
+      importMode,
+      saleDate,
       items: mergedItems,
       payments,
       totalRevenue: data.caixa.total_revenue,
@@ -808,14 +855,18 @@ export default function SalesImport() {
   const [step, setStep] = useState<"upload" | "review" | "history">("history");
   const [parsedData, setParsedData] = useState<ParsedData | null>(null);
   const [referenceMonth, setReferenceMonth] = useState("");
+  const [importMode, setImportMode] = useState<"monthly" | "daily">("monthly");
+  const [saleDate, setSaleDate] = useState<string | undefined>(undefined);
   const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
 
   const utils = trpc.useUtils();
   const { data: imports, isLoading } = trpc.salesImport.list.useQuery();
 
-  const handleParsed = (data: ParsedData, month: string) => {
+  const handleParsed = (data: ParsedData, month: string, mode: "monthly" | "daily", date?: string) => {
     setParsedData(data);
     setReferenceMonth(month);
+    setImportMode(mode);
+    setSaleDate(date);
     setStep("review");
   };
 
@@ -860,6 +911,8 @@ export default function SalesImport() {
         <ReviewStep
           data={parsedData}
           referenceMonth={referenceMonth}
+          importMode={importMode}
+          saleDate={saleDate}
           onConfirm={handleImportCreated}
           onBack={() => setStep("upload")}
         />
@@ -915,6 +968,10 @@ export default function SalesImport() {
                   <tbody>
                     {imports.map((imp) => {
                       const [y, m] = imp.referenceMonth.split("-").map(Number);
+                      const isDaily = imp.importMode === "daily";
+                      const dateLabel = isDaily && imp.saleDate
+                        ? new Date(imp.saleDate + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })
+                        : `${MONTHS[m - 1]}/${y}`;
                       return (
                         <tr
                           key={imp.id}
@@ -922,7 +979,14 @@ export default function SalesImport() {
                           onClick={() => setSelectedImportId(selectedImportId === imp.id ? null : imp.id)}
                         >
                           <td className="p-3 font-medium">
-                            {MONTHS[m - 1]}/{y}
+                            <div className="flex items-center gap-2">
+                              {dateLabel}
+                              {isDaily && (
+                                <Badge className="text-xs bg-blue-500/15 text-blue-600 border-blue-500/30 h-4 px-1">
+                                  Diário
+                                </Badge>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3 text-right font-medium text-green-600">
                             {fmt(imp.totalRevenue)}

@@ -120,6 +120,13 @@
       "when": 1775576106987,
       "tag": "0016_common_energizer",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1775732588800,
+      "tag": "0017_strong_molecule_man",
+      "breakpoints": true
     }
   ]
 }
