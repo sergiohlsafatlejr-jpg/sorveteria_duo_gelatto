@@ -644,3 +644,10 @@
 - [x] Corrigido: formulário reescrito com useState simples (sem react-hook-form)
 - [x] Corrigido: botão "Criar" chama handleSave() diretamente (type=button, não type=submit)
 - [x] Corrigido: filtro de mês inicializado corretamente com mês atual ao carregar a página
+
+## Bug: Lançamento criado não aparece na lista de Contas a Pagar (15/04 - terceira investigação)
+- [x] Diagnosticado: new Date("2026-04-30") = 2026-04-30T00:00:00Z, mas lançamentos salvos com hora 19:00 UTC ficavam fora do filtro (19:00 > 00:00 = fora do range)
+- [x] Corrigido FinPayables: dateFrom usa T00:00:00, dateTo usa T23:59:59 (cobre todo o dia)
+- [x] Corrigido FinReceivables: mesmo bug corrigido + formulário reescrito sem react-hook-form
+- [x] Corrigido FinBankStatements: mesmo bug corrigido + formulário reescrito sem react-hook-form
+- [x] 0 erros TypeScript após todas as correções

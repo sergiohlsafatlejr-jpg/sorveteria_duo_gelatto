@@ -63,8 +63,8 @@ export default function FinPayables() {
     categoryId: filters.categoryId ?? undefined,
     bankId: filters.bankId ?? undefined,
     isPaid: filters.status === "paid" ? true : filters.status === "pending" || filters.status === "overdue" ? false : undefined,
-    dateFrom: filters.dateFrom ? new Date(filters.dateFrom) : undefined,
-    dateTo: filters.dateTo ? new Date(filters.dateTo) : undefined,
+    dateFrom: filters.dateFrom ? new Date(filters.dateFrom + "T00:00:00") : undefined,
+    dateTo: filters.dateTo ? new Date(filters.dateTo + "T23:59:59") : undefined,
   });
 
   const now = new Date();

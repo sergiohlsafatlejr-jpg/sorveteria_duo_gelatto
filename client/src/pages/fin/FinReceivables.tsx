@@ -12,8 +12,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { CheckCircle2, Edit2, Plus, Trash2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useForm } from "react-hook-form";
-
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
@@ -22,28 +20,30 @@ const fmtDate = (d: Date | string) => {
   return dt.toLocaleDateString("pt-BR");
 };
 
-type ReceivableForm = {
-  description: string;
-  amount: string;
-  dueDate: string;
-  typeId: string;
-  isReceived: boolean;
-  receivedDate: string;
-  notes: string;
-};
+const emptyForm = () => ({
+  description: "",
+  amount: "",
+  dueDate: new Date().toISOString().split("T")[0],
+  typeId: "",
+  isReceived: false,
+  receivedDate: "",
+  notes: "",
+});
 
 export default function FinReceivables() {
   const [filters, setFilters] = useState<FinFilters>({ status: "all" });
   const [modalOpen, setModalOpen] = useState(false);
-  const [editItem, setEditItem] = useState<{ id: number } & ReceivableForm | null>(null);
+  const [editItem, setEditItem] = useState<{ id: number } | null>(null);
+  const [form, setForm] = useState(emptyForm());
+  const setField = (k: string, v: string | boolean) => setForm(f => ({ ...f, [k]: v }));
 
   const utils = trpc.useUtils();
   const { data: types = [] } = trpc.fin.receivableTypes.list.useQuery();
   const { data: rawData = [], isLoading } = trpc.fin.receivables.list.useQuery({
     typeId: filters.categoryId ?? undefined,
     isReceived: filters.status === "paid" ? true : filters.status === "pending" ? false : undefined,
-    dateFrom: filters.dateFrom ? new Date(filters.dateFrom) : undefined,
-    dateTo: filters.dateTo ? new Date(filters.dateTo) : undefined,
+    dateFrom: filters.dateFrom ? new Date(filters.dateFrom + "T00:00:00") : undefined,
+    dateTo: filters.dateTo ? new Date(filters.dateTo + "T23:59:59") : undefined,
   });
 
   const now = new Date();
@@ -71,14 +71,9 @@ export default function FinReceivables() {
     onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Marcado como pendente!"); },
   });
 
-  const { register, handleSubmit, reset, setValue, watch } = useForm<ReceivableForm>({
-    defaultValues: { description: "", amount: "", dueDate: "", typeId: "", isReceived: false, receivedDate: "", notes: "" },
-  });
-
-  const openCreate = () => { reset(); setEditItem(null); setModalOpen(true); };
+  const openCreate = () => { setForm(emptyForm()); setEditItem(null); setModalOpen(true); };
   const openEdit = (r: typeof data[0]) => {
-    const form = {
-      id: r.id,
+    setForm({
       description: r.description,
       amount: String(r.amount),
       dueDate: (() => { const dt = new Date(r.dueDate); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })(),
@@ -86,15 +81,17 @@ export default function FinReceivables() {
       isReceived: r.isReceived,
       receivedDate: r.receivedDate ? (() => { const dt = new Date(r.receivedDate!); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })() : "",
       notes: r.notes ?? "",
-    };
-    setEditItem(form);
-    reset(form);
+    });
+    setEditItem({ id: r.id });
     setModalOpen(true);
   };
 
-  const onSubmit = (form: ReceivableForm) => {
+  const handleSave = () => {
+    if (!form.description?.trim()) { toast.error("Informe a descrição"); return; }
+    if (!form.amount || isNaN(Number(form.amount))) { toast.error("Informe o valor"); return; }
+    if (!form.dueDate) { toast.error("Informe a data de vencimento"); return; }
     const payload = {
-      description: form.description,
+      description: form.description.trim(),
       amount: Number(form.amount),
       dueDate: new Date(form.dueDate + "T12:00:00"),
       typeId: form.typeId ? Number(form.typeId) : undefined,
@@ -224,24 +221,24 @@ export default function FinReceivables() {
           <DialogHeader>
             <DialogTitle>{editItem ? "Editar Recebimento" : "Novo Recebimento"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-4">
             <div className="space-y-2">
               <Label>Descrição *</Label>
-              <Input {...register("description", { required: true })} placeholder="Ex: Venda de sorvetes" />
+              <Input value={form.description} onChange={e => setField("description", e.target.value)} placeholder="Ex: Venda de sorvetes" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Valor (R$) *</Label>
-                <Input {...register("amount", { required: true })} type="number" step="0.01" placeholder="0,00" />
+                <Input value={form.amount} onChange={e => setField("amount", e.target.value)} type="number" step="0.01" placeholder="0,00" />
               </div>
               <div className="space-y-2">
                 <Label>Vencimento *</Label>
-                <Input {...register("dueDate", { required: true })} type="date" />
+                <Input value={form.dueDate} onChange={e => setField("dueDate", e.target.value)} type="date" />
               </div>
             </div>
             <div className="space-y-2">
               <Label>Tipo</Label>
-              <Select value={watch("typeId") || "none"} onValueChange={v => setValue("typeId", v === "none" ? "" : v)}>
+              <Select value={form.typeId || "none"} onValueChange={v => setField("typeId", v === "none" ? "" : v)}>
                 <SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sem tipo</SelectItem>
@@ -250,25 +247,25 @@ export default function FinReceivables() {
               </Select>
             </div>
             <div className="flex items-center gap-3">
-              <input type="checkbox" id="isReceived" {...register("isReceived")} className="rounded" />
+              <input type="checkbox" id="isReceived" checked={form.isReceived} onChange={e => setField("isReceived", e.target.checked)} className="rounded" />
               <Label htmlFor="isReceived">Já foi recebido?</Label>
-              {watch("isReceived") && (
+              {form.isReceived && (
                 <div className="flex-1">
-                  <Input {...register("receivedDate")} type="date" className="h-8 text-xs" />
+                  <Input value={form.receivedDate} onChange={e => setField("receivedDate", e.target.value)} type="date" className="h-8 text-xs" />
                 </div>
               )}
             </div>
             <div className="space-y-2">
               <Label>Observações</Label>
-              <Textarea {...register("notes")} placeholder="Notas adicionais..." rows={2} />
+              <Textarea value={form.notes} onChange={e => setField("notes", e.target.value)} placeholder="Notas adicionais..." rows={2} />
             </div>
             <div className="flex gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setModalOpen(false)} className="flex-1">Cancelar</Button>
-              <Button type="submit" className="flex-1" disabled={createMut.isPending || updateMut.isPending}>
+              <Button type="button" onClick={handleSave} className="flex-1" disabled={createMut.isPending || updateMut.isPending}>
                 {editItem ? "Salvar" : "Criar"}
               </Button>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

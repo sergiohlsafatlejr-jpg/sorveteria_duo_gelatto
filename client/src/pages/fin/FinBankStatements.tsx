@@ -11,8 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { ArrowDownCircle, ArrowUpCircle, Edit2, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useForm } from "react-hook-form";
-
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
@@ -43,10 +41,17 @@ type StatementForm = {
   paymentMethod: string;
 };
 
+const emptyForm = (): StatementForm => ({
+  bankId: "", categoryId: "", date: new Date().toISOString().split("T")[0],
+  description: "", amount: "", type: "debit", reconciled: false, paymentMethod: "",
+});
+
 export default function FinBankStatements() {
   const [filters, setFilters] = useState<FinFilters>({ status: "all" });
   const [modalOpen, setModalOpen] = useState(false);
-  const [editItem, setEditItem] = useState<{ id: number } & StatementForm | null>(null);
+  const [editItem, setEditItem] = useState<{ id: number } | null>(null);
+  const [form, setForm] = useState<StatementForm>(emptyForm());
+  const setField = (k: string, v: string | boolean) => setForm(f => ({ ...f, [k]: v }));
 
   const utils = trpc.useUtils();
   const { data: banks = [] } = trpc.fin.banks.list.useQuery();
@@ -54,8 +59,8 @@ export default function FinBankStatements() {
   const { data: rawData = [], isLoading } = trpc.fin.bankStatements.list.useQuery({
     bankId: filters.bankId ?? undefined,
     categoryId: filters.categoryId ?? undefined,
-    dateFrom: filters.dateFrom ? new Date(filters.dateFrom) : undefined,
-    dateTo: filters.dateTo ? new Date(filters.dateTo) : undefined,
+    dateFrom: filters.dateFrom ? new Date(filters.dateFrom + "T00:00:00") : undefined,
+    dateTo: filters.dateTo ? new Date(filters.dateTo + "T23:59:59") : undefined,
   });
 
   const data = rawData.filter(s => {
@@ -75,14 +80,9 @@ export default function FinBankStatements() {
     onSuccess: () => { utils.fin.bankStatements.list.invalidate(); toast.success("Excluído!"); },
   });
 
-  const { register, handleSubmit, reset, setValue, watch } = useForm<StatementForm>({
-    defaultValues: { bankId: "", categoryId: "", date: "", description: "", amount: "", type: "debit", reconciled: false, paymentMethod: "" },
-  });
-
-  const openCreate = () => { reset(); setEditItem(null); setModalOpen(true); };
+  const openCreate = () => { setForm(emptyForm()); setEditItem(null); setModalOpen(true); };
   const openEdit = (s: typeof data[0]) => {
-    const form = {
-      id: s.id,
+    setForm({
       bankId: s.bankId?.toString() ?? "",
       categoryId: s.categoryId?.toString() ?? "",
       date: (() => { const dt = new Date(s.date); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })(),
@@ -91,18 +91,20 @@ export default function FinBankStatements() {
       type: s.type as "credit" | "debit",
       reconciled: s.reconciled,
       paymentMethod: s.paymentMethod ?? "",
-    };
-    setEditItem(form);
-    reset(form);
+    });
+    setEditItem({ id: s.id });
     setModalOpen(true);
   };
 
-  const onSubmit = (form: StatementForm) => {
+  const handleSave = () => {
+    if (!form.description?.trim()) { toast.error("Informe a descrição"); return; }
+    if (!form.amount || isNaN(Number(form.amount))) { toast.error("Informe o valor"); return; }
+    if (!form.date) { toast.error("Informe a data"); return; }
     const payload = {
       bankId: form.bankId ? Number(form.bankId) : undefined,
       categoryId: form.categoryId ? Number(form.categoryId) : undefined,
       date: new Date(form.date + "T12:00:00"),
-      description: form.description,
+      description: form.description.trim(),
       amount: Number(form.amount),
       type: form.type,
       reconciled: form.reconciled,
@@ -251,15 +253,15 @@ export default function FinBankStatements() {
           <DialogHeader>
             <DialogTitle>{editItem ? "Editar Lançamento" : "Novo Lançamento Bancário"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Data *</Label>
-                <Input {...register("date", { required: true })} type="date" />
+                <Input value={form.date} onChange={e => setField("date", e.target.value)} type="date" />
               </div>
               <div className="space-y-2">
                 <Label>Tipo *</Label>
-                <Select value={watch("type")} onValueChange={v => setValue("type", v as "credit" | "debit")}>
+                <Select value={form.type} onValueChange={v => setField("type", v)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="credit">Entrada (Crédito)</SelectItem>
@@ -270,16 +272,16 @@ export default function FinBankStatements() {
             </div>
             <div className="space-y-2">
               <Label>Descrição *</Label>
-              <Input {...register("description", { required: true })} placeholder="Ex: Pagamento fornecedor" />
+              <Input value={form.description} onChange={e => setField("description", e.target.value)} placeholder="Ex: Pagamento fornecedor" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Valor (R$) *</Label>
-                <Input {...register("amount", { required: true })} type="number" step="0.01" placeholder="0,00" />
+                <Input value={form.amount} onChange={e => setField("amount", e.target.value)} type="number" step="0.01" placeholder="0,00" />
               </div>
               <div className="space-y-2">
                 <Label>Forma de Pagamento</Label>
-                <Select value={watch("paymentMethod") || "none"} onValueChange={v => setValue("paymentMethod", v === "none" ? "" : v)}>
+                <Select value={form.paymentMethod || "none"} onValueChange={v => setField("paymentMethod", v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Não informado</SelectItem>
@@ -291,7 +293,7 @@ export default function FinBankStatements() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Banco</Label>
-                <Select value={watch("bankId") || "none"} onValueChange={v => setValue("bankId", v === "none" ? "" : v)}>
+                <Select value={form.bankId || "none"} onValueChange={v => setField("bankId", v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Sem banco</SelectItem>
@@ -301,7 +303,7 @@ export default function FinBankStatements() {
               </div>
               <div className="space-y-2">
                 <Label>Categoria</Label>
-                <Select value={watch("categoryId") || "none"} onValueChange={v => setValue("categoryId", v === "none" ? "" : v)}>
+                <Select value={form.categoryId || "none"} onValueChange={v => setField("categoryId", v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Sem categoria</SelectItem>
@@ -311,16 +313,16 @@ export default function FinBankStatements() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <input type="checkbox" id="reconciled" {...register("reconciled")} className="rounded" />
+              <input type="checkbox" id="reconciled" checked={form.reconciled} onChange={e => setField("reconciled", e.target.checked)} className="rounded" />
               <Label htmlFor="reconciled">Conciliado</Label>
             </div>
             <div className="flex gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setModalOpen(false)} className="flex-1">Cancelar</Button>
-              <Button type="submit" className="flex-1" disabled={createMut.isPending || updateMut.isPending}>
+              <Button type="button" onClick={handleSave} className="flex-1" disabled={createMut.isPending || updateMut.isPending}>
                 {editItem ? "Salvar" : "Criar"}
               </Button>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
