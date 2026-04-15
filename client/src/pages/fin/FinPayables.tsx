@@ -12,8 +12,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload, CopyPlus, Square, CheckSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useForm } from "react-hook-form";
-
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
@@ -22,22 +20,35 @@ const fmtDate = (d: Date | string) => {
   return dt.toLocaleDateString("pt-BR");
 };
 
-type TransactionForm = {
-  description: string;
-  amount: string;
-  dueDate: string;
-  categoryId: string;
-  bankId: string;
-  costId: string;
-  isPaid: boolean;
-  paymentDate: string;
-  notes: string;
-};
+const emptyForm = () => ({
+  description: "",
+  amount: "",
+  dueDate: new Date().toISOString().split("T")[0],
+  categoryId: "",
+  bankId: "",
+  costId: "",
+  isPaid: false,
+  paymentDate: "",
+  notes: "",
+});
 
 export default function FinPayables() {
-  const [filters, setFilters] = useState<FinFilters>({ status: "all" });
+  const [filters, setFilters] = useState<FinFilters>(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+    return {
+      status: "all",
+      monthYear: `${year}-${month}`,
+      dateFrom: `${year}-${month}-01`,
+      dateTo: `${year}-${month}-${String(lastDay).padStart(2, "0")}`,
+    };
+  });
   const [modalOpen, setModalOpen] = useState(false);
-  const [editItem, setEditItem] = useState<{ id: number } & TransactionForm | null>(null);
+  const [editItem, setEditItem] = useState<{ id: number } | null>(null);
+  const [form, setForm] = useState(emptyForm());
+  const setField = (k: string, v: string | boolean) => setForm(f => ({ ...f, [k]: v }));
   const [showImport, setShowImport] = useState(false);
   const [importCategoryId, setImportCategoryId] = useState("none");
   const [importBankId, setImportBankId] = useState("none");
@@ -125,19 +136,13 @@ export default function FinPayables() {
     e.target.value = "";
   };
 
-  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<TransactionForm>({
-    defaultValues: { description: "", amount: "", dueDate: "", categoryId: "", bankId: "", costId: "", isPaid: false, paymentDate: "", notes: "" },
-  });
-
-  const todayDateStr = new Date().toISOString().split("T")[0];
   const openCreate = () => {
-    reset({ description: "", amount: "", dueDate: todayDateStr, categoryId: "", bankId: "", costId: "", isPaid: false, paymentDate: "", notes: "" });
+    setForm(emptyForm());
     setEditItem(null);
     setModalOpen(true);
   };
   const openEdit = (t: typeof data[0]) => {
-    const form = {
-      id: t.id,
+    setForm({
       description: t.description,
       amount: String(t.amount),
       dueDate: (() => { const dt = new Date(t.dueDate); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })(),
@@ -147,13 +152,12 @@ export default function FinPayables() {
       isPaid: t.isPaid,
       paymentDate: t.paymentDate ? (() => { const dt = new Date(t.paymentDate!); return new Date(dt.getTime() + dt.getTimezoneOffset() * 60000).toISOString().split("T")[0]; })() : "",
       notes: t.notes ?? "",
-    };
-    setEditItem(form);
-    reset(form);
+    });
+    setEditItem({ id: t.id });
     setModalOpen(true);
   };
 
-  const onSubmit = (form: TransactionForm) => {
+  const handleSave = () => {
     if (!form.description?.trim()) { toast.error("Informe a descrição"); return; }
     if (!form.amount || isNaN(Number(form.amount))) { toast.error("Informe o valor"); return; }
     if (!form.dueDate) { toast.error("Informe a data de vencimento"); return; }
@@ -336,28 +340,25 @@ export default function FinPayables() {
           <DialogHeader>
             <DialogTitle>{editItem ? "Editar Lançamento" : "Novo Lançamento"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit(onSubmit, () => toast.error("Preencha todos os campos obrigatórios"))} className="space-y-4">
+          <div className="space-y-4">
             <div className="space-y-2">
               <Label>Descrição *</Label>
-              <Input {...register("description", { required: "Descrição obrigatória" })} placeholder="Ex: Fornecedor de sorvetes" className={errors.description ? "border-destructive" : ""} />
-              {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
+              <Input value={form.description} onChange={e => setField("description", e.target.value)} placeholder="Ex: Fornecedor de sorvetes" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Valor (R$) *</Label>
-                <Input {...register("amount", { required: "Valor obrigatório", min: { value: 0.01, message: "Valor deve ser maior que zero" } })} type="number" step="0.01" placeholder="0,00" className={errors.amount ? "border-destructive" : ""} />
-                {errors.amount && <p className="text-xs text-destructive">{errors.amount.message}</p>}
+                <Input value={form.amount} onChange={e => setField("amount", e.target.value)} type="number" step="0.01" placeholder="0,00" />
               </div>
               <div className="space-y-2">
                 <Label>Vencimento *</Label>
-                <Input {...register("dueDate", { required: "Data obrigatória" })} type="date" className={errors.dueDate ? "border-destructive" : ""} />
-                {errors.dueDate && <p className="text-xs text-destructive">{errors.dueDate.message}</p>}
+                <Input value={form.dueDate} onChange={e => setField("dueDate", e.target.value)} type="date" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Categoria</Label>
-                <Select value={watch("categoryId") || "none"} onValueChange={v => setValue("categoryId", v === "none" ? "" : v)}>
+                <Select value={form.categoryId || "none"} onValueChange={v => setField("categoryId", v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Sem categoria</SelectItem>
@@ -367,7 +368,7 @@ export default function FinPayables() {
               </div>
               <div className="space-y-2">
                 <Label>Banco</Label>
-                <Select value={watch("bankId") || "none"} onValueChange={v => setValue("bankId", v === "none" ? "" : v)}>
+                <Select value={form.bankId || "none"} onValueChange={v => setField("bankId", v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Sem banco</SelectItem>
@@ -378,7 +379,7 @@ export default function FinPayables() {
             </div>
             <div className="space-y-2">
               <Label>Vincular ao Custo</Label>
-              <Select value={watch("costId") || "none"} onValueChange={v => setValue("costId", v === "none" ? "" : v)}>
+              <Select value={form.costId || "none"} onValueChange={v => setField("costId", v === "none" ? "" : v)}>
                 <SelectTrigger><SelectValue placeholder="Selecione o custo" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sem custo vinculado</SelectItem>
@@ -387,25 +388,25 @@ export default function FinPayables() {
               </Select>
             </div>
             <div className="flex items-center gap-3">
-              <input type="checkbox" id="isPaid" {...register("isPaid")} className="rounded" />
+              <input type="checkbox" id="isPaid" checked={form.isPaid} onChange={e => setField("isPaid", e.target.checked)} className="rounded" />
               <Label htmlFor="isPaid">Já foi pago?</Label>
-              {watch("isPaid") && (
+              {form.isPaid && (
                 <div className="flex-1">
-                  <Input {...register("paymentDate")} type="date" placeholder="Data do pagamento" className="h-8 text-xs" />
+                  <Input value={form.paymentDate} onChange={e => setField("paymentDate", e.target.value)} type="date" placeholder="Data do pagamento" className="h-8 text-xs" />
                 </div>
               )}
             </div>
             <div className="space-y-2">
               <Label>Observações</Label>
-              <Textarea {...register("notes")} placeholder="Notas adicionais..." rows={2} />
+              <Textarea value={form.notes} onChange={e => setField("notes", e.target.value)} placeholder="Notas adicionais..." rows={2} />
             </div>
             <div className="flex gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setModalOpen(false)} className="flex-1">Cancelar</Button>
-              <Button type="submit" className="flex-1" disabled={createMut.isPending || updateMut.isPending}>
+              <Button type="button" onClick={handleSave} className="flex-1" disabled={createMut.isPending || updateMut.isPending}>
                 {editItem ? "Salvar" : "Criar"}
               </Button>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
 

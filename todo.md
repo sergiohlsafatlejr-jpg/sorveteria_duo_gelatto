@@ -638,3 +638,9 @@
 - [x] Corrigido: formState.errors agora exibe mensagens de erro em vermelho nos campos
 - [x] Corrigido: handleSubmit(onSubmit, onError) agora mostra toast quando há erros de validação
 - [x] Corrigido: campo de data já vem preenchido com a data de hoje ao abrir o modal
+
+## Bug: Criação de despesa em Contas a Pagar ainda não funciona (15/04 - segunda investigação)
+- [x] Diagnosticado: react-hook-form bloqueava o submit silenciosamente por validação interna
+- [x] Corrigido: formulário reescrito com useState simples (sem react-hook-form)
+- [x] Corrigido: botão "Criar" chama handleSave() diretamente (type=button, não type=submit)
+- [x] Corrigido: filtro de mês inicializado corretamente com mês atual ao carregar a página
