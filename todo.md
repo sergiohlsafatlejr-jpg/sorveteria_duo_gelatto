@@ -622,3 +622,13 @@
 - [x] Frontend: botão "Importação Diária" na tela principal de importação
 - [x] Frontend: exibir resumo de produtos baixados no estoque e produtos sem vínculo após importação
 - [x] 29/29 testes passando
+
+## Bug: Quantidade Mínima de Estoque não salva (09/04)
+- [x] Corrigido: parseInt(data.minStock) || 5 substituía valores válidos como 1 por 5 (operador || trata 0 como falsy)
+- [x] Corrigido: agora usa isNaN() para verificar se o valor é válido antes de usar o fallback
+
+## Bug: Contas a Pagar - Editar data e Novo Lançamento não funcionam (15/04)
+- [x] Corrigido: openCreate() agora faz reset() com data padrão (hoje) ao abrir o modal
+- [x] Corrigido: onSubmit() com validações explícitas e feedback de erro via toast
+- [x] Corrigido: backend usa z.coerce.date() para garantir conversão correta de datas
+- [x] 29/29 testes passando

@@ -129,7 +129,12 @@ export default function FinPayables() {
     defaultValues: { description: "", amount: "", dueDate: "", categoryId: "", bankId: "", costId: "", isPaid: false, paymentDate: "", notes: "" },
   });
 
-  const openCreate = () => { reset(); setEditItem(null); setModalOpen(true); };
+  const todayDateStr = new Date().toISOString().split("T")[0];
+  const openCreate = () => {
+    reset({ description: "", amount: "", dueDate: todayDateStr, categoryId: "", bankId: "", costId: "", isPaid: false, paymentDate: "", notes: "" });
+    setEditItem(null);
+    setModalOpen(true);
+  };
   const openEdit = (t: typeof data[0]) => {
     const form = {
       id: t.id,
@@ -149,10 +154,15 @@ export default function FinPayables() {
   };
 
   const onSubmit = (form: TransactionForm) => {
+    if (!form.description?.trim()) { toast.error("Informe a descrição"); return; }
+    if (!form.amount || isNaN(Number(form.amount))) { toast.error("Informe o valor"); return; }
+    if (!form.dueDate) { toast.error("Informe a data de vencimento"); return; }
+    const dueDateObj = new Date(form.dueDate + "T12:00:00");
+    if (isNaN(dueDateObj.getTime())) { toast.error("Data de vencimento inválida"); return; }
     const payload = {
-      description: form.description,
+      description: form.description.trim(),
       amount: Number(form.amount),
-      dueDate: new Date(form.dueDate + "T12:00:00"),
+      dueDate: dueDateObj,
       categoryId: form.categoryId ? Number(form.categoryId) : undefined,
       bankId: form.bankId ? Number(form.bankId) : undefined,
       costId: form.costId ? Number(form.costId) : undefined,

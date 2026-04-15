@@ -96,8 +96,8 @@ export default function ProductsRegister() {
       barcode: data.barcode || undefined,
       costPrice: parseFloat(data.costPrice) || 0,
       salePrice: parseFloat(data.salePrice) || 0,
-      currentStock: parseInt(data.currentStock) || 0,
-      minStock: parseInt(data.minStock) || 5,
+      currentStock: isNaN(parseInt(data.currentStock)) ? 0 : parseInt(data.currentStock),
+      minStock: isNaN(parseInt(data.minStock)) ? 1 : parseInt(data.minStock),
       unit: data.unit,
     };
     if (editId) {

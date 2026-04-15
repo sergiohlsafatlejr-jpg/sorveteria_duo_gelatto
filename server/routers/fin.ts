@@ -271,13 +271,13 @@ export const finRouter = router({
       .input(z.object({
         description: z.string().min(1),
         amount: z.number().min(0),
-        dueDate: z.date(),
+        dueDate: z.coerce.date(),
         categoryId: z.number().optional(),
         typeId: z.number().optional(),
         costId: z.number().optional(),
         bankId: z.number().optional(),
         isPaid: z.boolean().default(false),
-        paymentDate: z.date().optional(),
+        paymentDate: z.coerce.date().optional(),
         notes: z.string().optional(),
       }))
       .mutation(({ ctx, input }) =>
@@ -300,13 +300,13 @@ export const finRouter = router({
         id: z.number(),
         description: z.string().optional(),
         amount: z.number().optional(),
-        dueDate: z.date().optional(),
+        dueDate: z.coerce.date().optional(),
         categoryId: z.number().nullable().optional(),
         typeId: z.number().nullable().optional(),
         costId: z.number().nullable().optional(),
         bankId: z.number().nullable().optional(),
         isPaid: z.boolean().optional(),
-        paymentDate: z.date().nullable().optional(),
+        paymentDate: z.coerce.date().nullable().optional(),
         notes: z.string().nullable().optional(),
       }))
       .mutation(({ ctx, input }) => {
