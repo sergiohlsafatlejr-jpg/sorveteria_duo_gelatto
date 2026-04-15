@@ -632,3 +632,9 @@
 - [x] Corrigido: onSubmit() com validações explícitas e feedback de erro via toast
 - [x] Corrigido: backend usa z.coerce.date() para garantir conversão correta de datas
 - [x] 29/29 testes passando
+
+## Bug: Nova despesa criada não aparece na lista de Contas a Pagar (15/04)
+- [x] Diagnosticado: handleSubmit bloqueava silenciosamente sem mostrar erro quando campos obrigatórios estavam vazios
+- [x] Corrigido: formState.errors agora exibe mensagens de erro em vermelho nos campos
+- [x] Corrigido: handleSubmit(onSubmit, onError) agora mostra toast quando há erros de validação
+- [x] Corrigido: campo de data já vem preenchido com a data de hoje ao abrir o modal

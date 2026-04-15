@@ -125,7 +125,7 @@ export default function FinPayables() {
     e.target.value = "";
   };
 
-  const { register, handleSubmit, reset, setValue, watch } = useForm<TransactionForm>({
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<TransactionForm>({
     defaultValues: { description: "", amount: "", dueDate: "", categoryId: "", bankId: "", costId: "", isPaid: false, paymentDate: "", notes: "" },
   });
 
@@ -336,19 +336,22 @@ export default function FinPayables() {
           <DialogHeader>
             <DialogTitle>{editItem ? "Editar Lançamento" : "Novo Lançamento"}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={handleSubmit(onSubmit, () => toast.error("Preencha todos os campos obrigatórios"))} className="space-y-4">
             <div className="space-y-2">
               <Label>Descrição *</Label>
-              <Input {...register("description", { required: true })} placeholder="Ex: Fornecedor de sorvetes" />
+              <Input {...register("description", { required: "Descrição obrigatória" })} placeholder="Ex: Fornecedor de sorvetes" className={errors.description ? "border-destructive" : ""} />
+              {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Valor (R$) *</Label>
-                <Input {...register("amount", { required: true })} type="number" step="0.01" placeholder="0,00" />
+                <Input {...register("amount", { required: "Valor obrigatório", min: { value: 0.01, message: "Valor deve ser maior que zero" } })} type="number" step="0.01" placeholder="0,00" className={errors.amount ? "border-destructive" : ""} />
+                {errors.amount && <p className="text-xs text-destructive">{errors.amount.message}</p>}
               </div>
               <div className="space-y-2">
                 <Label>Vencimento *</Label>
-                <Input {...register("dueDate", { required: true })} type="date" />
+                <Input {...register("dueDate", { required: "Data obrigatória" })} type="date" className={errors.dueDate ? "border-destructive" : ""} />
+                {errors.dueDate && <p className="text-xs text-destructive">{errors.dueDate.message}</p>}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
