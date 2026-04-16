@@ -918,3 +918,110 @@ export async function getMonthlyComparison(
 
   return { categories: allCats, month1: m1, month2: m2, month1Total: m1Total, month2Total: m2Total };
 }
+
+// ─── Relatório: Contas a Pagar por Dia da Semana ────────────────────────────
+export interface WeekdayPayableItem {
+  id: number;
+  description: string;
+  amount: number;
+  dueDate: Date;
+  isPaid: boolean;
+  isOverdue: boolean;
+  categoryName: string | null;
+  bankName: string | null;
+}
+
+export interface WeekdayPayableSummary {
+  dayIndex: number;   // 1=Segunda, 2=Terça, 3=Quarta, 4=Quinta, 5=Sexta
+  dayName: string;
+  pending: number;
+  paid: number;
+  overdue: number;
+  total: number;
+  count: number;
+  items: WeekdayPayableItem[];
+}
+
+export async function getPayablesByWeekday(
+  _userId: number,
+  filters: { dateFrom: Date; dateTo: Date }
+): Promise<WeekdayPayableSummary[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const rows = await db
+    .select({
+      id: finTransactions.id,
+      description: finTransactions.description,
+      amount: finTransactions.amount,
+      dueDate: finTransactions.dueDate,
+      isPaid: finTransactions.isPaid,
+      categoryName: finCategories.name,
+      bankName: finBanks.name,
+    })
+    .from(finTransactions)
+    .leftJoin(finCategories, eq(finTransactions.categoryId, finCategories.id))
+    .leftJoin(finBanks, eq(finTransactions.bankId, finBanks.id))
+    .where(
+      and(
+        gte(finTransactions.dueDate, filters.dateFrom),
+        lte(finTransactions.dueDate, filters.dateTo)
+      )
+    )
+    .orderBy(finTransactions.dueDate);
+
+  const now = new Date();
+  const dayNames = ["", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"];
+
+  // Inicializar os 5 dias da semana (1=Seg ... 5=Sex)
+  const summaryMap = new Map<number, WeekdayPayableSummary>();
+  for (let d = 1; d <= 5; d++) {
+    summaryMap.set(d, {
+      dayIndex: d,
+      dayName: dayNames[d],
+      pending: 0,
+      paid: 0,
+      overdue: 0,
+      total: 0,
+      count: 0,
+      items: [],
+    });
+  }
+
+  for (const row of rows) {
+    const date = new Date(row.dueDate);
+    // getDay(): 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sab
+    const jsDay = date.getDay();
+    // Ignorar fins de semana
+    if (jsDay === 0 || jsDay === 6) continue;
+
+    const dayIndex = jsDay; // 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex
+    const summary = summaryMap.get(dayIndex)!;
+    const amount = Number(row.amount);
+    const isOverdue = !row.isPaid && date < now;
+
+    summary.count++;
+    summary.total += amount;
+    if (row.isPaid) {
+      summary.paid += amount;
+    } else if (isOverdue) {
+      summary.overdue += amount;
+    } else {
+      summary.pending += amount;
+    }
+
+    summary.items.push({
+      id: row.id,
+      description: row.description,
+      amount,
+      dueDate: date,
+      isPaid: row.isPaid,
+      isOverdue,
+      categoryName: row.categoryName ?? null,
+      bankName: row.bankName ?? null,
+    });
+  }
+
+  return Array.from(summaryMap.values());
+}
+

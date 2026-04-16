@@ -21,6 +21,7 @@ import GerencialReports from "./pages/GerencialReports";
 // Finance module pages
 import FinanceDashboard from "./pages/fin/FinanceDashboard";
 import FinPayables from "./pages/fin/FinPayables";
+import FinWeekdayReport from "./pages/fin/FinWeekdayReport";
 import FinReceivables from "./pages/fin/FinReceivables";
 import FinBankStatements from "./pages/fin/FinBankStatements";
 import FinCosts from "./pages/fin/FinCosts";
@@ -69,6 +70,7 @@ function Router() {
       {/* Finance module routes — admin only (financeiro sensível) */}
       <Route path="/fin/dashboard">{() => <ProtectedRoute path="/fin/dashboard"><FinanceDashboard /></ProtectedRoute>}</Route>
       <Route path="/fin/payables">{() => <ProtectedRoute path="/fin/payables"><FinPayables /></ProtectedRoute>}</Route>
+      <Route path="/fin/weekday-report">{() => <ProtectedRoute path="/fin/weekday-report"><FinWeekdayReport /></ProtectedRoute>}</Route>
       <Route path="/fin/receivables">{() => <ProtectedRoute path="/fin/receivables"><FinReceivables /></ProtectedRoute>}</Route>
       <Route path="/fin/bank-statements">{() => <ProtectedRoute path="/fin/bank-statements"><FinBankStatements /></ProtectedRoute>}</Route>
       <Route path="/fin/costs">{() => <ProtectedRoute path="/fin/costs"><FinCosts /></ProtectedRoute>}</Route>

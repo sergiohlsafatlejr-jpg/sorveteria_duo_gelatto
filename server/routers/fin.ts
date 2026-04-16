@@ -60,6 +60,7 @@ import {
   getFinGoalsMonthSummary,
   populateForecastFromGoal,
   getMonthlyComparison,
+  getPayablesByWeekday,
 } from "../db.fin";
 import { protectedProcedure, router } from "../_core/trpc";
 import { finDailyRevenue } from "../../drizzle/schema";
@@ -962,6 +963,21 @@ export const finRouter = router({
         const month2From = new Date(y2, m2 - 1, 1, 12, 0, 0);
         const month2To = new Date(y2, m2, 0, 23, 59, 59);
         return getMonthlyComparison(month1From, month1To, month2From, month2To);
+      }),
+  }),
+
+  // ─── Relatório: Contas a Pagar por Dia da Semana ─────────────────────────────────────────────────
+  weekdayReport: router({
+    payablesByWeekday: protectedProcedure
+      .input(z.object({
+        year: z.number().int().min(2020).max(2030),
+        month: z.number().int().min(1).max(12),
+      }))
+      .query(({ ctx, input }) => {
+        const { year, month } = input;
+        const dateFrom = new Date(year, month - 1, 1, 0, 0, 0);
+        const dateTo = new Date(year, month, 0, 23, 59, 59);
+        return getPayablesByWeekday(ctx.user.id, { dateFrom, dateTo });
       }),
   }),
 

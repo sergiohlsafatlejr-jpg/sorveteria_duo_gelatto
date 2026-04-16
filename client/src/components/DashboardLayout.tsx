@@ -115,6 +115,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { icon: DollarSign, label: "Painel Financeiro", path: "/fin/dashboard" },
       { icon: Receipt, label: "Contas a Pagar", path: "/fin/payables", badgeKey: "overduePayables" },
+      { icon: BarChart3, label: "Relatório Semanal (Pagar)", path: "/fin/weekday-report" },
       { icon: Wallet, label: "Contas a Receber", path: "/fin/receivables", badgeKey: "overdueReceivables" },
       { icon: Building2, label: "Extratos Bancários", path: "/fin/bank-statements" },
       { icon: PiggyBank, label: "Custos", path: "/fin/costs" },

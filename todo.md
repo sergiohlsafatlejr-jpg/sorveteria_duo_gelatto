@@ -651,3 +651,15 @@
 - [x] Corrigido FinReceivables: mesmo bug corrigido + formulário reescrito sem react-hook-form
 - [x] Corrigido FinBankStatements: mesmo bug corrigido + formulário reescrito sem react-hook-form
 - [x] 0 erros TypeScript após todas as correções
+
+## Relatório Contas a Pagar por Dia da Semana (16/04)
+- [x] Backend: função getPayablesByWeekday no db.fin.ts (agrupa por DAYOFWEEK MySQL, segunda a sexta)
+- [x] Backend: procedimento tRPC fin.weekdayReport.payablesByWeekday com filtro de mês/ano
+- [x] Backend: retorna pendente, pago, vencido, total e lista de lançamentos por dia
+- [x] Frontend: página FinWeekdayReport (/fin/weekday-report) com navegação de mês
+- [x] Frontend: 4 KPI cards (Pendente, Pago, Vencido, Total Geral)
+- [x] Frontend: gráfico de barras por dia da semana (Recharts)
+- [x] Frontend: tabela expandida com lista de lançamentos ao clicar em cada dia
+- [x] Frontend: rota /fin/weekday-report registrada no App.tsx
+- [x] Frontend: item "Relatório Semanal (Pagar)" adicionado no menu lateral (grupo Financeiro)
+- [x] 29/29 testes passando
