@@ -61,6 +61,7 @@ import {
   populateForecastFromGoal,
   getMonthlyComparison,
   getPayablesByWeekday,
+  getPayablesByWeek,
 } from "../db.fin";
 import { protectedProcedure, router } from "../_core/trpc";
 import { finDailyRevenue } from "../../drizzle/schema";
@@ -978,6 +979,17 @@ export const finRouter = router({
         const dateFrom = new Date(year, month - 1, 1, 0, 0, 0);
         const dateTo = new Date(year, month, 0, 23, 59, 59);
         return getPayablesByWeekday(ctx.user.id, { dateFrom, dateTo });
+      }),
+    payablesByWeek: protectedProcedure
+      .input(z.object({
+        year: z.number().int().min(2020).max(2030),
+        month: z.number().int().min(1).max(12),
+      }))
+      .query(({ ctx, input }) => {
+        const { year, month } = input;
+        const dateFrom = new Date(year, month - 1, 1, 0, 0, 0);
+        const dateTo = new Date(year, month, 0, 23, 59, 59);
+        return getPayablesByWeek(ctx.user.id, { dateFrom, dateTo });
       }),
   }),
 

@@ -1025,3 +1025,143 @@ export async function getPayablesByWeekday(
   return Array.from(summaryMap.values());
 }
 
+// ─── Payables by Week of Month ────────────────────────────────────────────────
+export interface WeekDayItem {
+  id: number;
+  description: string;
+  amount: number;
+  dueDate: Date;
+  isPaid: boolean;
+  isOverdue: boolean;
+  categoryName: string | null;
+  bankName: string | null;
+}
+
+export interface WeekDaySummary {
+  dayIndex: number; // 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex
+  dayName: string;
+  dateLabel: string; // e.g. "07/04"
+  pending: number;
+  paid: number;
+  overdue: number;
+  total: number;
+  count: number;
+  items: WeekDayItem[];
+}
+
+export interface WeekSummary {
+  weekIndex: number;
+  weekLabel: string;
+  dateRange: string;
+  pending: number;
+  paid: number;
+  overdue: number;
+  total: number;
+  days: WeekDaySummary[];
+}
+
+export async function getPayablesByWeek(
+  _userId: number,
+  filters: { dateFrom: Date; dateTo: Date }
+): Promise<WeekSummary[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const rows = await db
+    .select({
+      id: finTransactions.id,
+      description: finTransactions.description,
+      amount: finTransactions.amount,
+      dueDate: finTransactions.dueDate,
+      isPaid: finTransactions.isPaid,
+      categoryName: finCategories.name,
+      bankName: finBanks.name,
+    })
+    .from(finTransactions)
+    .leftJoin(finCategories, eq(finTransactions.categoryId, finCategories.id))
+    .leftJoin(finBanks, eq(finTransactions.bankId, finBanks.id))
+    .where(
+      and(
+        gte(finTransactions.dueDate, filters.dateFrom),
+        lte(finTransactions.dueDate, filters.dateTo)
+      )
+    )
+    .orderBy(finTransactions.dueDate);
+
+  const now = new Date();
+  const dayNames = ["", "Segunda-feira", "Ter\u00e7a-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"];
+
+  const year = filters.dateFrom.getFullYear();
+  const month = filters.dateFrom.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+
+  const weekRanges = [
+    { start: 1, end: Math.min(7, lastDay) },
+    { start: 8, end: Math.min(14, lastDay) },
+    { start: 15, end: Math.min(21, lastDay) },
+    { start: 22, end: lastDay },
+  ];
+
+  const fmt = (d: Date) =>
+    `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+  const weeks: WeekSummary[] = weekRanges.map((range, idx) => {
+    const days: WeekDaySummary[] = [];
+    for (let d = 1; d <= 5; d++) {
+      days.push({ dayIndex: d, dayName: dayNames[d], dateLabel: "", pending: 0, paid: 0, overdue: 0, total: 0, count: 0, items: [] });
+    }
+    return {
+      weekIndex: idx + 1,
+      weekLabel: `${idx + 1}\u00aa Semana`,
+      dateRange: `${fmt(new Date(year, month, range.start))} - ${fmt(new Date(year, month, range.end))}`,
+      pending: 0, paid: 0, overdue: 0, total: 0,
+      days,
+    };
+  });
+
+  for (const row of rows) {
+    const date = new Date(row.dueDate);
+    const dayOfMonth = date.getDate();
+    const jsDay = date.getDay();
+    if (jsDay === 0 || jsDay === 6) continue;
+
+    let weekIdx = 0;
+    if (dayOfMonth <= 7) weekIdx = 0;
+    else if (dayOfMonth <= 14) weekIdx = 1;
+    else if (dayOfMonth <= 21) weekIdx = 2;
+    else weekIdx = 3;
+
+    const week = weeks[weekIdx];
+    const daySummary = week.days.find((d) => d.dayIndex === jsDay)!;
+    const amount = Number(row.amount);
+    const isOverdue = !row.isPaid && date < now;
+
+    // Atualiza o dateLabel com a data real do dia (dd/mm)
+    if (!daySummary.dateLabel) {
+      daySummary.dateLabel = fmt(date);
+    }
+    daySummary.count++;
+    daySummary.total += amount;
+    week.total += amount;
+
+    if (row.isPaid) {
+      daySummary.paid += amount;
+      week.paid += amount;
+    } else if (isOverdue) {
+      daySummary.overdue += amount;
+      week.overdue += amount;
+    } else {
+      daySummary.pending += amount;
+      week.pending += amount;
+    }
+
+    daySummary.items.push({
+      id: row.id, description: row.description, amount,
+      dueDate: date, isPaid: row.isPaid, isOverdue,
+      categoryName: row.categoryName ?? null,
+      bankName: row.bankName ?? null,
+    });
+  }
+
+  return weeks;
+}

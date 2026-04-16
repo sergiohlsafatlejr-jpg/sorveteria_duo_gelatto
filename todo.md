@@ -663,3 +663,13 @@
 - [x] Frontend: rota /fin/weekday-report registrada no App.tsx
 - [x] Frontend: item "Relatório Semanal (Pagar)" adicionado no menu lateral (grupo Financeiro)
 - [x] 29/29 testes passando
+
+## Relatório Semanal: Separar por Semana do Mês (16/04)
+- [x] Backend: função getPayablesByWeek no db.fin.ts — agrupa por semana do mês (1ª a 4ª), dias Seg-Sex, com dateLabel por dia
+- [x] Backend: procedimento tRPC fin.weekdayReport.payablesByWeek com filtro de mês/ano
+- [x] Frontend: FinWeekdayReport atualizado com duas abas: "Por Semana do Mês" e "Visão Geral (Seg–Sex)"
+- [x] Frontend: seletor de semana (1ª, 2ª, 3ª, 4ª Semana) com intervalo de datas
+- [x] Frontend: gráfico de barras por dia da semana selecionada
+- [x] Frontend: tabela expandida com lista de lançamentos por dia da semana selecionada
+- [x] Frontend: totais por semana (pendente, pago, vencido, total)
+- [x] 29/29 testes passando
