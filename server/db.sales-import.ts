@@ -228,10 +228,34 @@ export async function createSalesImport(
 
 // ─── Listar importações ───────────────────────────────────────────────────────
 
-export async function getSalesImports() {
+export async function getSalesImports(showArchived = false) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(salesImports).orderBy(desc(salesImports.createdAt));
+  if (showArchived) {
+    return db.select().from(salesImports).orderBy(desc(salesImports.createdAt));
+  }
+  return db
+    .select()
+    .from(salesImports)
+    .where(eq(salesImports.archived, false))
+    .orderBy(desc(salesImports.createdAt));
+}
+
+// ─── Arquivar importação (ocultar da lista principal) ─────────────────────────
+
+export async function archiveSalesImport(importId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+
+  const [header] = await db.select().from(salesImports).where(eq(salesImports.id, importId));
+  if (!header) throw new Error("Importação não encontrada");
+
+  await db
+    .update(salesImports)
+    .set({ archived: true, archivedAt: new Date() })
+    .where(eq(salesImports.id, importId));
+
+  return { success: true };
 }
 
 // ─── Detalhe de uma importação ────────────────────────────────────────────────

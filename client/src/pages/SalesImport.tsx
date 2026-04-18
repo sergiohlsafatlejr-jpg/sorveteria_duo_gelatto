@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import {
   Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Clock,
   Link2, Trash2, ChevronDown, ChevronUp, Package, CreditCard,
-  TrendingUp, ShoppingCart, ArrowLeft, RefreshCw, Eye, Sparkles
+  TrendingUp, ShoppingCart, ArrowLeft, RefreshCw, Eye, Sparkles, Archive
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -970,6 +970,31 @@ function ImportDetail({ importId, onClose }: { importId: number; onClose: () => 
       toast.success(`Importação confirmada! ${result.stockUpdated} produtos com estoque atualizado.`);
       utils.salesImport.list.invalidate();
       utils.salesImport.detail.invalidate({ importId });
+      // Se for reimportação, sugerir arquivar a anterior
+      if (reimportCheck?.isReimport && reimportCheck.previousImportId) {
+        const prevId = reimportCheck.previousImportId;
+        toast(
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">Reimportação confirmada!</p>
+            <p className="text-xs text-muted-foreground">Deseja arquivar a importação anterior para manter a lista limpa?</p>
+            <button
+              className="text-xs bg-slate-600 text-white rounded px-3 py-1 hover:bg-slate-700 w-fit"
+              onClick={() => archiveMut.mutate({ importId: prevId })}
+            >
+              Arquivar importação anterior
+            </button>
+          </div>,
+          { duration: 8000 }
+        );
+      }
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const archiveMut = trpc.salesImport.archive.useMutation({
+    onSuccess: () => {
+      toast.success("Importação anterior arquivada. Não aparece mais na lista principal.");
+      utils.salesImport.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
   });
@@ -1038,6 +1063,23 @@ function ImportDetail({ importId, onClose }: { importId: number; onClose: () => 
           </div>
         </div>
         <div className="flex gap-2">
+          {/* Botão de arquivar (visível para importações confirmadas não arquivadas) */}
+          {header.status === "confirmed" && !header.archived && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-slate-500 border-slate-500/30 hover:bg-slate-500/10"
+              onClick={() => {
+                if (confirm("Arquivar esta importação? Ela será ocultada da lista principal, mas pode ser visualizada ativando \"Mostrar arquivadas\".")) {
+                  archiveMut.mutate({ importId });
+                }
+              }}
+              disabled={archiveMut.isPending}
+            >
+              <Archive className="h-3 w-3 mr-1" />
+              Arquivar
+            </Button>
+          )}
           {isPending && (
             <>
               <Button
@@ -1197,9 +1239,10 @@ export default function SalesImport() {
   const [importMode, setImportMode] = useState<"monthly" | "daily">("monthly");
   const [saleDate, setSaleDate] = useState<string | undefined>(undefined);
   const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const utils = trpc.useUtils();
-  const { data: imports, isLoading } = trpc.salesImport.list.useQuery();
+  const { data: imports, isLoading } = trpc.salesImport.list.useQuery({ showArchived });
 
   const handleParsed = (data: ParsedData, month: string, mode: "monthly" | "daily", date?: string) => {
     setParsedData(data);
@@ -1291,7 +1334,18 @@ export default function SalesImport() {
           {/* Lista de importações */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Histórico de Importações</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium">Histórico de Importações</CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`text-xs h-7 gap-1.5 ${showArchived ? "text-amber-600 bg-amber-500/10" : "text-muted-foreground"}`}
+                  onClick={() => setShowArchived(!showArchived)}
+                >
+                  <Archive className="h-3 w-3" />
+                  {showArchived ? "Ocultar arquivadas" : "Mostrar arquivadas"}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {isLoading ? (
@@ -1358,17 +1412,25 @@ export default function SalesImport() {
                             <span className="text-muted-foreground">/{imp.totalItems}</span>
                           </td>
                           <td className="p-3 text-center">
-                            <Badge
-                              className={
-                                imp.status === "confirmed"
-                                  ? "bg-green-500/15 text-green-600 border-green-500/30"
-                                  : imp.status === "cancelled"
-                                  ? "bg-rose-500/15 text-rose-600 border-rose-500/30"
-                                  : "bg-amber-500/15 text-amber-600 border-amber-500/30"
-                              }
-                            >
-                              {imp.status === "confirmed" ? "Confirmada" : imp.status === "cancelled" ? "Cancelada" : "Pendente"}
-                            </Badge>
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              <Badge
+                                className={
+                                  imp.status === "confirmed"
+                                    ? "bg-green-500/15 text-green-600 border-green-500/30"
+                                    : imp.status === "cancelled"
+                                    ? "bg-rose-500/15 text-rose-600 border-rose-500/30"
+                                    : "bg-amber-500/15 text-amber-600 border-amber-500/30"
+                                }
+                              >
+                                {imp.status === "confirmed" ? "Confirmada" : imp.status === "cancelled" ? "Cancelada" : "Pendente"}
+                              </Badge>
+                              {imp.archived && (
+                                <Badge className="bg-slate-500/15 text-slate-500 border-slate-500/30 text-[10px]">
+                                  <Archive className="h-2.5 w-2.5 mr-0.5" />
+                                  Arquivada
+                                </Badge>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3 text-center">
                             <Button

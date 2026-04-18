@@ -134,6 +134,13 @@
       "when": 1775751150042,
       "tag": "0018_sudden_ultragirl",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1776515834850,
+      "tag": "0019_graceful_sheva_callister",
+      "breakpoints": true
     }
   ]
 }

@@ -683,3 +683,14 @@
 - [x] Frontend: aviso visual (banner âmbar) ao abrir importação pendente do mesmo mês já confirmado
 - [x] Frontend: endpoint tRPC checkReimport para verificar se há importação anterior confirmada
 - [x] 29/29 testes passando
+
+## Arquivar Importação Anterior após Reimportação (18/04)
+- [x] Schema: campo archived (boolean, default false) + archivedAt na tabela salesImports
+- [x] Backend: função archiveSalesImport e endpoint tRPC salesImport.archive
+- [x] Backend: getSalesImports filtra arquivadas por padrão (showArchived=false)
+- [x] Backend: parâmetro showArchived para listar todas incluindo arquivadas
+- [x] Frontend: após confirmar reimportação, toast com botão "Arquivar importação anterior"
+- [x] Frontend: botão "Arquivar" no cabeçalho do detalhe de importações confirmadas
+- [x] Frontend: toggle "Mostrar arquivadas" na lista de importações
+- [x] Frontend: badge visual "Arquivada" nas importações arquivadas
+- [x] 29/29 testes passando

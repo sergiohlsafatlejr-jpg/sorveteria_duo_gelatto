@@ -15,6 +15,7 @@ import {
   linkImportItem,
   confirmSalesImport,
   deleteSalesImport,
+  archiveSalesImport,
   getProductsForLinking,
   getAllMappings,
   updateProductMapping,
@@ -488,10 +489,19 @@ export const salesImportRouter = router({
       return result;
     }),
 
-  // Listar todas as importações
-  list: protectedProcedure.query(async () => {
-    return getSalesImports();
-  }),
+  // Listar todas as importações (por padrão exclui arquivadas)
+  list: protectedProcedure
+    .input(z.object({ showArchived: z.boolean().default(false) }).optional())
+    .query(async ({ input }) => {
+      return getSalesImports(input?.showArchived ?? false);
+    }),
+
+  // Arquivar importação (ocultar da lista principal)
+  archive: protectedProcedure
+    .input(z.object({ importId: z.number() }))
+    .mutation(async ({ input }) => {
+      return archiveSalesImport(input.importId);
+    }),
 
   // Detalhe de uma importação
   detail: protectedProcedure
