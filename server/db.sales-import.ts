@@ -332,34 +332,121 @@ export async function confirmSalesImport(importId: number, userId: number) {
     .from(salesImportItems)
     .where(and(eq(salesImportItems.importId, importId), eq(salesImportItems.linkStatus, "linked")));
 
+  // ── Verificar se já existe importação confirmada para o mesmo mês (reimportação) ──
+  // Busca a última importação confirmada do mesmo mês (excluindo a atual)
+  const previousImports = await db
+    .select({ id: salesImports.id })
+    .from(salesImports)
+    .where(
+      and(
+        eq(salesImports.referenceMonth, header.referenceMonth),
+        eq(salesImports.status, "confirmed")
+      )
+    )
+    .orderBy(desc(salesImports.confirmedAt))
+    .limit(1);
+
+  // Mapa de qtd anterior por productId (da última importação confirmada do mesmo mês)
+  const previousQtyMap = new Map<number, number>();
+  let isReimport = false;
+
+  if (previousImports.length > 0) {
+    isReimport = true;
+    const prevImportId = previousImports[0].id;
+    const prevItems = await db
+      .select({ productId: salesImportItems.productId, quantity: salesImportItems.quantity })
+      .from(salesImportItems)
+      .where(
+        and(
+          eq(salesImportItems.importId, prevImportId),
+          eq(salesImportItems.linkStatus, "linked")
+        )
+      );
+    for (const pi of prevItems) {
+      if (!pi.productId) continue;
+      const prev = previousQtyMap.get(pi.productId) ?? 0;
+      previousQtyMap.set(pi.productId, prev + Math.round(Number(pi.quantity)));
+    }
+  }
+
   let stockUpdated = 0;
 
   for (const item of items) {
     if (!item.productId) continue;
 
-    const qty = Math.round(Number(item.quantity));
-    if (qty <= 0) continue;
+    const newQty = Math.round(Number(item.quantity));
+    if (newQty < 0) continue;
 
-    // Descontar do estoque
+    // Calcular delta: nova qtd - qtd anterior (0 se primeira importação)
+    const prevQty = previousQtyMap.get(item.productId) ?? 0;
+    const delta = newQty - prevQty;
+
+    // Se delta = 0, nada a fazer para este produto
+    if (delta === 0) continue;
+
+    // Buscar estoque atual
     const [prod] = await db.select({ currentStock: products.currentStock }).from(products).where(eq(products.id, item.productId));
     if (!prod) continue;
 
-    const newStock = Math.max(0, prod.currentStock - qty);
+    let newStock: number;
+    let movType: "sale" | "adjustment";
+    let movQty: number;
+    let movReason: string;
+
+    if (delta > 0) {
+      // Vendeu mais que antes → descontar o delta
+      newStock = Math.max(0, prod.currentStock - delta);
+      movType = isReimport ? "adjustment" : "sale";
+      movQty = delta;
+      movReason = isReimport
+        ? `Reimportação ${header.referenceMonth} — delta +${delta} un (ID: ${importId})`
+        : `Importação de vendas ${header.referenceMonth} (ID: ${importId})`;
+    } else {
+      // Vendeu menos que antes → devolver o delta ao estoque
+      newStock = prod.currentStock + Math.abs(delta);
+      movType = "adjustment";
+      movQty = Math.abs(delta);
+      movReason = `Reimportação ${header.referenceMonth} — delta ${delta} un, estoque devolvido (ID: ${importId})`;
+    }
+
     await db.update(products).set({ currentStock: newStock }).where(eq(products.id, item.productId));
 
     // Registrar movimentação de estoque
     await db.insert(stockMovements).values({
       productId: item.productId,
-      type: "sale",
-      quantity: qty,
+      type: movType,
+      quantity: movQty,
       previousStock: prod.currentStock,
       newStock,
       unitCost: item.unitPrice,
-      reason: `Importação de vendas ${header.referenceMonth} (ID: ${importId})`,
+      reason: movReason,
       userId,
     });
 
     stockUpdated++;
+  }
+
+  // Produtos que existiam na importação anterior mas não existem na nova → devolver ao estoque
+  if (isReimport) {
+    const newProductIds = new Set(items.filter(i => i.productId).map(i => i.productId!));
+    for (const [productId, prevQty] of Array.from(previousQtyMap.entries())) {
+      if (!newProductIds.has(productId) && prevQty > 0) {
+        const [prod] = await db.select({ currentStock: products.currentStock }).from(products).where(eq(products.id, productId));
+        if (!prod) continue;
+        const newStock = prod.currentStock + prevQty;
+        await db.update(products).set({ currentStock: newStock }).where(eq(products.id, productId));
+        await db.insert(stockMovements).values({
+          productId,
+          type: "adjustment",
+          quantity: prevQty,
+          previousStock: prod.currentStock,
+          newStock,
+          reason: `Reimportação ${header.referenceMonth} — produto removido, estoque devolvido (ID: ${importId})`,
+          userId,
+        });
+        stockUpdated++;
+      }
+    }
   }
 
   // Marcar como confirmada

@@ -514,6 +514,30 @@ export const salesImportRouter = router({
       return linkImportItem(input.itemId, input.productId, input.linkStatus, input.saveExternalCode);
     }),
 
+  // Verificar se já existe importação confirmada para o mesmo mês (reimportação)
+  checkReimport: protectedProcedure
+    .input(z.object({ importId: z.number() }))
+    .query(async ({ input }) => {
+      const detail = await getSalesImportDetail(input.importId);
+      if (!detail) return { isReimport: false, previousImportId: null, referenceMonth: null };
+      const { getDb } = await import("../db");
+      const { salesImports: si } = await import("../../drizzle/schema");
+      const { and: _and, eq: _eq, desc: _desc } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) return { isReimport: false, previousImportId: null, referenceMonth: detail.header.referenceMonth };
+      const prev = await db
+        .select({ id: si.id })
+        .from(si)
+        .where(_and(_eq(si.referenceMonth, detail.header.referenceMonth), _eq(si.status, "confirmed")))
+        .orderBy(_desc(si.confirmedAt))
+        .limit(1);
+      return {
+        isReimport: prev.length > 0,
+        previousImportId: prev.length > 0 ? prev[0].id : null,
+        referenceMonth: detail.header.referenceMonth,
+      };
+    }),
+
   // Confirmar importação (desconta estoque)
   confirm: protectedProcedure
     .input(z.object({ importId: z.number() }))

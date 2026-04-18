@@ -958,6 +958,7 @@ function ImportDetail({ importId, onClose }: { importId: number; onClose: () => 
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.salesImport.detail.useQuery({ importId });
   const { data: stockProducts } = trpc.salesImport.getProductsForLinking.useQuery();
+  const { data: reimportCheck } = trpc.salesImport.checkReimport.useQuery({ importId });
 
   const linkMut = trpc.salesImport.linkItem.useMutation({
     onSuccess: () => utils.salesImport.detail.invalidate({ importId }),
@@ -1000,6 +1001,21 @@ function ImportDetail({ importId, onClose }: { importId: number; onClose: () => 
 
   return (
     <div className="space-y-4">
+      {/* Aviso de reimportação */}
+      {reimportCheck?.isReimport && isPending && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+          <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-amber-700 dark:text-amber-400">
+              Reimportação detectada — {reimportCheck.referenceMonth && (() => { const [y, m] = reimportCheck.referenceMonth!.split("-").map(Number); return `${MONTHS[m-1]}/${y}`; })()}
+            </p>
+            <p className="text-amber-600/80 dark:text-amber-400/70 mt-0.5">
+              Já existe uma importação confirmada para este mês. Ao confirmar, apenas o <strong>delta</strong> (diferença entre a nova e a anterior) será aplicado no estoque — ajustes manuais de estoque não serão afetados.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Cabeçalho */}
       <div className="flex items-center justify-between">
         <div>

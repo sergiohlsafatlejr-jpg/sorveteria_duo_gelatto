@@ -673,3 +673,13 @@
 - [x] Frontend: tabela expandida com lista de lançamentos por dia da semana selecionada
 - [x] Frontend: totais por semana (pendente, pago, vencido, total)
 - [x] 29/29 testes passando
+
+## Reimportação Inteligente de Vendas por Delta (18/04)
+- [x] Backend: ao confirmar nova importação do mesmo mês, buscar última importação confirmada do mesmo referenceMonth
+- [x] Backend: calcular delta por produto (nova qtd - qtd anterior) e aplicar apenas a diferença no estoque
+- [x] Backend: se delta > 0 (vendeu mais) → descontar; se delta < 0 (vendeu menos) → devolver ao estoque
+- [x] Backend: registrar movimentação de estoque com tipo "adjustment" e motivo de reimportação
+- [x] Backend: produtos removidos da nova importação têm estoque devolvido automaticamente
+- [x] Frontend: aviso visual (banner âmbar) ao abrir importação pendente do mesmo mês já confirmado
+- [x] Frontend: endpoint tRPC checkReimport para verificar se há importação anterior confirmada
+- [x] 29/29 testes passando
