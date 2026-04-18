@@ -709,3 +709,10 @@
 - [x] Frontend: cards resumo (total, crítico, baixo, sem cadastro)
 - [x] Frontend: sugestão de estoque mínimo = média × 1,2
 - [x] 29/29 testes passando
+
+## Aplicar Estoque Mínimo Sugerido em Lote (18/04)
+- [x] Backend: endpoint tRPC products.applyMinStockBulk — atualiza minStock de até 500 produtos em lote
+- [x] Frontend: botão verde "Aplicar sugestões (N)" no cabeçalho da página SalesAverage
+- [x] Frontend: modal de confirmação com tabela de preview (produto, média, novo mínimo)
+- [x] Frontend: feedback de sucesso via toast com contagem de produtos atualizados
+- [x] 29/29 testes passando

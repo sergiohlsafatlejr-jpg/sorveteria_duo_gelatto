@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { TrendingUp, Package, AlertTriangle, Search, ChevronDown, ChevronUp } from "lucide-react";
+import { TrendingUp, Package, AlertTriangle, Search, ChevronDown, ChevronUp, Wand2, X, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
 
 const PERIOD_OPTIONS = [
   { label: "Últimos 3 meses", value: 3 },
@@ -41,8 +42,30 @@ export default function SalesAverage() {
   const [sortField, setSortField] = useState<"avgQty" | "currentStock" | "suggestedMinStock">("avgQty");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [showTop, setShowTop] = useState(20);
+  const [showApplyModal, setShowApplyModal] = useState(false);
 
   const { data, isLoading } = trpc.salesImport.salesAverage.useQuery({ months });
+  const utils = trpc.useUtils();
+
+  const applyBulkMutation = trpc.products.applyMinStockBulk.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Estoque mínimo atualizado em ${result.updated} produto(s)!`);
+      setShowApplyModal(false);
+      utils.salesImport.salesAverage.invalidate();
+    },
+    onError: (err) => {
+      toast.error(`Erro ao aplicar: ${err.message}`);
+    },
+  });
+
+  // Produtos com productId que têm sugestão diferente do minStock atual
+  const applyItems = useMemo(() => {
+    if (!data) return [];
+    return data
+      .filter(r => r.productId !== null)
+      .map(r => ({ productId: r.productId as number, minStock: r.suggestedMinStock, productName: r.productName, avgQty: r.avgQty }))
+      .filter(r => r.minStock > 0);
+  }, [data]);
 
   // Meses disponíveis para colunas
   const allMonths = useMemo(() => {
@@ -121,7 +144,7 @@ export default function SalesAverage() {
             Média mensal de quantidade vendida por produto — base para ajuste de estoque mínimo
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           {PERIOD_OPTIONS.map(opt => (
             <button
               key={opt.value}
@@ -135,6 +158,15 @@ export default function SalesAverage() {
               {opt.label}
             </button>
           ))}
+          {applyItems.length > 0 && (
+            <button
+              onClick={() => setShowApplyModal(true)}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold bg-green-600 hover:bg-green-700 text-white transition-colors shadow-sm"
+            >
+              <Wand2 className="w-4 h-4" />
+              Aplicar sugestões ({applyItems.length})
+            </button>
+          )}
         </div>
       </div>
 
@@ -317,6 +349,75 @@ export default function SalesAverage() {
         <span className="text-amber-600 font-medium ml-1">âmbar</span> = entre 50% e 100%,
         <span className="text-green-700 font-medium ml-1">verde</span> = adequado.
       </div>
+
+      {/* Modal de confirmação de aplicação em lote */}
+      {showApplyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-lg border">
+            <div className="flex items-center justify-between p-5 border-b">
+              <div className="flex items-center gap-2">
+                <Wand2 className="w-5 h-5 text-green-600" />
+                <h2 className="font-bold text-lg">Aplicar Estoque Mínimo Sugerido</h2>
+              </div>
+              <button onClick={() => setShowApplyModal(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5">
+              <p className="text-sm text-muted-foreground mb-4">
+                O sistema vai atualizar o <strong>estoque mínimo</strong> de <strong>{applyItems.length} produto(s)</strong> com o valor sugerido
+                (média mensal × 1,2). Essa ação afeta diretamente o cadastro de cada produto.
+              </p>
+              <div className="max-h-64 overflow-y-auto border rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Produto</th>
+                      <th className="text-center px-3 py-2 font-medium text-muted-foreground">Média/mês</th>
+                      <th className="text-center px-3 py-2 font-medium text-muted-foreground">Novo Est. Mínimo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {applyItems.slice(0, 50).map((item, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="px-3 py-1.5 text-foreground">{item.productName}</td>
+                        <td className="px-3 py-1.5 text-center text-muted-foreground">{fmtQty(item.avgQty)}</td>
+                        <td className="px-3 py-1.5 text-center">
+                          <span className="font-semibold text-green-700">{item.minStock}</span>
+                        </td>
+                      </tr>
+                    ))}
+                    {applyItems.length > 50 && (
+                      <tr className="border-t">
+                        <td colSpan={3} className="px-3 py-2 text-center text-muted-foreground text-xs">
+                          + {applyItems.length - 50} produtos adicionais
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="flex gap-3 p-5 border-t justify-end">
+              <button
+                onClick={() => setShowApplyModal(false)}
+                className="px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors"
+                disabled={applyBulkMutation.isPending}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => applyBulkMutation.mutate({ items: applyItems.map(i => ({ productId: i.productId, minStock: i.minStock })) })}
+                disabled={applyBulkMutation.isPending}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {applyBulkMutation.isPending ? "Aplicando..." : `Confirmar (${applyItems.length} produtos)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

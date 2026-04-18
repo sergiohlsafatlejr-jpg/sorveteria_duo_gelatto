@@ -353,6 +353,27 @@ const productsRouter = router({
     .input(z.object({ id: z.number() }))
     .mutation(({ input }) => db.deleteProduct(input.id)),
 
+  // Aplica estoque mínimo sugerido em lote (a partir do relatório de média de vendas)
+  applyMinStockBulk: managerProcedure
+    .input(
+      z.object({
+        items: z.array(
+          z.object({
+            productId: z.number().int().positive(),
+            minStock: z.number().int().min(0),
+          })
+        ).min(1).max(500),
+      })
+    )
+    .mutation(async ({ input }) => {
+      let updated = 0;
+      for (const item of input.items) {
+        await db.updateProduct(item.productId, { minStock: item.minStock });
+        updated++;
+      }
+      return { updated };
+    }),
+
   addStockMovement: protectedProcedure
     .input(
       z.object({
