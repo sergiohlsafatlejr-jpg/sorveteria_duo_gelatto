@@ -39,6 +39,7 @@ import {
   userPermissions,
   users,
   salesImports,
+  salesImportItems,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -349,18 +350,55 @@ export async function deleteProduct(id: number): Promise<void> {
   await db.update(products).set({ active: false }).where(eq(products.id, id));
 }
 
-export async function getLowStockProducts(): Promise<Product[]> {
+export async function getLowStockProducts(): Promise<(Product & { avgSalesQty: number })[]> {
   const db = await getDb();
   if (!db) return [];
-  return db
-    .select()
+
+  // Busca produtos com estoque baixo, ordenados pela média de vendas dos últimos 6 meses (mais vendidos primeiro)
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const fromMonth = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}`;
+
+  const rows = await db
+    .select({
+      id: products.id,
+      name: products.name,
+      sku: products.sku,
+      barcode: products.barcode,
+      categoryId: products.categoryId,
+      unit: products.unit,
+      purchaseUnit: products.purchaseUnit,
+      conversionFactor: products.conversionFactor,
+      costPrice: products.costPrice,
+      salePrice: products.salePrice,
+      currentStock: products.currentStock,
+      minStock: products.minStock,
+      active: products.active,
+      supplierCode: products.supplierCode,
+      createdAt: products.createdAt,
+      updatedAt: products.updatedAt,
+      avgSalesQty: sql<number>`COALESCE(SUM(CAST(${salesImportItems.quantity} AS DECIMAL(10,3))), 0)`,
+    })
     .from(products)
+    .leftJoin(
+      salesImportItems,
+      and(
+        eq(salesImportItems.productId, products.id),
+        eq(salesImportItems.linkStatus, "linked"),
+        sql`EXISTS (SELECT 1 FROM sales_imports si WHERE si.id = ${salesImportItems.importId} AND si.status = 'confirmed' AND si.referenceMonth >= ${fromMonth})`
+      )
+    )
     .where(
       and(
         eq(products.active, true),
         sql`${products.currentStock} <= ${products.minStock}`
       )
-    );
+    )
+    .groupBy(products.id)
+    .orderBy(sql`COALESCE(SUM(CAST(${salesImportItems.quantity} AS DECIMAL(10,3))), 0) DESC`)
+    .limit(50);
+
+  return rows as (Product & { avgSalesQty: number })[];
 }
 
 // ─── Stock Movements ──────────────────────────────────────────────────────────
@@ -442,11 +480,15 @@ export async function getDashboardMetrics() {
   const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD
   const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`; // YYYY-MM
 
-  // Importações mensais confirmadas do mês atual
+  // Importações mensais confirmadas do mês atual (excluindo arquivadas)
   const [importMonthSales] = await db
     .select({ total: sql<string>`COALESCE(SUM(${salesImports.totalRevenue}), 0)`, count: sql<number>`COUNT(*)` })
     .from(salesImports)
-    .where(and(eq(salesImports.status, "confirmed"), eq(salesImports.referenceMonth, monthStr)));
+    .where(and(
+      eq(salesImports.status, "confirmed"),
+      eq(salesImports.referenceMonth, monthStr),
+      eq(salesImports.archived, false),
+    ));
 
   // Importações diárias confirmadas de hoje
   const [importTodaySales] = await db

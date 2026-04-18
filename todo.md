@@ -716,3 +716,12 @@
 - [x] Frontend: modal de confirmação com tabela de preview (produto, média, novo mínimo)
 - [x] Frontend: feedback de sucesso via toast com contagem de produtos atualizados
 - [x] 29/29 testes passando
+
+## Bug Fix: KPI "Vendas do Mês" exibindo valor incorreto (18/04)
+- [x] Investigado: importação arquivada (ID 2, R$22.781,94) estava sendo somada ao KPI
+- [x] Corrigido: filtro do KPI agora exclui importações com archived=true
+
+## Widget Estoque Baixo: Ordenar por Mais Vendidos (18/04)
+- [x] Backend: getLowStockProducts atualizado com LEFT JOIN em salesImportItems (6 meses), ordenado por SUM(quantity) DESC
+- [x] Frontend: widget Estoque Baixo no Dashboard mostra os produtos mais vendidos com estoque baixo primeiro
+- [x] 29/29 testes passando
