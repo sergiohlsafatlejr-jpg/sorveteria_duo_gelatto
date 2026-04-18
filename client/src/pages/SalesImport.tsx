@@ -1380,7 +1380,13 @@ export default function SalesImport() {
                       const [y, m] = imp.referenceMonth.split("-").map(Number);
                       const isDaily = imp.importMode === "daily";
                       const dateLabel = isDaily && imp.saleDate
-                        ? new Date(imp.saleDate + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })
+                        ? (() => {
+                            // saleDate pode vir como Date object ou string do banco
+                            const d = imp.saleDate instanceof Date
+                              ? imp.saleDate
+                              : new Date(String(imp.saleDate).slice(0, 10) + "T12:00:00");
+                            return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+                          })()
                         : `${MONTHS[m - 1]}/${y}`;
                       return (
                         <tr

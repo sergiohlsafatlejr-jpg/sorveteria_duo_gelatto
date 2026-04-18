@@ -694,3 +694,18 @@
 - [x] Frontend: toggle "Mostrar arquivadas" na lista de importações
 - [x] Frontend: badge visual "Arquivada" nas importações arquivadas
 - [x] 29/29 testes passando
+
+## Bug Fix: Invalid Date nas Importações Diárias (18/04)
+- [x] Corrigir exibição de data nas importações diárias na lista (saleDate pode ser Date object ou string do banco)
+
+## Relatório de Média de Vendas por Produto (18/04)
+- [x] Backend: função getSalesAverageByProduct — média mensal de quantidade vendida por produto nos últimos N meses
+- [x] Backend: procedimento tRPC salesImport.salesAverage com parâmetro months (3, 6, 12)
+- [x] Frontend: página SalesAverage.tsx com tabela de produtos, média mensal, mês a mês e sugestão de estoque mínimo
+- [x] Frontend: link no menu Vendas → "Média de Vendas" (/sales/average)
+- [x] Frontend: filtro de período (últimos 3, 6, 12 meses)
+- [x] Frontend: coluna "Estoque Atual" vs "Média Mensal" com indicador visual (verde/âmbar/vermelho)
+- [x] Frontend: gráfico de barras Top 15 mais vendidos
+- [x] Frontend: cards resumo (total, crítico, baixo, sem cadastro)
+- [x] Frontend: sugestão de estoque mínimo = média × 1,2
+- [x] 29/29 testes passando

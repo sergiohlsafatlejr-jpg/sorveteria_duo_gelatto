@@ -23,6 +23,7 @@ import {
   getConfirmedMonths,
   matchProductsToStock,
   importDiarioExpress,
+  getSalesAverageByProduct,
 } from "../db.sales-import";
 import { invokeLLM } from "../_core/llm";
 
@@ -984,5 +985,12 @@ Use confiança > 0.7 apenas quando tiver certeza da correspondência.`;
         total: input.products.length,
         message: `IA analisou ${input.products.length} produtos em ${Math.ceil(input.products.length/BATCH_SIZE)} lotes. ${highConfidence.length} vínculos com confiança ≥ 70% encontrados.`,
       };
+    }),
+
+  // Relatório de média de vendas por produto
+  salesAverage: protectedProcedure
+    .input(z.object({ months: z.number().min(1).max(24).default(6) }))
+    .query(async ({ input }) => {
+      return getSalesAverageByProduct(input.months);
     }),
 });

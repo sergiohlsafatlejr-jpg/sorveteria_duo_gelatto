@@ -825,3 +825,144 @@ export async function getConfirmedMonths() {
   }
   return unique;
 }
+
+// ─── Relatório: Média de Vendas por Produto ───────────────────────────────────
+
+export interface ProductSalesAverage {
+  productId: number | null;
+  productName: string;
+  externalCode: string;
+  externalName: string;
+  unit: string;
+  // Dados por mês: { "2026-01": 12.5, "2026-02": 8.0, ... }
+  monthlyQty: Record<string, number>;
+  // Média mensal (apenas meses em que houve venda)
+  avgQty: number;
+  // Total de meses com venda
+  monthsWithSales: number;
+  // Estoque atual
+  currentStock: number | null;
+  // Sugestão de estoque mínimo (média * 1.2, arredondado para cima)
+  suggestedMinStock: number;
+}
+
+export async function getSalesAverageByProduct(months = 6): Promise<ProductSalesAverage[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Buscar importações mensais confirmadas dos últimos N meses
+  const { sql, gte } = await import("drizzle-orm");
+
+  // Calcular data de corte (N meses atrás)
+  const cutoffDate = new Date();
+  cutoffDate.setMonth(cutoffDate.getMonth() - months);
+  const cutoffMonth = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, "0")}`;
+
+  // Buscar importações mensais confirmadas no período
+  const confirmedImports = await db
+    .select({ id: salesImports.id, referenceMonth: salesImports.referenceMonth })
+    .from(salesImports)
+    .where(
+      and(
+        eq(salesImports.status, "confirmed"),
+        eq(salesImports.importMode, "monthly"),
+        gte(salesImports.referenceMonth, cutoffMonth)
+      )
+    )
+    .orderBy(desc(salesImports.referenceMonth));
+
+  if (confirmedImports.length === 0) return [];
+
+  const importIds = confirmedImports.map((i) => i.id);
+  const importMonthMap = new Map<number, string>(confirmedImports.map((i) => [i.id, i.referenceMonth]));
+
+  // Buscar todos os itens vinculados dessas importações
+  const items = await db
+    .select({
+      importId: salesImportItems.importId,
+      externalCode: salesImportItems.externalCode,
+      externalName: salesImportItems.externalName,
+      unit: salesImportItems.unit,
+      quantity: salesImportItems.quantity,
+      productId: salesImportItems.productId,
+    })
+    .from(salesImportItems)
+    .where(
+      and(
+        inArray(salesImportItems.importId, importIds),
+        eq(salesImportItems.linkStatus, "linked")
+      )
+    );
+
+  // Buscar estoque atual dos produtos vinculados
+  const productIdsSet = new Set(items.map((i) => i.productId).filter((id): id is number => id !== null));
+  const productIds = Array.from(productIdsSet);
+  const stockMap = new Map<number, { stock: number; name: string }>();
+  if (productIds.length > 0) {
+    const prods = await db
+      .select({ id: products.id, name: products.name, currentStock: products.currentStock })
+      .from(products)
+      .where(inArray(products.id, productIds));
+    for (const p of prods) {
+      stockMap.set(p.id, { stock: Number(p.currentStock), name: p.name });
+    }
+  }
+
+  // Agrupar por produto (externalCode + productId)
+  const productMap = new Map<string, {
+    productId: number | null;
+    externalCode: string;
+    externalName: string;
+    unit: string;
+    monthlyQty: Record<string, number>;
+  }>();
+
+  for (const item of items) {
+    const key = item.productId ? `p_${item.productId}` : `ext_${item.externalCode}`;
+    const month = importMonthMap.get(item.importId) ?? "";
+    if (!month) continue;
+
+    if (!productMap.has(key)) {
+      productMap.set(key, {
+        productId: item.productId,
+        externalCode: item.externalCode,
+        externalName: item.externalName,
+        unit: item.unit,
+        monthlyQty: {},
+      });
+    }
+    const entry = productMap.get(key)!;
+    entry.monthlyQty[month] = (entry.monthlyQty[month] ?? 0) + Number(item.quantity);
+  }
+
+  // Calcular médias e montar resultado
+  const result: ProductSalesAverage[] = [];
+  for (const [, entry] of Array.from(productMap)) {
+    const qtys = Object.values(entry.monthlyQty) as number[];
+    const monthsWithSales = qtys.length;
+    const totalQty = qtys.reduce((a: number, b: number) => a + b, 0);
+    const avgQty = monthsWithSales > 0 ? totalQty / monthsWithSales : 0;
+    const suggestedMinStock = Math.ceil(avgQty * 1.2);
+
+    const productInfo = entry.productId ? stockMap.get(entry.productId) : null;
+    const productName = productInfo?.name ?? entry.externalName;
+    const currentStock = productInfo?.stock ?? null;
+
+    result.push({
+      productId: entry.productId,
+      productName,
+      externalCode: entry.externalCode,
+      externalName: entry.externalName,
+      unit: entry.unit,
+      monthlyQty: entry.monthlyQty,
+      avgQty: Math.round(avgQty * 100) / 100,
+      monthsWithSales,
+      currentStock,
+      suggestedMinStock,
+    });
+  }
+
+  // Ordenar por média decrescente (mais vendidos primeiro)
+  result.sort((a, b) => b.avgQty - a.avgQty);
+  return result;
+}

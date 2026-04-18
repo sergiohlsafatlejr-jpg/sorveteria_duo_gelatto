@@ -40,6 +40,7 @@ import ProductsRegister from "./pages/ProductsRegister";
 import SalesImport from "./pages/SalesImport";
 import ProductMapping from "./pages/ProductMapping";
 import SalesReport from "./pages/SalesReport";
+import SalesAverage from "./pages/SalesAverage";
 import Unauthorized from "./pages/Unauthorized";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
@@ -66,6 +67,7 @@ function Router() {
       <Route path="/sales-import">{() => <ProtectedRoute path="/sales-import"><SalesImport /></ProtectedRoute>}</Route>
       <Route path="/sales/product-mapping">{() => <ProtectedRoute path="/sales/product-mapping"><ProductMapping /></ProtectedRoute>}</Route>
       <Route path="/sales/sales-report">{() => <ProtectedRoute path="/sales/sales-report"><SalesReport /></ProtectedRoute>}</Route>
+      <Route path="/sales/average">{() => <ProtectedRoute path="/sales/average"><SalesAverage /></ProtectedRoute>}</Route>
       <Route path="/notifications">{() => <ProtectedRoute path="/notifications"><Notifications /></ProtectedRoute>}</Route>
       {/* Finance module routes — admin only (financeiro sensível) */}
       <Route path="/fin/dashboard">{() => <ProtectedRoute path="/fin/dashboard"><FinanceDashboard /></ProtectedRoute>}</Route>
