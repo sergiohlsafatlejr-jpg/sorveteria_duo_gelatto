@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { TrendingUp, Package, AlertTriangle, Search, ChevronDown, ChevronUp, Wand2, X, CheckCircle2 } from "lucide-react";
+import { TrendingUp, Package, AlertTriangle, Search, ChevronDown, ChevronUp, Wand2, X, CheckCircle2, Download } from "lucide-react";
+import { exportToExcel, fmtMoeda } from "@/lib/exportExcel";
 import { toast } from "sonner";
 
 const PERIOD_OPTIONS = [
@@ -158,6 +159,25 @@ export default function SalesAverage() {
               {opt.label}
             </button>
           ))}
+          {data && data.length > 0 && (
+            <button
+              onClick={() => {
+                const rows = (filtered ?? []).map((r: any) => ({
+                  "Produto": r.productName,
+                  "Média Mensal (un)": parseFloat(r.avgQty.toFixed(2)),
+                  "Estoque Atual": r.currentStock ?? "",
+                  "Estoque Mínimo Atual": r.currentMinStock ?? "",
+                  "Sugestão Mínimo": parseFloat((r.avgQty * 1.2).toFixed(0)),
+                  ...Object.fromEntries((r.monthlyBreakdown ?? []).map((m: any) => [`${m.month}`, parseFloat(m.qty.toFixed(2))])),
+                }));
+                exportToExcel(rows, `Media_Vendas_${months}meses_${new Date().toISOString().slice(0,10)}`, "Média de Vendas");
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border border-border hover:bg-muted transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Exportar Excel
+            </button>
+          )}
           {applyItems.length > 0 && (
             <button
               onClick={() => setShowApplyModal(true)}

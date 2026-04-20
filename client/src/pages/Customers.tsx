@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { ChevronDown, ChevronUp, Edit, Gift, Plus, Search, ShoppingBag, TrendingUp, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronUp, Edit, Gift, Plus, Search, ShoppingBag, ShoppingCart, TrendingUp, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -124,6 +124,12 @@ export default function Customers() {
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<CustomerForm>(emptyForm);
 
+  // ── Registro de compra ──
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
+  const [purchaseCustomerId, setPurchaseCustomerId] = useState<number | null>(null);
+  const [purchaseCustomerName, setPurchaseCustomerName] = useState("");
+  const [purchaseForm, setPurchaseForm] = useState({ amount: "", paymentMethod: "pix" as const, notes: "" });
+
   const utils = trpc.useUtils();
   const { data: customers, isLoading } = trpc.customers.list.useQuery({ search: search || undefined });
 
@@ -147,6 +153,17 @@ export default function Customers() {
     onError: (e) => toast.error(e.message),
   });
 
+  const registerPurchaseMutation = trpc.customers.registerPurchase.useMutation({
+    onSuccess: (data) => {
+      utils.customers.list.invalidate();
+      utils.customers.getStats.invalidate();
+      toast.success(`Compra registrada! ${data.pointsEarned > 0 ? `+${data.pointsEarned} pontos` : ""}`);
+      setPurchaseOpen(false);
+      setPurchaseForm({ amount: "", paymentMethod: "pix", notes: "" });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const deleteMutation = trpc.customers.delete.useMutation({
     onSuccess: () => {
       utils.customers.list.invalidate();
@@ -154,6 +171,13 @@ export default function Customers() {
     },
     onError: (e) => toast.error(e.message),
   });
+
+  function openRegisterPurchase(c: NonNullable<typeof customers>[0]) {
+    setPurchaseCustomerId(c.id);
+    setPurchaseCustomerName(c.fullName);
+    setPurchaseForm({ amount: "", paymentMethod: "pix", notes: "" });
+    setPurchaseOpen(true);
+  }
 
   function openCreate() {
     setEditId(null);
@@ -266,6 +290,15 @@ export default function Customers() {
                       <p className="text-xs text-muted-foreground">{c.phone ?? "—"}</p>
                     </div>
                     <div className="flex gap-1 shrink-0 ml-2">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-green-600 hover:text-green-700"
+                        title="Registrar compra"
+                        onClick={() => openRegisterPurchase(c)}
+                      >
+                        <ShoppingCart className="h-3.5 w-3.5" />
+                      </Button>
                       <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(c)}>
                         <Edit className="h-3.5 w-3.5" />
                       </Button>
@@ -381,6 +414,81 @@ export default function Customers() {
               </Button>
               <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
                 {editId ? "Salvar Alterações" : "Cadastrar Cliente"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      {/* ── Modal Registrar Compra ── */}
+      <Dialog open={purchaseOpen} onOpenChange={setPurchaseOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShoppingCart className="h-5 w-5 text-green-600" />
+              Registrar Compra
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground -mt-2">Cliente: <strong>{purchaseCustomerName}</strong></p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!purchaseCustomerId) return;
+              registerPurchaseMutation.mutate({
+                customerId: purchaseCustomerId,
+                amount: parseFloat(purchaseForm.amount),
+                paymentMethod: purchaseForm.paymentMethod,
+                notes: purchaseForm.notes || undefined,
+              });
+            }}
+            className="space-y-4 mt-2"
+          >
+            <div>
+              <Label htmlFor="purchaseAmount">Valor da Compra (R$) *</Label>
+              <Input
+                id="purchaseAmount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={purchaseForm.amount}
+                onChange={(e) => setPurchaseForm((f) => ({ ...f, amount: e.target.value }))}
+                placeholder="0,00"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="purchasePayment">Forma de Pagamento *</Label>
+              <select
+                id="purchasePayment"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={purchaseForm.paymentMethod}
+                onChange={(e) => setPurchaseForm((f) => ({ ...f, paymentMethod: e.target.value as any }))}
+              >
+                <option value="pix">PIX</option>
+                <option value="cash">Dinheiro</option>
+                <option value="debit_card">Cartão Débito</option>
+                <option value="credit_card">Cartão Crédito</option>
+                <option value="other">Outro</option>
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="purchaseNotes">Observações</Label>
+              <Input
+                id="purchaseNotes"
+                value={purchaseForm.notes}
+                onChange={(e) => setPurchaseForm((f) => ({ ...f, notes: e.target.value }))}
+                placeholder="Ex: Sorvete de morango, 2kg..."
+              />
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button type="button" variant="outline" onClick={() => setPurchaseOpen(false)}>
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                className="bg-green-600 hover:bg-green-700"
+                disabled={registerPurchaseMutation.isPending}
+              >
+                {registerPurchaseMutation.isPending ? "Registrando..." : "Registrar Compra"}
               </Button>
             </div>
           </form>

@@ -13,8 +13,9 @@ import {
 } from "recharts";
 import {
   TrendingUp, TrendingDown, DollarSign, ShoppingCart, Package,
-  CreditCard, BarChart2, Search, Warehouse, AlertTriangle, CheckCircle2, Clock,
+  CreditCard, BarChart2, Search, Warehouse, AlertTriangle, CheckCircle2, Clock, Download,
 } from "lucide-react";
+import { exportToExcel } from "@/lib/exportExcel";
 
 const MONTHS_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const PAYMENT_COLORS: Record<string, string> = {
@@ -132,6 +133,26 @@ function CostVsSalesTab({ referenceMonth }: { referenceMonth?: string }) {
                   <SelectItem value="profit">Por Lucro</SelectItem>
                 </SelectContent>
               </Select>
+              {filtered.length > 0 && (
+                <button
+                  onClick={() => {
+                    const rows = filtered.map((r: any) => ({
+                      "Produto": r.productName,
+                      "Qtd Vendida": r.totalQty,
+                      "Preço Médio (R$)": parseFloat(Number(r.avgSalePrice).toFixed(2)),
+                      "Custo Unit. (R$)": r.costPrice > 0 ? parseFloat(Number(r.costPrice).toFixed(2)) : "",
+                      "Receita (R$)": parseFloat(Number(r.totalRevenue).toFixed(2)),
+                      "CMV (R$)": r.costPrice > 0 ? parseFloat(Number(r.totalCost).toFixed(2)) : "",
+                      "Lucro Bruto (R$)": r.costPrice > 0 ? parseFloat(Number(r.grossProfit).toFixed(2)) : "",
+                      "Margem (%)": r.costPrice > 0 ? parseFloat(Number(r.margin).toFixed(1)) : "",
+                    }));
+                    exportToExcel(rows, `Custo_x_Venda_${new Date().toISOString().slice(0,10)}`, "Custo x Venda");
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-border hover:bg-muted transition-colors whitespace-nowrap"
+                >
+                  <Download className="w-3.5 h-3.5" /> Exportar Excel
+                </button>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -251,7 +272,28 @@ function TopProductsTab({ referenceMonth }: { referenceMonth?: string }) {
       </div>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Ranking Completo</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Ranking Completo</CardTitle>
+          {data.length > 0 && (
+            <button
+              onClick={() => {
+                const rows = data.map((r: any) => ({
+                  "#": r.rank,
+                  "Produto": r.productName,
+                  "Qtd Vendida": r.totalQty,
+                  "Preço Médio (R$)": parseFloat(Number(r.avgSalePrice).toFixed(2)),
+                  "Receita Total (R$)": parseFloat(Number(r.totalRevenue).toFixed(2)),
+                  "Lucro Bruto (R$)": r.costPrice > 0 ? parseFloat(Number(r.grossProfit).toFixed(2)) : "",
+                  "Margem (%)": r.costPrice > 0 ? parseFloat(Number(r.margin).toFixed(1)) : "",
+                }));
+                exportToExcel(rows, `Ranking_Produtos_${new Date().toISOString().slice(0,10)}`, "Mais Vendidos");
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-border hover:bg-muted transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" /> Exportar Excel
+            </button>
+          )}
+        </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -355,7 +397,26 @@ function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="text-base">Detalhamento</CardTitle></CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-base">Detalhamento</CardTitle>
+            {data.length > 0 && (
+              <button
+                onClick={() => {
+                  const rows = data.map((r: any) => ({
+                    "Forma de Pagamento": r.paymentMethod,
+                    "Valor Total (R$)": parseFloat(Number(r.totalAmount).toFixed(2)),
+                    "% do Total": parseFloat(Number(r.percentage).toFixed(1)),
+                    "Transações": r.transactionCount,
+                    "Ticket Médio (R$)": r.transactionCount > 0 ? parseFloat((Number(r.totalAmount) / r.transactionCount).toFixed(2)) : 0,
+                  }));
+                  exportToExcel(rows, `Formas_Pagamento_${new Date().toISOString().slice(0,10)}`, "Formas de Pagamento");
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-border hover:bg-muted transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" /> Exportar Excel
+              </button>
+            )}
+          </CardHeader>
           <CardContent className="p-0">
             {data.length === 0 ? (
               <div className="h-48 flex items-center justify-center text-muted-foreground text-sm px-4 text-center">

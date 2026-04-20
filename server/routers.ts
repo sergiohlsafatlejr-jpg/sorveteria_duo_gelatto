@@ -119,6 +119,31 @@ const customersRouter = router({
   getStats: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(({ input }) => db.getCustomerPurchaseStats(input.id)),
+
+  registerPurchase: protectedProcedure
+    .input(
+      z.object({
+        customerId: z.number(),
+        amount: z.number().positive(),
+        paymentMethod: z.enum(["cash", "credit_card", "debit_card", "pix", "other"]),
+        notes: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const result = await db.registerCustomerPurchase({
+        ...input,
+        userId: ctx.user.id,
+      });
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        userName: ctx.user.name ?? "Sistema",
+        action: "create",
+        module: "customers",
+        targetId: input.customerId,
+        details: `Compra registrada: R$ ${input.amount.toFixed(2)} (${input.paymentMethod}) — ${result.pointsEarned} pts`,
+      });
+      return result;
+    }),
 });
 
 // ─── Points Router ────────────────────────────────────────────────────────────

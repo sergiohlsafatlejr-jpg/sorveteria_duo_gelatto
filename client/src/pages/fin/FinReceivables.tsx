@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { CheckCircle2, Edit2, Plus, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Edit2, Plus, Trash2, XCircle, Download } from "lucide-react";
+import { exportToExcel } from "@/lib/exportExcel";
 import { cn } from "@/lib/utils";
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -117,9 +118,31 @@ export default function FinReceivables() {
           <h1 className="text-2xl font-bold">Contas a Receber</h1>
           <p className="text-sm text-muted-foreground">Gerencie seus recebimentos e cobranças</p>
         </div>
-        <Button onClick={openCreate} className="gap-2">
-          <Plus className="h-4 w-4" /> Novo Recebimento
-        </Button>
+        <div className="flex gap-2">
+          {data.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                const rows = data.map((r: any) => ({
+                  "Descrição": r.description,
+                  "Tipo": r.typeId ? typeMap.get(r.typeId) ?? "" : "",
+                  "Valor (R$)": parseFloat(Number(r.amount).toFixed(2)),
+                  "Vencimento": fmtDate(r.dueDate),
+                  "Data Recebimento": r.receivedDate ? fmtDate(r.receivedDate) : "",
+                  "Status": r.isReceived ? "Recebido" : (new Date(r.dueDate) < now ? "Vencido" : "Pendente"),
+                  "Observações": r.notes ?? "",
+                }));
+                exportToExcel(rows, `Contas_Receber_${new Date().toISOString().slice(0,7)}`, "Contas a Receber");
+              }}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" /> Exportar Excel
+            </Button>
+          )}
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="h-4 w-4" /> Novo Recebimento
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">

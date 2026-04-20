@@ -737,3 +737,31 @@
 ## Bug Fix: Datas no Relatório Semanal Financeiro (20/04)
 - [x] Verificado: getPayablesByWeek usa timestamp (não date), sem problema de fuso horário
 - [x] 29/29 testes passando
+
+## Fase de Consolidação (20/04)
+
+### Bug Fuzzy Match NF-e
+- [ ] Corrigir algoritmo de similaridade de texto para vincular produtos da NF-e ao estoque (Levenshtein/token overlap)
+- [ ] Testar com NF-e real para garantir que cada produto vincula ao produto correto
+
+### Registro de Compra no Card do Cliente
+- [ ] Criar tabela customer_purchases no schema (customerId, amount, paymentMethod, points, createdAt)
+- [ ] Backend: endpoint customers.registerPurchase — registra compra, calcula pontos pela regra ativa e cria pointsTransaction
+- [ ] Frontend: botão "Registrar Compra" no card do cliente com modal (valor + forma de pagamento)
+- [ ] Frontend: ao salvar, atualizar pontos do cliente em tempo real
+
+### Histórico de Compras e Ticket Médio
+- [ ] Backend: endpoint customers.purchaseHistory — retorna últimas N compras do cliente
+- [ ] Frontend: seção "Histórico de Compras" no card expandível (data, valor, pontos)
+- [ ] Frontend: exibir ticket médio e total de visitas no card do cliente
+- [ ] Bug fix: data de aniversário exibida com 1 dia a menos (fuso horário)
+
+### Exportação Excel
+- [x] Exportar relatório de Média de Vendas por Produto para Excel (.xlsx) — SalesAverage.tsx
+- [x] Exportar aba Ranking Completo (GerencialReports) para Excel
+- [x] Exportar aba Custo x Venda (GerencialReports) para Excel
+- [x] Exportar aba Formas de Pagamento (GerencialReports) para Excel
+- [x] Exportar Contas a Pagar (FinPayables) para Excel
+- [x] Exportar Contas a Receber (FinReceivables) para Excel
+- [ ] Exportar relatório de Contas a Pagar (semanal por semana do mês) para Excel
+- [ ] Exportar lista de Estoque Baixo para Excel

@@ -219,8 +219,8 @@ export async function getBirthdayCustomers(): Promise<Customer[]> {
   const db = await getDb();
   if (!db) return [];
   const today = new Date();
-  const month = today.getMonth() + 1;
-  const day = today.getDate();
+  const month = today.getUTCMonth() + 1; // UTC para consistência com o banco
+  const day = today.getUTCDate();
   return db
     .select()
     .from(customers)
@@ -854,4 +854,67 @@ export async function getMonthlyPurchaseReport(
       })),
     };
   }).sort((a, b) => b.purchaseCount - a.purchaseCount);
+}
+
+// ─── Register Customer Purchase (manual, sem PDV) ─────────────────────────────
+export async function registerCustomerPurchase(data: {
+  customerId: number;
+  amount: number;
+  paymentMethod: "cash" | "credit_card" | "debit_card" | "pix" | "other";
+  notes?: string;
+  userId?: number;
+}): Promise<{ saleId: number; pointsEarned: number }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB não disponível");
+
+  // Calcular pontos com base na regra ativa
+  const activeRules = await db
+    .select()
+    .from(pointsRules)
+    .where(eq(pointsRules.active, true))
+    .limit(1);
+
+  const rule = activeRules[0];
+  let pointsEarned = 0;
+  if (rule) {
+    const purchaseAmt = parseFloat(String(rule.purchaseAmount));
+    if (purchaseAmt > 0) {
+      pointsEarned = Math.floor(data.amount / purchaseAmt) * rule.pointsEarned;
+    }
+  }
+
+  // Criar venda
+  const [insertResult] = await db.insert(sales).values({
+    customerId: data.customerId,
+    userId: data.userId,
+    total: String(data.amount.toFixed(2)),
+    discount: "0.00",
+    finalTotal: String(data.amount.toFixed(2)),
+    paymentMethod: data.paymentMethod,
+    pointsEarned,
+    pointsRedeemed: 0,
+    notes: data.notes ?? null,
+    status: "completed",
+  });
+  const saleId = (insertResult as any).insertId;
+
+  // Atualizar totalPurchases do cliente
+  await db
+    .update(customers)
+    .set({ totalPurchases: sql`totalPurchases + ${data.amount}` })
+    .where(eq(customers.id, data.customerId));
+
+  // Registrar pontos se ganhou
+  if (pointsEarned > 0) {
+    await addPointsTransaction({
+      customerId: data.customerId,
+      type: "earned",
+      points: pointsEarned,
+      purchaseAmount: String(data.amount.toFixed(2)),
+      description: `Compra registrada manualmente — R$ ${data.amount.toFixed(2)}`,
+      userId: data.userId,
+    });
+  }
+
+  return { saleId, pointsEarned };
 }

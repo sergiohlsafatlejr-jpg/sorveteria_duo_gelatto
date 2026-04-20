@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload, CopyPlus, Square, CheckSquare } from "lucide-react";
+import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload, CopyPlus, Square, CheckSquare, Download } from "lucide-react";
+import { exportToExcel } from "@/lib/exportExcel";
 import { cn } from "@/lib/utils";
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -205,6 +206,28 @@ export default function FinPayables() {
             >
               <CopyPlus className="h-4 w-4" />
               Duplicar {selectedIds.size} para próximo mês
+            </Button>
+          )}
+          {data.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                const rows = data.map((t: any) => ({
+                  "Descrição": t.description,
+                  "Categoria": t.categoryId ? categoryMap.get(t.categoryId) ?? "" : "",
+                  "Banco": t.bankId ? bankMap.get(t.bankId) ?? "" : "",
+                  "Custo": t.costId ? costMap.get(t.costId) ?? "" : "",
+                  "Valor (R$)": parseFloat(Number(t.amount).toFixed(2)),
+                  "Vencimento": fmtDate(t.dueDate),
+                  "Status": t.isPaid ? "Pago" : (new Date(t.dueDate) < now ? "Vencido" : "Pendente"),
+                  "Data Pagamento": t.paymentDate ? fmtDate(t.paymentDate) : "",
+                  "Observações": t.notes ?? "",
+                }));
+                exportToExcel(rows, `Contas_Pagar_${filters.monthYear || new Date().toISOString().slice(0,7)}`, "Contas a Pagar");
+              }}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" /> Exportar Excel
             </Button>
           )}
           <Button variant="outline" onClick={() => setShowImport(true)} className="gap-2">
