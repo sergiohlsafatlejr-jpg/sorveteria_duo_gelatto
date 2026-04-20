@@ -728,3 +728,12 @@
 
 ## Bug Fix: Data incorreta nas importações diárias (20/04)
 - [x] Corrigido: data exibida com 1 dia a menos por causa do fuso horário UTC-3 — agora usa split de string YYYY-MM-DD sem converter para Date object
+
+## Bug Fix: Gráfico "Vendas — Últimos 30 dias" incorreto (20/04)
+- [x] Corrigido: importações mensais arquivadas (archived=true) estavam sendo somadas no gráfico
+- [x] Corrigido: importações mensais agora são distribuídas igualmente pelos dias do mês (sem pico artificial)
+- [x] Datas do eixo X já usavam string YYYY-MM-DD corretamente — sem bug de fuso horário
+
+## Bug Fix: Datas no Relatório Semanal Financeiro (20/04)
+- [x] Verificado: getPayablesByWeek usa timestamp (não date), sem problema de fuso horário
+- [x] 29/29 testes passando

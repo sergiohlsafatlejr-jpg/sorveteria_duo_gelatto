@@ -555,7 +555,7 @@ export async function getSalesChartData(days = 30) {
     ))
     .groupBy(sql`DATE(${salesImports.saleDate})`);
 
-  // Importações mensais confirmadas — distribuir pelo mês de referência
+  // Importações mensais confirmadas NÃO arquivadas — distribuir pelos dias do mês que estejam no intervalo
   const importMonthlySales = await db
     .select({
       referenceMonth: salesImports.referenceMonth,
@@ -566,6 +566,7 @@ export async function getSalesChartData(days = 30) {
     .where(and(
       eq(salesImports.status, "confirmed"),
       eq(salesImports.importMode, "monthly"),
+      eq(salesImports.archived, false),
     ))
     .groupBy(salesImports.referenceMonth);
 
@@ -585,16 +586,26 @@ export async function getSalesChartData(days = 30) {
     map.set(key, { total: prev.total + parseFloat(row.total), count: prev.count + row.count });
   }
 
-  // Para importações mensais, colocar no último dia do mês de referência (ou dia 1 se futuro)
+  // Para importações mensais: distribuir o total igualmente pelos dias úteis do mês que estejam no intervalo
+  const today = new Date();
   for (const row of importMonthlySales) {
     const [y, m] = row.referenceMonth.split("-").map(Number);
-    const lastDay = new Date(y, m, 0);
-    const today = new Date();
-    const targetDate = lastDay <= today ? lastDay : new Date(y, m - 1, 1);
-    const key = targetDate.toISOString().slice(0, 10);
-    if (key < fromStr) continue;
-    const prev = map.get(key) ?? { total: 0, count: 0 };
-    map.set(key, { total: prev.total + parseFloat(row.total), count: prev.count + row.count });
+    // Gerar todos os dias do mês até hoje
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const monthDays: string[] = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      if (dateStr >= fromStr && dateStr <= today.toISOString().slice(0, 10)) {
+        monthDays.push(dateStr);
+      }
+    }
+    if (monthDays.length === 0) continue;
+    // Distribuir o total igualmente pelos dias do mês no intervalo
+    const dailyTotal = parseFloat(row.total) / monthDays.length;
+    for (const dateStr of monthDays) {
+      const prev = map.get(dateStr) ?? { total: 0, count: 0 };
+      map.set(dateStr, { total: prev.total + dailyTotal, count: prev.count });
+    }
   }
 
   return Array.from(map.entries())
