@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { execSync } from "child_process";
+import * as fs from "fs";
 import { protectedProcedure, router } from "../_core/trpc";
 
 // ─── Helper: chama o MCP meta-marketing via CLI ───────────────────────────────
@@ -8,11 +9,15 @@ function callMcp(toolName: string, input: Record<string, unknown>): unknown {
   const cmd = `manus-mcp-cli tool call ${toolName} --server meta-marketing --input '${inputJson}' 2>/dev/null`;
   try {
     execSync(cmd, { timeout: 30000 });
-    const listCmd = `ls -t /tmp/manus-mcp/mcp_result_*.json 2>/dev/null | head -1`;
-    const latestFile = execSync(listCmd).toString().trim();
-    if (!latestFile) return null;
-    const content = execSync(`cat "${latestFile}"`).toString();
+    // Pegar o arquivo mais recente gerado pelo MCP
+    const listOut = execSync("ls -t /tmp/manus-mcp/mcp_result_*.json 2>/dev/null | head -1")
+      .toString()
+      .trim();
+    if (!listOut) return null;
+    const content = fs.readFileSync(listOut, "utf-8");
     const parsed = JSON.parse(content);
+    // O MCP retorna { success: true, result: { insights: [...] } } ou { success: true, result: [...] }
+    // Precisamos retornar result diretamente para que o caller acesse result.insights ou result.data
     return parsed?.result ?? parsed;
   } catch {
     return null;
@@ -65,6 +70,18 @@ function parseInsightRow(r: any) {
     dateStart: r.date_start ?? null,
     dateStop: r.date_stop ?? null,
   };
+}
+
+// ─── Helper: extrai array de insights do resultado MCP ────────────────────────
+function extractInsightRows(result: any): any[] {
+  if (!result) return [];
+  // Estrutura: { insights: [...], filteredCount: N }
+  if (Array.isArray(result.insights)) return result.insights;
+  // Estrutura: { data: [...] }
+  if (Array.isArray(result.data)) return result.data;
+  // Estrutura: array direto
+  if (Array.isArray(result)) return result;
+  return [];
 }
 
 // ─── Meta Ads Router ──────────────────────────────────────────────────────────
@@ -128,8 +145,7 @@ export const metaAdsRouter = router({
         limit: input?.limit ?? 50,
       };
       const result = callMcp("meta_marketing_get_insights", payload) as any;
-      // O MCP retorna result.insights (lista) ou result.data
-      const rows = result?.insights ?? result?.data ?? [];
+      const rows = extractInsightRows(result);
       return rows.map(parseInsightRow);
     }),
 
@@ -153,7 +169,7 @@ export const metaAdsRouter = router({
         limit: input?.limit ?? 100,
       };
       const result = callMcp("meta_marketing_get_insights", payload) as any;
-      const rows = result?.insights ?? result?.data ?? [];
+      const rows = extractInsightRows(result);
       return rows.map(parseInsightRow);
     }),
 
@@ -176,7 +192,7 @@ export const metaAdsRouter = router({
         limit: 50,
       };
       const result = callMcp("meta_marketing_get_insights", payload) as any;
-      const rows: any[] = result?.insights ?? result?.data ?? [];
+      const rows: any[] = extractInsightRows(result);
       const totalSpend = rows.reduce((s: number, r: any) => s + parseFloat(r.spend ?? "0"), 0);
       const totalImpressions = rows.reduce((s: number, r: any) => s + parseInt(r.impressions ?? "0"), 0);
       const totalReach = rows.reduce((s: number, r: any) => s + parseInt(r.reach ?? "0"), 0);
