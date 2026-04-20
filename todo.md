@@ -767,3 +767,14 @@
 - [x] Exportar Contas a Receber (FinReceivables) para Excel
 - [ ] Exportar relatório de Contas a Pagar (semanal por semana do mês) para Excel
 - [ ] Exportar lista de Estoque Baixo para Excel
+
+### Página Meta Ads Analytics
+- [x] Backend: router metaAds com endpoints getCampaigns, getInsights, getAdSets, getRecommendations (proxy MCP via shell)
+- [x] Frontend: página MetaAds.tsx com KPIs gerais (Valor usado, Impressões, Alcance, Cliques no link, CPM)
+- [x] Frontend: tabela de campanhas com status, métricas e badge de qualidade
+- [x] Frontend: gráfico de barras comparando Impressões x Alcance x Cliques no link por campanha
+- [x] Frontend: seletor de período (hoje, 7d, 14d, 30d, 90d, este mês, mês passado)
+- [x] Frontend: painel de detalhe expansível por campanha (frequência, rankings, ações)
+- [x] Frontend: seção de recomendações do Meta
+- [x] Registrar rota /meta-ads no App.tsx
+- [x] Adicionar item Meta Ads no menu do DashboardLayout (grupo Pontos/Marketing)

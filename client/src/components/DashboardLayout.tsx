@@ -58,6 +58,7 @@ import {
   Users,
   UserCog,
   Wallet,
+  Megaphone,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -94,6 +95,7 @@ const menuGroups: MenuGroup[] = [
       { icon: Settings, label: "Regras de Pontos", path: "/points-rules" },
       { icon: MessageSquare, label: "WhatsApp", path: "/whatsapp" },
       { icon: Instagram, label: "Instagram", path: "/instagram" },
+      { icon: Megaphone, label: "Meta Ads", path: "/meta-ads" },
     ],
   },
   {

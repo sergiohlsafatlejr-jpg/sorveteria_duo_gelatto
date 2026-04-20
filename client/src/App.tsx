@@ -42,6 +42,7 @@ import ProductMapping from "./pages/ProductMapping";
 import SalesReport from "./pages/SalesReport";
 import SalesAverage from "./pages/SalesAverage";
 import Unauthorized from "./pages/Unauthorized";
+import MetaAds from "./pages/MetaAds";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function Router() {
@@ -63,6 +64,7 @@ function Router() {
       <Route path="/points-rules">{() => <ProtectedRoute path="/points-rules"><PointsRules /></ProtectedRoute>}</Route>
       <Route path="/whatsapp">{() => <ProtectedRoute path="/whatsapp"><WhatsApp /></ProtectedRoute>}</Route>
       <Route path="/instagram">{() => <ProtectedRoute path="/instagram"><InstagramPage /></ProtectedRoute>}</Route>
+      <Route path="/meta-ads">{() => <ProtectedRoute path="/meta-ads"><MetaAds /></ProtectedRoute>}</Route>
       {/* Vendas — importação e notificações (gerente+) */}
       <Route path="/sales-import">{() => <ProtectedRoute path="/sales-import"><SalesImport /></ProtectedRoute>}</Route>
       <Route path="/sales/product-mapping">{() => <ProtectedRoute path="/sales/product-mapping"><ProductMapping /></ProtectedRoute>}</Route>

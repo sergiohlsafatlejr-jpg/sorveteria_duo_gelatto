@@ -11,6 +11,7 @@ import { instagramRouter } from "./routers/instagram";
 import { nfeRouter } from "./routers/nfe";
 import { salesImportRouter } from "./routers/sales-import";
 import { reportsRouter } from "./routers/reports";
+import { metaAdsRouter } from "./routers/meta-ads";
 import { getDb } from "./db";
 import { finTransactions, finReceivables, products } from "../drizzle/schema";
 import { and, eq, lt, lte, sql } from "drizzle-orm";
@@ -842,6 +843,7 @@ export const appRouter = router({
   nfe: nfeRouter,
   salesImport: salesImportRouter,
   reports: reportsRouter,
+  metaAds: metaAdsRouter,
   alerts: router({
     counts: protectedProcedure.query(async ({ ctx }) => {
       const dbInstance = await getDb();
