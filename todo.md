@@ -725,3 +725,6 @@
 - [x] Backend: getLowStockProducts atualizado com LEFT JOIN em salesImportItems (6 meses), ordenado por SUM(quantity) DESC
 - [x] Frontend: widget Estoque Baixo no Dashboard mostra os produtos mais vendidos com estoque baixo primeiro
 - [x] 29/29 testes passando
+
+## Bug Fix: Data incorreta nas importações diárias (20/04)
+- [x] Corrigido: data exibida com 1 dia a menos por causa do fuso horário UTC-3 — agora usa split de string YYYY-MM-DD sem converter para Date object

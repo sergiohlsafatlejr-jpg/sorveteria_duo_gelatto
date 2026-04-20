@@ -108,7 +108,8 @@ function ImportacaoDiariaStep({ onBack }: { onBack: () => void }) {
   };
 
   if (result) {
-    const dateLabel = new Date(saleDate + "T12:00:00").toLocaleDateString("pt-BR");
+    const [syy, smm, sdd] = saleDate.split("-");
+    const dateLabel = `${sdd}/${smm}/${syy}`;
     return (
       <div className="space-y-4">
         <Card className="border-green-500/30 bg-green-500/5">
@@ -298,7 +299,7 @@ function CaixaOnlyStep({ onBack }: { onBack: () => void }) {
                 <tbody>
                   {result.dailySummary.map((d) => (
                     <tr key={d.date} className="border-t">
-                      <td className="p-2">{new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR")}</td>
+                      <td className="p-2">{(() => { const [dy, dm, dd] = d.date.split("-"); return `${dd}/${dm}/${dy}`; })()}</td>
                       <td className="p-2 text-right font-medium">{fmt(d.total)}</td>
                       <td className="p-2 text-right text-muted-foreground">{d.transactions}</td>
                     </tr>
@@ -1381,11 +1382,12 @@ export default function SalesImport() {
                       const isDaily = imp.importMode === "daily";
                       const dateLabel = isDaily && imp.saleDate
                         ? (() => {
-                            // saleDate pode vir como Date object ou string do banco
-                            const d = imp.saleDate instanceof Date
-                              ? imp.saleDate
-                              : new Date(String(imp.saleDate).slice(0, 10) + "T12:00:00");
-                            return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+                            // Extrair apenas a parte YYYY-MM-DD para evitar problema de fuso horário
+                            const raw = imp.saleDate instanceof Date
+                              ? imp.saleDate.toISOString().slice(0, 10)
+                              : String(imp.saleDate).slice(0, 10);
+                            const [yy, mm, dd] = raw.split("-");
+                            return `${dd}/${mm}/${yy}`;
                           })()
                         : `${MONTHS[m - 1]}/${y}`;
                       return (
