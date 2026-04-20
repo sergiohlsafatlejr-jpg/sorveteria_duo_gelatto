@@ -3,11 +3,15 @@ import BackButton from "@/components/BackButton";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
+import { Link } from "wouter";
 import {
   AlertTriangle,
   BarChart3,
   DollarSign,
+  Eye,
   IceCream,
+  Megaphone,
+  MousePointerClick,
   Package,
   ShoppingCart,
   TrendingUp,
@@ -70,6 +74,10 @@ export default function Dashboard() {
   const { data: lowStock } = trpc.dashboard.lowStock.useQuery();
   const { data: topPointsCustomers = [] } = trpc.dashboard.topCustomersByPoints.useQuery({ limit: 8 });
   const { data: pointsCount = 0 } = trpc.dashboard.customersWithPointsCount.useQuery();
+  const { data: metaSummary } = trpc.metaAds.getSummary.useQuery(
+    { datePreset: "last_7d" },
+    { staleTime: 10 * 60 * 1000 }
+  );
 
   const salesChart = (chartData ?? []).map((d) => ({
     date: new Date(d.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
@@ -253,6 +261,66 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {/* Meta Ads Summary Card */}
+        {metaSummary && (
+          <Link href="/meta-ads">
+            <Card className="cursor-pointer hover:shadow-md transition-shadow border-blue-100 hover:border-blue-300">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base font-semibold flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Megaphone className="h-4 w-4 text-blue-600" />
+                    Meta Ads — Últimos 7 dias
+                  </span>
+                  <span className="text-xs font-normal text-blue-600 hover:underline">Ver análise completa →</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-lg p-2 bg-green-100 text-green-600">
+                      <DollarSign className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Valor usado</p>
+                      <p className="font-bold text-sm">{new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(metaSummary.totalSpend)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-lg p-2 bg-blue-100 text-blue-600">
+                      <Eye className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Impressões</p>
+                      <p className="font-bold text-sm">{new Intl.NumberFormat("pt-BR").format(metaSummary.totalImpressions)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-lg p-2 bg-purple-100 text-purple-600">
+                      <TrendingUp className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Alcance</p>
+                      <p className="font-bold text-sm">{new Intl.NumberFormat("pt-BR").format(metaSummary.totalReach)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-lg p-2 bg-orange-100 text-orange-600">
+                      <MousePointerClick className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Cliques no link</p>
+                      <p className="font-bold text-sm">{new Intl.NumberFormat("pt-BR").format(metaSummary.totalLinkClicks)}</p>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-3">
+                  {metaSummary.activeCampaigns} campanha(s) ativa(s) · Clique para ver análise completa
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
         )}
 
         {/* Birthdays & Low Stock */}

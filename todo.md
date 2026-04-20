@@ -778,3 +778,12 @@
 - [x] Frontend: seção de recomendações do Meta
 - [x] Registrar rota /meta-ads no App.tsx
 - [x] Adicionar item Meta Ads no menu do DashboardLayout (grupo Pontos/Marketing)
+
+### Meta Ads — Melhorias v2
+- [x] Backend: endpoint metaAds.getInsightsByAd (level=ad) para breakdown por criativo
+- [x] Backend: endpoint metaAds.getSummary para resumo rápido (7 dias) no Dashboard
+- [x] Frontend MetaAds.tsx: sistema de 4 abas (Visão Geral, Por Anúncio, Comparativo, Recomendações)
+- [x] Frontend MetaAds.tsx: aba "Por Anúncio" com tabela + gráfico de pizza de distribuição de gasto
+- [x] Frontend MetaAds.tsx: aba "Comparativo" com tabela de custo/conta alcançada e custo/clique no link + 2 gráficos
+- [x] Frontend MetaAds.tsx: aba "Recomendações" separada com badge de contagem no menu
+- [x] Frontend Dashboard.tsx: card resumo Meta Ads (7 dias) clícavel com 4 KPIs e link para /meta-ads
