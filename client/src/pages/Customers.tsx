@@ -29,10 +29,16 @@ function formatBirthDate(raw: Date | string | null | undefined): string {
 // ─── Componente de stats de compras (lazy, só carrega ao expandir) ────────────
 function CustomerStats({ customerId, totalPurchases }: { customerId: number; totalPurchases: string }) {
   const [expanded, setExpanded] = useState(false);
-  const { data: stats, isLoading } = trpc.customers.getStats.useQuery(
-    { id: customerId },
+  const { data: stats, isLoading: statsLoading } = trpc.customers.purchaseStatsFromTable.useQuery(
+    { customerId },
     { enabled: expanded }
   );
+  const { data: history, isLoading: histLoading } = trpc.customers.purchaseHistory.useQuery(
+    { customerId, limit: 10 },
+    { enabled: expanded }
+  );
+
+  const isLoading = statsLoading || histLoading;
 
   const fmt = (v: number | string) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
@@ -47,6 +53,17 @@ function CustomerStats({ customerId, totalPurchases }: { customerId: number; tot
     other: "Outro",
   };
 
+  const paymentColor: Record<string, string> = {
+    cash: "bg-green-100 text-green-700",
+    credit_card: "bg-blue-100 text-blue-700",
+    debit_card: "bg-indigo-100 text-indigo-700",
+    pix: "bg-purple-100 text-purple-700",
+    other: "bg-gray-100 text-gray-700",
+  };
+
+  const hasHistory = (history?.length ?? 0) > 0;
+  const hasStats = stats && (stats.visitCount > 0);
+
   return (
     <div className="mt-2">
       <button
@@ -59,38 +76,58 @@ function CustomerStats({ customerId, totalPurchases }: { customerId: number; tot
       </button>
 
       {expanded && (
-        <div className="mt-2 rounded-lg border bg-muted/30 p-3 space-y-2 text-xs">
+        <div className="mt-2 rounded-lg border bg-muted/30 p-3 space-y-3 text-xs">
           {isLoading ? (
-            <p className="text-muted-foreground animate-pulse">Carregando...</p>
-          ) : !stats ? (
-            <p className="text-muted-foreground">Sem dados disponíveis.</p>
+            <p className="text-muted-foreground animate-pulse">Carregando histórico...</p>
           ) : (
             <>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1 text-muted-foreground">
-                  <TrendingUp className="h-3 w-3" />
-                  <span>Média por visita:</span>
-                  <strong className="text-foreground">{fmt(stats.avgPurchase)}</strong>
+              {/* KPIs */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-md bg-background border p-2 text-center">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Visitas</p>
+                  <p className="font-bold text-sm text-foreground">{stats?.visitCount ?? 0}</p>
                 </div>
-                <div className="text-muted-foreground">
-                  <span>{stats.visitCount} visita(s)</span>
+                <div className="rounded-md bg-background border p-2 text-center">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Ticket Médio</p>
+                  <p className="font-bold text-sm text-foreground">{fmt(stats?.avgPurchase ?? 0)}</p>
+                </div>
+                <div className="rounded-md bg-background border p-2 text-center">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Gasto</p>
+                  <p className="font-bold text-sm text-foreground">{fmt(stats?.totalSpent ?? 0)}</p>
                 </div>
               </div>
-              {stats.lastPurchases.length > 0 ? (
+
+              {/* Última visita */}
+              {stats?.lastVisitDate && (
+                <p className="text-muted-foreground text-[10px]">
+                  Última visita: <strong className="text-foreground">{new Date(stats.lastVisitDate).toLocaleDateString("pt-BR")}</strong>
+                </p>
+              )}
+
+              {/* Histórico de compras */}
+              {hasHistory ? (
                 <div className="space-y-1">
-                  <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Últimas compras</p>
-                  {stats.lastPurchases.map((p, i) => (
-                    <div key={i} className="flex items-center justify-between">
-                      <span className="text-muted-foreground">
-                        {new Date(p.date).toLocaleDateString("pt-BR")} · {paymentLabel[p.paymentMethod] ?? p.paymentMethod}
-                      </span>
-                      <strong>{fmt(p.total)}</strong>
+                  <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Histórico de compras</p>
+                  {history!.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between gap-2 py-0.5">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${paymentColor[p.paymentMethod] ?? "bg-gray-100 text-gray-700"}`}>
+                          {paymentLabel[p.paymentMethod] ?? p.paymentMethod}
+                        </span>
+                        <span className="text-muted-foreground truncate">
+                          {new Date(p.createdAt).toLocaleDateString("pt-BR")}
+                        </span>
+                        {p.pointsEarned > 0 && (
+                          <span className="text-amber-600 shrink-0">+{p.pointsEarned}pts</span>
+                        )}
+                      </div>
+                      <strong className="shrink-0">{fmt(p.amount)}</strong>
                     </div>
                   ))}
                 </div>
-              ) : (
-                <p className="text-muted-foreground">Nenhuma compra registrada ainda.</p>
-              )}
+              ) : !hasStats ? (
+                <p className="text-muted-foreground text-center py-2">Nenhuma compra registrada ainda.</p>
+              ) : null}
             </>
           )}
         </div>
@@ -157,6 +194,8 @@ export default function Customers() {
     onSuccess: (data) => {
       utils.customers.list.invalidate();
       utils.customers.getStats.invalidate();
+      utils.customers.purchaseHistory.invalidate();
+      utils.customers.purchaseStatsFromTable.invalidate();
       toast.success(`Compra registrada! ${data.pointsEarned > 0 ? `+${data.pointsEarned} pontos` : ""}`);
       setPurchaseOpen(false);
       setPurchaseForm({ amount: "", paymentMethod: "pix", notes: "" });

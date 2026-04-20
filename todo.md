@@ -745,15 +745,17 @@
 - [ ] Testar com NF-e real para garantir que cada produto vincula ao produto correto
 
 ### Registro de Compra no Card do Cliente
-- [ ] Criar tabela customer_purchases no schema (customerId, amount, paymentMethod, points, createdAt)
-- [ ] Backend: endpoint customers.registerPurchase — registra compra, calcula pontos pela regra ativa e cria pointsTransaction
-- [ ] Frontend: botão "Registrar Compra" no card do cliente com modal (valor + forma de pagamento)
-- [ ] Frontend: ao salvar, atualizar pontos do cliente em tempo real
+- [x] Criar tabela customer_purchases no schema (customerId, amount, paymentMethod, pointsEarned, notes, userId, createdAt)
+- [x] Backend: endpoint customers.registerPurchase — registra compra, calcula pontos pela regra ativa e cria pointsTransaction
+- [x] Frontend: botão "Registrar Compra" no card do cliente com modal (valor + forma de pagamento)
+- [x] Frontend: ao salvar, atualizar pontos do cliente em tempo real
 
 ### Histórico de Compras e Ticket Médio
-- [ ] Backend: endpoint customers.purchaseHistory — retorna últimas N compras do cliente
-- [ ] Frontend: seção "Histórico de Compras" no card expandível (data, valor, pontos)
-- [ ] Frontend: exibir ticket médio e total de visitas no card do cliente
+- [x] Backend: endpoint customers.purchaseHistory — retorna últimas N compras do cliente
+- [x] Backend: endpoint customers.purchaseStatsFromTable — retorna visitCount, totalSpent, avgPurchase, lastVisitDate
+- [x] Frontend: seção "Histórico de Compras" no card expansível (data, valor, pontos, forma de pagamento)
+- [x] Frontend: KPIs de Visitas, Ticket Médio e Total Gasto no card do cliente
+- [x] Frontend: data da última visita exibida no card expansível
 - [ ] Bug fix: data de aniversário exibida com 1 dia a menos (fuso horário)
 
 ### Exportação Excel

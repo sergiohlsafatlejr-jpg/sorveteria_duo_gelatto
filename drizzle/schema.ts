@@ -603,3 +603,17 @@ export const salesImportPayments = mysqlTable("sales_import_payments", {
 });
 export type SalesImportPayment = typeof salesImportPayments.$inferSelect;
 export type InsertSalesImportPayment = typeof salesImportPayments.$inferInsert;
+
+// ─── Customer Purchases ───────────────────────────────────────────────────────
+export const customerPurchases = mysqlTable("customer_purchases", {
+  id: int("id").autoincrement().primaryKey(),
+  customerId: int("customerId").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  paymentMethod: mysqlEnum("paymentMethod", ["cash", "credit_card", "debit_card", "pix", "other"]).notNull(),
+  pointsEarned: int("pointsEarned").default(0).notNull(),
+  notes: text("notes"),
+  userId: int("userId"), // atendente que registrou
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CustomerPurchase = typeof customerPurchases.$inferSelect;
+export type InsertCustomerPurchase = typeof customerPurchases.$inferInsert;

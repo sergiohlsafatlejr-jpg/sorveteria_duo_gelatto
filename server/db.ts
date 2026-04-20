@@ -40,6 +40,9 @@ import {
   users,
   salesImports,
   salesImportItems,
+  customerPurchases,
+  InsertCustomerPurchase,
+  CustomerPurchase,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -917,4 +920,132 @@ export async function registerCustomerPurchase(data: {
   }
 
   return { saleId, pointsEarned };
+}
+
+// ─── Customer Purchase History (tabela customer_purchases) ────────────────────
+export async function getCustomerPurchaseHistory(
+  customerId: number,
+  limit = 20
+): Promise<{
+  id: number;
+  amount: string;
+  paymentMethod: string;
+  pointsEarned: number;
+  notes: string | null;
+  createdAt: Date;
+}[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const rows = await db
+    .select({
+      id: customerPurchases.id,
+      amount: customerPurchases.amount,
+      paymentMethod: customerPurchases.paymentMethod,
+      pointsEarned: customerPurchases.pointsEarned,
+      notes: customerPurchases.notes,
+      createdAt: customerPurchases.createdAt,
+    })
+    .from(customerPurchases)
+    .where(eq(customerPurchases.customerId, customerId))
+    .orderBy(desc(customerPurchases.createdAt))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    id: r.id,
+    amount: String(r.amount),
+    paymentMethod: r.paymentMethod,
+    pointsEarned: r.pointsEarned,
+    notes: r.notes ?? null,
+    createdAt: r.createdAt,
+  }));
+}
+
+// ─── Customer Purchase Stats (tabela customer_purchases) ─────────────────────
+export async function getCustomerPurchaseStatsFromTable(customerId: number): Promise<{
+  visitCount: number;
+  totalSpent: number;
+  avgPurchase: number;
+  lastVisitDate: Date | null;
+}> {
+  const db = await getDb();
+  if (!db) return { visitCount: 0, totalSpent: 0, avgPurchase: 0, lastVisitDate: null };
+
+  const rows = await db
+    .select({
+      amount: customerPurchases.amount,
+      createdAt: customerPurchases.createdAt,
+    })
+    .from(customerPurchases)
+    .where(eq(customerPurchases.customerId, customerId))
+    .orderBy(desc(customerPurchases.createdAt));
+
+  const visitCount = rows.length;
+  const totalSpent = rows.reduce((s, r) => s + parseFloat(String(r.amount)), 0);
+  const avgPurchase = visitCount > 0 ? totalSpent / visitCount : 0;
+  const lastVisitDate = rows.length > 0 ? rows[0].createdAt : null;
+
+  return { visitCount, totalSpent, avgPurchase, lastVisitDate };
+}
+
+// ─── Register Customer Purchase (tabela customer_purchases) ───────────────────
+export async function registerCustomerPurchaseInTable(data: {
+  customerId: number;
+  amount: number;
+  paymentMethod: "cash" | "credit_card" | "debit_card" | "pix" | "other";
+  notes?: string;
+  userId?: number;
+}): Promise<{ purchaseId: number; pointsEarned: number }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB não disponível");
+
+  // Calcular pontos com base na regra ativa
+  const activeRules = await db
+    .select()
+    .from(pointsRules)
+    .where(eq(pointsRules.active, true))
+    .limit(1);
+
+  const rule = activeRules[0];
+  let pointsEarned = 0;
+  if (rule) {
+    const purchaseAmt = parseFloat(String(rule.purchaseAmount));
+    if (purchaseAmt > 0) {
+      pointsEarned = Math.floor(data.amount / purchaseAmt) * rule.pointsEarned;
+    }
+  }
+
+  // Inserir na tabela customer_purchases
+  const [insertResult] = await db.insert(customerPurchases).values({
+    customerId: data.customerId,
+    amount: String(data.amount.toFixed(2)),
+    paymentMethod: data.paymentMethod,
+    pointsEarned,
+    notes: data.notes ?? null,
+    userId: data.userId,
+  });
+  const purchaseId = (insertResult as any).insertId;
+
+  // Atualizar totalPurchases e totalPoints do cliente
+  await db
+    .update(customers)
+    .set({
+      totalPurchases: sql`totalPurchases + ${data.amount}`,
+      totalPoints: pointsEarned > 0 ? sql`totalPoints + ${pointsEarned}` : undefined,
+    })
+    .where(eq(customers.id, data.customerId));
+
+  // Registrar transação de pontos se ganhou
+  if (pointsEarned > 0) {
+    await addPointsTransaction({
+      customerId: data.customerId,
+      type: "earned",
+      points: pointsEarned,
+      purchaseAmount: String(data.amount.toFixed(2)),
+      description: `Compra registrada — R$ ${data.amount.toFixed(2)}`,
+      userId: data.userId,
+    });
+  }
+
+  return { purchaseId, pointsEarned };
 }

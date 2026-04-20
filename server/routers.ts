@@ -130,7 +130,7 @@ const customersRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const result = await db.registerCustomerPurchase({
+      const result = await db.registerCustomerPurchaseInTable({
         ...input,
         userId: ctx.user.id,
       });
@@ -144,6 +144,14 @@ const customersRouter = router({
       });
       return result;
     }),
+
+  purchaseHistory: protectedProcedure
+    .input(z.object({ customerId: z.number(), limit: z.number().optional() }))
+    .query(({ input }) => db.getCustomerPurchaseHistory(input.customerId, input.limit ?? 20)),
+
+  purchaseStatsFromTable: protectedProcedure
+    .input(z.object({ customerId: z.number() }))
+    .query(({ input }) => db.getCustomerPurchaseStatsFromTable(input.customerId)),
 });
 
 // ─── Points Router ────────────────────────────────────────────────────────────
