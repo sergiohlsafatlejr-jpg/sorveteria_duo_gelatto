@@ -45,6 +45,8 @@ import Unauthorized from "./pages/Unauthorized";
 import MetaAds from "./pages/MetaAds";
 import AdLibrary from "./pages/AdLibrary";
 import GiroEstoque from "./pages/GiroEstoque";
+import InoveConnector from "./pages/InoveConnector";
+import PublicLoyalty from "./pages/PublicLoyalty";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function Router() {
@@ -95,6 +97,9 @@ function Router() {
       {/* Administração — admin only */}
       <Route path="/users">{() => <ProtectedRoute path="/users"><Users /></ProtectedRoute>}</Route>
       <Route path="/connector">{() => <ProtectedRoute path="/connector"><Connector /></ProtectedRoute>}</Route>
+      <Route path="/inove-connector">{() => <ProtectedRoute path="/inove-connector"><InoveConnector /></ProtectedRoute>}</Route>
+      {/* Página pública de fidelidade — sem login */}
+      <Route path="/fidelidade/:token" component={PublicLoyalty} />
       {/* Acesso negado */}
       <Route path="/unauthorized" component={Unauthorized} />
       <Route path="/nfe-import" component={NfeImport} />

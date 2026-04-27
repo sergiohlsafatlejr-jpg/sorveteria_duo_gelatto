@@ -13,6 +13,7 @@ import { salesImportRouter } from "./routers/sales-import";
 import { reportsRouter } from "./routers/reports";
 import { metaAdsRouter } from "./routers/meta-ads";
 import { adLibraryRouter } from "./routers/ad-library";
+import { inoveRouter } from "./routers/inove";
 import { getDb } from "./db";
 import { finTransactions, finReceivables, products } from "../drizzle/schema";
 import { and, eq, lt, lte, sql } from "drizzle-orm";
@@ -211,6 +212,61 @@ const pointsRouter = router({
   getHistory: protectedProcedure
     .input(z.object({ customerId: z.number() }))
     .query(({ input }) => db.getCustomerPointsHistory(input.customerId)),
+
+  // ── Link público de fidelidade ──────────────────────────────────────────────
+  getPublicToken: protectedProcedure
+    .input(z.object({ customerId: z.number() }))
+    .query(async ({ input }) => {
+      const dbInstance = await getDb();
+      if (!dbInstance) return null;
+      const { customerLoyaltyTokens } = await import("../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const crypto = await import("crypto");
+      const existing = await dbInstance.select().from(customerLoyaltyTokens).where(eq(customerLoyaltyTokens.customerId, input.customerId)).limit(1);
+      if (existing.length > 0) return existing[0].token;
+      const token = crypto.randomBytes(32).toString("hex");
+      await dbInstance.insert(customerLoyaltyTokens).values({ customerId: input.customerId, token });
+      return token;
+    }),
+
+  // ── Consulta pública por token (sem login) ────────────────────────────────
+  getPublicProfile: publicProcedure
+    .input(z.object({ token: z.string().min(10) }))
+    .query(async ({ input }) => {
+      const dbInstance = await getDb();
+      if (!dbInstance) return null;
+      const { customerLoyaltyTokens, customers, pointsTransactions, pointsRules } = await import("../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      const tokenRow = await dbInstance.select().from(customerLoyaltyTokens).where(eq(customerLoyaltyTokens.token, input.token)).limit(1);
+      if (tokenRow.length === 0) return null;
+      const customerId = tokenRow[0].customerId;
+      // Atualizar lastAccessedAt
+      await dbInstance.update(customerLoyaltyTokens).set({ lastAccessedAt: new Date() }).where(eq(customerLoyaltyTokens.customerId, customerId));
+      const customer = await dbInstance.select().from(customers).where(eq(customers.id, customerId)).limit(1);
+      if (customer.length === 0) return null;
+      const history = await dbInstance.select().from(pointsTransactions).where(eq(pointsTransactions.customerId, customerId)).orderBy(desc(pointsTransactions.createdAt)).limit(10);
+      const rules = await dbInstance.select().from(pointsRules).where(eq(pointsRules.active, true)).limit(1);
+      const rule = rules[0] ?? null;
+      const totalPoints = customer[0].totalPoints ?? 0;
+      const meta = rule ? rule.rewardThreshold : 100;
+      const rewardValue = rule ? rule.rewardValue : "0";
+      const progress = Math.min(100, Math.round((totalPoints / meta) * 100));
+      const faltam = Math.max(0, meta - totalPoints);
+      return {
+        name: customer[0].fullName,
+        totalPoints,
+        meta,
+        rewardValue,
+        progress,
+        faltam,
+        history: history.map((h) => ({
+          type: h.type,
+          points: h.points,
+          description: h.description,
+          createdAt: h.createdAt,
+        })),
+      };
+    }),
 
   addPoints: protectedProcedure
     .input(
@@ -875,6 +931,7 @@ export const appRouter = router({
   reports: reportsRouter,
   metaAds: metaAdsRouter,
   adLibrary: adLibraryRouter,
+  inove: inoveRouter,
   alerts: router({
     counts: protectedProcedure.query(async ({ ctx }) => {
       const dbInstance = await getDb();

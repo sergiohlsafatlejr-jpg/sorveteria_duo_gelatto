@@ -142,6 +142,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { icon: UserCog, label: "Usuários", path: "/users" },
       { icon: Database, label: "Conector Externo", path: "/connector" },
+      { icon: Database, label: "Conector INOVE PDV", path: "/inove-connector" },
     ],
   },
 ];

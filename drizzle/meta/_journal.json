@@ -155,6 +155,13 @@
       "when": 1777291758470,
       "tag": "0021_new_dust",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1777303970963,
+      "tag": "0022_talented_master_chief",
+      "breakpoints": true
     }
   ]
 }

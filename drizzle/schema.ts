@@ -641,3 +641,48 @@ export const metaAdsCache = mysqlTable("meta_ads_cache", {
 });
 export type MetaAdsCache = typeof metaAdsCache.$inferSelect;
 export type InsertMetaAdsCache = typeof metaAdsCache.$inferInsert;
+
+// ─── Customer Loyalty Token (link público de consulta de pontos) ──────────────
+// Cada cliente recebe um token único para consultar seu saldo sem precisar de login
+export const customerLoyaltyTokens = mysqlTable("customer_loyalty_tokens", {
+  id: int("id").autoincrement().primaryKey(),
+  customerId: int("customerId").notNull().unique(), // 1 token por cliente
+  token: varchar("token", { length: 64 }).notNull().unique(), // UUID ou hash único
+  lastAccessedAt: timestamp("lastAccessedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CustomerLoyaltyToken = typeof customerLoyaltyTokens.$inferSelect;
+export type InsertCustomerLoyaltyToken = typeof customerLoyaltyTokens.$inferInsert;
+
+// ─── INOVE Connector Config (configuração do banco de dados do PDV INOVE) ─────
+// Armazena as credenciais do banco MySQL do INOVE para sincronização automática
+export const inoveConnectorConfig = mysqlTable("inove_connector_config", {
+  id: int("id").autoincrement().primaryKey(),
+  host: varchar("host", { length: 255 }).notNull(),       // IP ou hostname do servidor INOVE
+  port: int("port").default(3306).notNull(),               // porta MySQL (padrão 3306)
+  database: varchar("database", { length: 100 }).notNull(), // nome do banco de dados
+  username: varchar("username", { length: 100 }).notNull(),
+  password: varchar("password", { length: 255 }).notNull(), // armazenado criptografado
+  active: boolean("active").default(false).notNull(),
+  lastSyncAt: timestamp("lastSyncAt"),
+  lastSyncStatus: mysqlEnum("lastSyncStatus", ["success", "error", "pending"]).default("pending"),
+  lastSyncMessage: text("lastSyncMessage"),
+  syncIntervalMinutes: int("syncIntervalMinutes").default(5).notNull(), // polling a cada N minutos
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type InoveConnectorConfig = typeof inoveConnectorConfig.$inferSelect;
+export type InsertInoveConnectorConfig = typeof inoveConnectorConfig.$inferInsert;
+
+// ─── INOVE Sync Log (histórico de sincronizações com o INOVE) ─────────────────
+export const inoveSyncLog = mysqlTable("inove_sync_log", {
+  id: int("id").autoincrement().primaryKey(),
+  status: mysqlEnum("status", ["success", "error"]).notNull(),
+  salesFound: int("salesFound").default(0).notNull(),     // vendas encontradas no INOVE
+  salesProcessed: int("salesProcessed").default(0).notNull(), // vendas processadas (pontos lançados)
+  customersLinked: int("customersLinked").default(0).notNull(), // clientes vinculados automaticamente
+  errorMessage: text("errorMessage"),
+  syncedAt: timestamp("syncedAt").defaultNow().notNull(),
+});
+export type InoveSyncLog = typeof inoveSyncLog.$inferSelect;
+export type InsertInoveSyncLog = typeof inoveSyncLog.$inferInsert;
