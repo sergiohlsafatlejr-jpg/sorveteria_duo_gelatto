@@ -357,7 +357,10 @@ export async function getLowStockProducts(): Promise<(Product & { avgSalesQty: n
   const db = await getDb();
   if (!db) return [];
 
-  // Busca produtos com estoque baixo, ordenados pela média de vendas dos últimos 6 meses (mais vendidos primeiro)
+  // Busca produtos com estoque baixo, ordenados pela quantidade vendida nos últimos 6 meses.
+  // NOTA: TiDB/MySQL não suporta subquery na cláusula ON do LEFT JOIN.
+  // Solução: fazer JOIN direto com sales_import_items e filtrar via WHERE com OR IS NULL,
+  // depois juntar com sales_imports para filtrar por status e referenceMonth.
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
   const fromMonth = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}`;
@@ -380,16 +383,25 @@ export async function getLowStockProducts(): Promise<(Product & { avgSalesQty: n
       supplierCode: products.supplierCode,
       createdAt: products.createdAt,
       updatedAt: products.updatedAt,
-      avgSalesQty: sql<number>`COALESCE(SUM(CAST(${salesImportItems.quantity} AS DECIMAL(10,3))), 0)`,
+      avgSalesQty: sql<number>`COALESCE(SUM(
+        CASE WHEN ${salesImportItems.id} IS NOT NULL
+          AND ${salesImports.status} = 'confirmed'
+          AND ${salesImports.referenceMonth} >= ${fromMonth}
+        THEN CAST(${salesImportItems.quantity} AS DECIMAL(10,3))
+        ELSE 0 END
+      ), 0)`,
     })
     .from(products)
     .leftJoin(
       salesImportItems,
       and(
         eq(salesImportItems.productId, products.id),
-        eq(salesImportItems.linkStatus, "linked"),
-        sql`EXISTS (SELECT 1 FROM sales_imports si WHERE si.id = ${salesImportItems.importId} AND si.status = 'confirmed' AND si.referenceMonth >= ${fromMonth})`
+        eq(salesImportItems.linkStatus, "linked")
       )
+    )
+    .leftJoin(
+      salesImports,
+      eq(salesImports.id, salesImportItems.importId)
     )
     .where(
       and(
@@ -398,7 +410,13 @@ export async function getLowStockProducts(): Promise<(Product & { avgSalesQty: n
       )
     )
     .groupBy(products.id)
-    .orderBy(sql`COALESCE(SUM(CAST(${salesImportItems.quantity} AS DECIMAL(10,3))), 0) DESC`)
+    .orderBy(sql`COALESCE(SUM(
+      CASE WHEN ${salesImportItems.id} IS NOT NULL
+        AND ${salesImports.status} = 'confirmed'
+        AND ${salesImports.referenceMonth} >= ${fromMonth}
+      THEN CAST(${salesImportItems.quantity} AS DECIMAL(10,3))
+      ELSE 0 END
+    ), 0) DESC`)
     .limit(50);
 
   return rows as (Product & { avgSalesQty: number })[];
