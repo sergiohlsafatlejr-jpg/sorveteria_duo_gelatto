@@ -1,14 +1,18 @@
 /**
- * usePermission — controle de acesso por papel (RBAC)
+ * usePermission — controle de acesso granular por módulo (RBAC + permissões customizadas)
  *
- * Papéis:
- *  admin      → acesso total
- *  manager    → gerente: sem telas financeiras sensíveis e sem administração
- *  attendant  → funcionário: apenas vendas e clientes
+ * Hierarquia de papéis:
+ *  admin      → acesso total, ignora permissões customizadas
+ *  manager    → gerente: acesso padrão + permissões customizadas do banco
+ *  attendant  → funcionário: acesso restrito + permissões customizadas do banco
  *  user       → mesmo que attendant (fallback)
+ *
+ * Para usuários não-admin, as permissões granulares do banco têm prioridade.
+ * Se não houver permissão salva para um módulo, usa as regras padrão do papel.
  */
 
 import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
 
 // Hierarquia numérica para comparações simples
 const HIERARCHY: Record<string, number> = {
@@ -18,77 +22,60 @@ const HIERARCHY: Record<string, number> = {
   user: 1,
 };
 
-// Rotas permitidas por papel (além das rotas públicas)
-// "admin" tem tudo, então não precisa de lista — verificamos pelo nível
-const MANAGER_ALLOWED_PATHS = new Set([
-  "/",
-  "/products-register",
-  "/products",
-  "/reports",
-  "/customers",
-  "/points",
-  "/points-rules",
-  "/whatsapp",
-  "/instagram",
-  "/sales",
-  "/sales-import",
-  "/notifications",
-  "/fin/forecast",
-  "/fin/goals",
-  "/fin/monthly-comparison",
-]);
+// Mapeamento de caminhos de rota para chaves de módulo no banco
+const PATH_TO_MODULE: Record<string, string> = {
+  "/products-register": "products",
+  "/products": "products-stock",
+  "/giro-estoque": "giro-estoque",
+  "/reports": "reports",
+  "/customers": "customers",
+  "/points": "points",
+  "/points-rules": "points-rules",
+  "/sales": "sales",
+  "/sales-import": "sales-import",
+  "/whatsapp": "whatsapp",
+  "/instagram": "instagram",
+  "/meta-ads": "meta-ads",
+  "/ad-library": "ad-library",
+  "/notifications": "notifications",
+  "/users": "users",
+  "/connector": "connector",
+  "/fin/dashboard": "fin-dashboard",
+  "/fin/payables": "fin-payables",
+  "/fin/receivables": "fin-receivables",
+  "/fin/cashflow": "fin-cashflow",
+  "/fin/dre": "fin-dre",
+  "/fin/forecast": "fin-forecast",
+  "/fin/goals": "fin-goals",
+  "/fin/costs": "fin-costs",
+  "/fin/banks": "fin-banks",
+  "/fin/bank-statements": "fin-banks",
+  "/fin/categories": "fin-costs",
+  "/fin/costs-register": "fin-costs",
+  "/fin/settings": "fin-dashboard",
+  "/fin/monthly-comparison": "fin-dre",
+};
 
-const ATTENDANT_ALLOWED_PATHS = new Set([
-  "/",
-  "/customers",
-  "/points",
-  "/sales",
-]);
+// Permissões padrão por papel (fallback quando não há permissão customizada)
+const DEFAULT_ROLE_MODULES: Record<string, string[]> = {
+  manager: [
+    "sales", "sales-import", "products", "products-stock", "giro-estoque",
+    "reports", "customers", "points", "points-rules", "fin-forecast",
+    "fin-goals", "notifications", "whatsapp", "instagram",
+  ],
+  attendant: ["sales", "customers", "points"],
+  user: ["sales", "customers", "points"],
+};
 
-// Rotas que requerem nível mínimo
+// Mantém compatibilidade com código legado que usa getRequiredLevel
 export function getRequiredLevel(path: string): number {
-  // Rotas de administração — apenas admin
   if (path.startsWith("/users") || path.startsWith("/connector")) return 3;
-
-  // Rotas financeiras sensíveis — apenas admin
-  const finAdminOnly = [
-    "/fin/dashboard",
-    "/fin/payables",
-    "/fin/receivables",
-    "/fin/bank-statements",
-    "/fin/costs",
-    "/fin/dre",
-    "/fin/cashflow",
-    "/fin/categories",
-    "/fin/banks",
-    "/fin/costs-register",
-    "/fin/settings",
-  ];
+  const finAdminOnly = ["/fin/dashboard","/fin/payables","/fin/receivables","/fin/bank-statements","/fin/costs","/fin/dre","/fin/cashflow","/fin/categories","/fin/banks","/fin/costs-register","/fin/settings"];
   if (finAdminOnly.some((p) => path.startsWith(p))) return 3;
-
-  // Rotas financeiras de gerência
   if (path.startsWith("/fin/")) return 2;
-
-  // Estoque — gerente ou acima
-  if (
-    path.startsWith("/products") ||
-    path.startsWith("/reports")
-  )
-    return 2;
-
-  // Pontos/regras, WhatsApp, Instagram — gerente ou acima
-  if (
-    path.startsWith("/points-rules") ||
-    path.startsWith("/whatsapp") ||
-    path.startsWith("/instagram")
-  )
-    return 2;
-
-  // Importação de vendas, notificações — gerente ou acima
-  if (path.startsWith("/sales-import") || path.startsWith("/notifications"))
-    return 2;
-
-  // Tudo mais (dashboard, clientes, pontos, vendas) — qualquer usuário logado
+  if (path.startsWith("/products") || path.startsWith("/reports")) return 2;
+  if (path.startsWith("/points-rules") || path.startsWith("/whatsapp") || path.startsWith("/instagram")) return 2;
+  if (path.startsWith("/sales-import") || path.startsWith("/notifications")) return 2;
   return 1;
 }
 
@@ -97,13 +84,72 @@ export function usePermission() {
   const role = (user?.role as string) ?? "user";
   const level = HIERARCHY[role] ?? 1;
 
+  // Busca permissões granulares do banco para usuários não-admin
+  const { data: dbPermissions } = trpc.users.getPermissions.useQuery(
+    { userId: user?.id ?? 0 },
+    { enabled: !!user && level < 3 }
+  );
+
   /**
-   * Verifica se o usuário pode acessar determinada rota
+   * Verifica se o usuário pode visualizar um módulo específico
+   */
+  function canViewModule(moduleKey: string): boolean {
+    if (level >= 3) return true;
+    if (dbPermissions && dbPermissions.length > 0) {
+      const perm = dbPermissions.find((p) => p.module === moduleKey);
+      if (perm !== undefined) return perm.canView;
+      return false;
+    }
+    const allowed = DEFAULT_ROLE_MODULES[role] ?? [];
+    return allowed.includes(moduleKey);
+  }
+
+  /**
+   * Verifica se o usuário pode criar em um módulo
+   */
+  function canCreate(moduleKey: string): boolean {
+    if (level >= 3) return true;
+    if (dbPermissions && dbPermissions.length > 0) {
+      const perm = dbPermissions.find((p) => p.module === moduleKey);
+      return perm?.canCreate ?? false;
+    }
+    return level >= 2;
+  }
+
+  /**
+   * Verifica se o usuário pode editar em um módulo
+   */
+  function canEdit(moduleKey: string): boolean {
+    if (level >= 3) return true;
+    if (dbPermissions && dbPermissions.length > 0) {
+      const perm = dbPermissions.find((p) => p.module === moduleKey);
+      return perm?.canEdit ?? false;
+    }
+    return level >= 2;
+  }
+
+  /**
+   * Verifica se o usuário pode excluir em um módulo
+   */
+  function canDelete(moduleKey: string): boolean {
+    if (level >= 3) return true;
+    if (dbPermissions && dbPermissions.length > 0) {
+      const perm = dbPermissions.find((p) => p.module === moduleKey);
+      return perm?.canDelete ?? false;
+    }
+    return false;
+  }
+
+  /**
+   * Verifica se o usuário pode acessar uma rota (baseado no módulo mapeado)
    */
   function canAccess(path: string): boolean {
-    if (level >= 3) return true; // admin tem tudo
-    const required = getRequiredLevel(path);
-    return level >= required;
+    if (level >= 3) return true;
+    const moduleKey = Object.entries(PATH_TO_MODULE).find(([p]) =>
+      path === p || path.startsWith(p + "/")
+    )?.[1];
+    if (!moduleKey) return true;
+    return canViewModule(moduleKey);
   }
 
   /**
@@ -138,11 +184,16 @@ export function usePermission() {
     role,
     level,
     canAccess,
+    canViewModule,
+    canCreate,
+    canEdit,
+    canDelete,
     hasRole,
     filterMenu,
     isAdmin: level >= 3,
     isManager: level >= 2,
     isAttendant: level >= 1,
+    dbPermissions,
   };
 }
 

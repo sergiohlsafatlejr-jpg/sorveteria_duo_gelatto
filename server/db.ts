@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, like, lte, or, sql, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   AuditLog,
@@ -136,6 +136,21 @@ export async function upsertUserPermission(
     .insert(userPermissions)
     .values({ userId, module, ...perms })
     .onDuplicateKeyUpdate({ set: perms });
+}
+
+export async function upsertAllUserPermissions(
+  userId: number,
+  modulePerms: Array<{ module: string; canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean }>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  // Remove todas as permissões existentes do usuário e reinsere
+  await db.delete(userPermissions).where(eq(userPermissions.userId, userId));
+  if (modulePerms.length > 0) {
+    await db.insert(userPermissions).values(
+      modulePerms.map(p => ({ userId, ...p }))
+    );
+  }
 }
 
 // ─── Audit Logs ───────────────────────────────────────────────────────────────

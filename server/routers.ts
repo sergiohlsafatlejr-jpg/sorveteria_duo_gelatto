@@ -625,6 +625,35 @@ const usersRouter = router({
       });
     }),
 
+  // Aplica um conjunto completo de permissões de uma vez (perfil pré-definido ou customizado)
+  setAllPermissions: adminProcedure
+    .input(
+      z.object({
+        userId: z.number(),
+        permissions: z.array(
+          z.object({
+            module: z.string(),
+            canView: z.boolean(),
+            canCreate: z.boolean(),
+            canEdit: z.boolean(),
+            canDelete: z.boolean(),
+          })
+        ),
+        profileApplied: z.string().optional(), // ex: "manager", "attendant", "custom"
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      await db.upsertAllUserPermissions(input.userId, input.permissions);
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        userName: ctx.user.name ?? "Sistema",
+        action: "set_all_permissions",
+        module: "users",
+        targetId: input.userId,
+        details: `Perfil de permissões aplicado: ${input.profileApplied ?? "customizado"} (${input.permissions.length} módulos)`,
+      });
+    }),
+
   auditLogs: adminProcedure
     .input(z.object({ limit: z.number().default(100) }))
     .query(({ input }) => db.getAuditLogs(input.limit)),
