@@ -10,6 +10,7 @@ import {
   getMostPurchasedReport,
   getStockTurnoverReport,
   getStockSummaryReport,
+  getWeeklyStockTurnoverReport,
 } from "../db.reports";
 
 export const reportsRouter = router({
@@ -72,4 +73,11 @@ export const reportsRouter = router({
   stockSummary: protectedProcedure.query(async () => {
     return getStockSummaryReport();
   }),
+
+  // Giro de estoque por semana (para planejamento de compras)
+  weeklyStockTurnover: protectedProcedure
+    .input(z.object({ weeksBack: z.number().min(2).max(12).default(6) }).optional())
+    .query(async ({ input }) => {
+      return getWeeklyStockTurnoverReport(input?.weeksBack ?? 6);
+    }),
 });

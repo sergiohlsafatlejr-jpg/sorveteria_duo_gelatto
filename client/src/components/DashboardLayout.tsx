@@ -84,6 +84,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { icon: Package, label: "Cadastro de Produtos", path: "/products-register" },
       { icon: Package, label: "Estoque", path: "/products", badgeKey: "lowStock" },
+      { icon: TrendingUp, label: "Giro Semanal", path: "/giro-estoque" },
       { icon: BarChart3, label: "Relatórios de Estoque", path: "/reports" },
     ],
   },

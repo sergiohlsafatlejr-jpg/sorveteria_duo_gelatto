@@ -469,3 +469,189 @@ export async function getStockSummaryReport() {
     withCostCount: Number(r.withCostCount) || 0,
   };
 }
+
+// ─── Relatório: Giro de Estoque por Semana ────────────────────────────────────
+// Retorna as últimas N semanas com vendas por produto, cobertura e sugestão de compra
+export async function getWeeklyStockTurnoverReport(weeksBack = 6) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+
+  // Calcular as semanas: cada semana começa na segunda-feira
+  const weeks: Array<{ label: string; start: Date; end: Date }> = [];
+  const now = new Date();
+  // Encontrar a segunda-feira da semana atual
+  const dayOfWeek = now.getDay(); // 0=dom, 1=seg, ...
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const thisMonday = new Date(now);
+  thisMonday.setDate(now.getDate() - daysToMonday);
+  thisMonday.setHours(0, 0, 0, 0);
+
+  for (let i = weeksBack - 1; i >= 0; i--) {
+    const start = new Date(thisMonday);
+    start.setDate(thisMonday.getDate() - i * 7);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    const label = `${start.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} – ${end.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
+    weeks.push({ label, start, end });
+  }
+
+  // Buscar vendas por produto e por semana usando saleDate ou createdAt da importação
+  // Agrupa por productId e por semana (usando YEARWEEK do MySQL)
+  const salesByWeek = await db
+    .select({
+      productId: salesImportItems.productId,
+      weekStart: sql<string>`DATE(DATE_SUB(COALESCE(${salesImports.saleDate}, ${salesImports.createdAt}), INTERVAL (WEEKDAY(COALESCE(${salesImports.saleDate}, ${salesImports.createdAt}))) DAY))`,
+      totalQty: sql<number>`SUM(${salesImportItems.quantity})`,
+      totalRevenue: sql<number>`SUM(${salesImportItems.totalPrice})`,
+    })
+    .from(salesImportItems)
+    .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+    .where(
+      and(
+        eq(salesImportItems.linkStatus, "linked"),
+        eq(salesImports.status, "confirmed"),
+        isNotNull(salesImportItems.productId),
+        gte(
+          sql`COALESCE(${salesImports.saleDate}, ${salesImports.createdAt})`,
+          sql`DATE_SUB(NOW(), INTERVAL ${weeksBack} WEEK)`
+        )
+      )
+    )
+    .groupBy(
+      salesImportItems.productId,
+      sql`DATE(DATE_SUB(COALESCE(${salesImports.saleDate}, ${salesImports.createdAt}), INTERVAL (WEEKDAY(COALESCE(${salesImports.saleDate}, ${salesImports.createdAt}))) DAY))`
+    );
+
+  // Buscar estoque atual e preços de todos os produtos que tiveram vendas no período
+  const productIds = Array.from(new Set(salesByWeek.map(r => r.productId).filter(Boolean))) as number[];
+  if (productIds.length === 0) return { weeks: weeks.map(w => w.label), products: [] };
+
+  const productData = await db
+    .select({
+      id: products.id,
+      name: products.name,
+      currentStock: products.currentStock,
+      minStock: products.minStock,
+      costPrice: products.costPrice,
+      salePrice: products.salePrice,
+    })
+    .from(products)
+    .where(
+      sql`${products.id} IN (${sql.join(productIds.map(id => sql`${id}`), sql`, `)})`
+    )
+    .orderBy(asc(products.name));
+
+  // Montar mapa: productId -> weekStart -> qty
+  type WeekSales = { qty: number; revenue: number };
+  const salesMap = new Map<number, Map<string, WeekSales>>();
+  for (const row of salesByWeek) {
+    if (!row.productId) continue;
+    if (!salesMap.has(row.productId)) salesMap.set(row.productId, new Map());
+    salesMap.get(row.productId)!.set(row.weekStart, {
+      qty: Number(row.totalQty) || 0,
+      revenue: Number(row.totalRevenue) || 0,
+    });
+  }
+
+  // Montar resultado por produto
+  const result = productData.map(p => {
+    const weekSales = salesMap.get(p.id) ?? new Map<string, WeekSales>();
+    const currentStock = Number(p.currentStock) || 0;
+    const costPrice = Number(p.costPrice) || 0;
+    const salePrice = Number(p.salePrice) || 0;
+    const minStock = Number(p.minStock) || 0;
+
+    // Vendas por semana (na ordem das semanas)
+    const weekData = weeks.map(w => {
+      const weekKey = w.start.toISOString().split("T")[0]; // YYYY-MM-DD
+      // Procurar a semana no mapa (pode ter pequenas diferenças de timezone)
+      let found: WeekSales | undefined;
+      for (const [key, val] of Array.from(weekSales.entries())) {
+        // Comparar apenas a data (YYYY-MM-DD)
+        if (key && key.substring(0, 10) === weekKey) {
+          found = val;
+          break;
+        }
+      }
+      return {
+        weekLabel: w.label,
+        qty: found?.qty ?? 0,
+        revenue: found?.revenue ?? 0,
+      };
+    });
+
+    // Total vendido no período
+    const totalQtySold = weekData.reduce((s, w) => s + w.qty, 0);
+    const weeksWithSales = weekData.filter(w => w.qty > 0).length;
+
+    // Média de vendas por semana (últimas semanas com dados)
+    const avgQtyPerWeek = weeksWithSales > 0
+      ? parseFloat((totalQtySold / Math.max(weeksWithSales, 1)).toFixed(1))
+      : 0;
+
+    // Cobertura em semanas = estoque atual / média semanal
+    const coverageWeeks = avgQtyPerWeek > 0
+      ? parseFloat((currentStock / avgQtyPerWeek).toFixed(1))
+      : 999;
+
+    // Sugestão de compra para próxima semana
+    // Fórmula: max(0, (avgQtyPerWeek * 2) - currentStock + minStock)
+    // Garante estoque para 2 semanas + estoque mínimo
+    const suggestedPurchase = avgQtyPerWeek > 0
+      ? Math.max(0, Math.ceil(avgQtyPerWeek * 2 - currentStock + minStock))
+      : 0;
+
+    // Giro = total vendido / estoque atual
+    const turnover = currentStock > 0
+      ? parseFloat((totalQtySold / currentStock).toFixed(1))
+      : totalQtySold > 0 ? 99 : 0;
+
+    // Margem bruta estimada
+    const totalRevenue = weekData.reduce((s, w) => s + w.revenue, 0);
+    const totalCostSold = costPrice * totalQtySold;
+    const margin = totalRevenue > 0
+      ? parseFloat(((totalRevenue - totalCostSold) / totalRevenue * 100).toFixed(1))
+      : 0;
+
+    // Status de estoque
+    const stockStatus =
+      currentStock <= 0 ? "sem_estoque" :
+      currentStock <= minStock ? "critico" :
+      coverageWeeks < 1 ? "critico" :
+      coverageWeeks < 2 ? "baixo" :
+      "ok";
+
+    return {
+      productId: p.id,
+      productName: p.name,
+      currentStock,
+      minStock,
+      costPrice,
+      salePrice,
+      avgQtyPerWeek,
+      coverageWeeks,
+      suggestedPurchase,
+      turnover,
+      margin,
+      stockStatus,
+      totalQtySold,
+      weekData,
+    };
+  });
+
+  // Ordenar por urgência: crítico primeiro, depois por menor cobertura
+  result.sort((a, b) => {
+    const statusOrder = { sem_estoque: 0, critico: 1, baixo: 2, ok: 3 };
+    const sa = statusOrder[a.stockStatus as keyof typeof statusOrder] ?? 3;
+    const sb = statusOrder[b.stockStatus as keyof typeof statusOrder] ?? 3;
+    if (sa !== sb) return sa - sb;
+    return a.coverageWeeks - b.coverageWeeks;
+  });
+
+  return {
+    weeks: weeks.map(w => w.label),
+    products: result,
+    generatedAt: new Date().toISOString(),
+  };
+}

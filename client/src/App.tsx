@@ -44,6 +44,7 @@ import SalesAverage from "./pages/SalesAverage";
 import Unauthorized from "./pages/Unauthorized";
 import MetaAds from "./pages/MetaAds";
 import AdLibrary from "./pages/AdLibrary";
+import GiroEstoque from "./pages/GiroEstoque";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function Router() {
@@ -67,6 +68,7 @@ function Router() {
       <Route path="/instagram">{() => <ProtectedRoute path="/instagram"><InstagramPage /></ProtectedRoute>}</Route>
       <Route path="/meta-ads">{() => <ProtectedRoute path="/meta-ads"><MetaAds /></ProtectedRoute>}</Route>
       <Route path="/ad-library">{() => <ProtectedRoute path="/ad-library"><AdLibrary /></ProtectedRoute>}</Route>
+      <Route path="/giro-estoque">{() => <ProtectedRoute path="/giro-estoque"><GiroEstoque /></ProtectedRoute>}</Route>
       {/* Vendas — importação e notificações (gerente+) */}
       <Route path="/sales-import">{() => <ProtectedRoute path="/sales-import"><SalesImport /></ProtectedRoute>}</Route>
       <Route path="/sales/product-mapping">{() => <ProtectedRoute path="/sales/product-mapping"><ProductMapping /></ProtectedRoute>}</Route>
