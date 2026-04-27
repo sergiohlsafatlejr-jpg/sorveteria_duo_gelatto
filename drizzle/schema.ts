@@ -617,3 +617,27 @@ export const customerPurchases = mysqlTable("customer_purchases", {
 });
 export type CustomerPurchase = typeof customerPurchases.$inferSelect;
 export type InsertCustomerPurchase = typeof customerPurchases.$inferInsert;
+
+// ─── Instagram Cache (dados sincronizados via MCP pelo agente Manus) ─────────
+// O manus-mcp-cli só pode ser chamado pelo agente Manus, não pelo servidor web.
+// Solução: agente sincroniza dados periodicamente e salva aqui; servidor lê do banco.
+export const instagramCache = mysqlTable("instagram_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  cacheKey: varchar("cacheKey", { length: 100 }).notNull().unique(), // ex: "account_info", "recent_posts", "performance_summary"
+  data: json("data").notNull(),                                       // dados em JSON
+  syncedAt: timestamp("syncedAt").defaultNow().notNull(),             // última sincronização
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type InstagramCache = typeof instagramCache.$inferSelect;
+export type InsertInstagramCache = typeof instagramCache.$inferInsert;
+
+// ─── Meta Ads Cache (dados sincronizados via MCP pelo agente Manus) ──────────
+export const metaAdsCache = mysqlTable("meta_ads_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  cacheKey: varchar("cacheKey", { length: 100 }).notNull().unique(), // ex: "campaigns_last_30d", "ads_last_30d"
+  data: json("data").notNull(),
+  syncedAt: timestamp("syncedAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type MetaAdsCache = typeof metaAdsCache.$inferSelect;
+export type InsertMetaAdsCache = typeof metaAdsCache.$inferInsert;

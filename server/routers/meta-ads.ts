@@ -3,7 +3,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import { protectedProcedure, router } from "../_core/trpc";
 
-// ─── Helper: chama o MCP meta-marketing via CLI ───────────────────────────────
+// --- Helper: chama o MCP meta-marketing via CLI -------------------------------
 function callMcp(toolName: string, input: Record<string, unknown>): unknown {
   const inputJson = JSON.stringify(input).replace(/'/g, "'\\''");
   const cmd = `manus-mcp-cli tool call ${toolName} --server meta-marketing --input '${inputJson}' 2>/dev/null`;
@@ -24,10 +24,10 @@ function callMcp(toolName: string, input: Record<string, unknown>): unknown {
   }
 }
 
-// ─── Conta padrão Duo Gelatto ─────────────────────────────────────────────────
+// --- Conta padrão Duo Gelatto -------------------------------------------------
 const DUO_ACCOUNT_ID = "act_1821396852023766";
 
-// ─── Mapa de plataformas ──────────────────────────────────────────────────────
+// --- Mapa de plataformas ------------------------------------------------------
 const PLATFORM_LABELS: Record<string, string> = {
   facebook: "Facebook",
   instagram: "Instagram",
@@ -36,7 +36,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   unknown: "Desconhecido",
 };
 
-// ─── Helper: parse row de insight ─────────────────────────────────────────────
+// --- Helper: parse row de insight ---------------------------------------------
 function parseInsightRow(r: any) {
   const actions: Record<string, number> = {};
   if (Array.isArray(r.actions)) {
@@ -72,7 +72,7 @@ function parseInsightRow(r: any) {
   };
 }
 
-// ─── Helper: extrai array de insights do resultado MCP ────────────────────────
+// --- Helper: extrai array de insights do resultado MCP ------------------------
 function extractInsightRows(result: any): any[] {
   if (!result) return [];
   // Estrutura: { insights: [...], filteredCount: N }
@@ -84,7 +84,7 @@ function extractInsightRows(result: any): any[] {
   return [];
 }
 
-// ─── Meta Ads Router ──────────────────────────────────────────────────────────
+// --- Meta Ads Router ----------------------------------------------------------
 export const metaAdsRouter = router({
   // Retorna as contas de anúncio conectadas
   getAccounts: protectedProcedure.query(() => {
