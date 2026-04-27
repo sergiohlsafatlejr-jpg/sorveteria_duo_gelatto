@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import BackButton from "@/components/BackButton";
+import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,29 +11,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import {
   Instagram, Image, BarChart2, RefreshCw, Trash2, Send, Plus,
   Heart, Eye, MessageCircle, Users, ExternalLink, CheckCircle,
-  AlertCircle, Clock, Sparkles, Calendar, Wand2
+  AlertCircle, Clock, Sparkles, Calendar, Wand2, TrendingUp,
+  DollarSign, MousePointer, Megaphone, Share2, Bookmark,
+  Activity, Target, ChevronRight, Play, Grid3X3
 } from "lucide-react";
 
 type PostType = "post" | "story" | "reels";
 type AiStyle = "realistic" | "cartoon" | "watercolor" | "minimalist";
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  draft: { label: "Rascunho", color: "bg-gray-100 text-gray-700", icon: <Clock className="w-3 h-3" /> },
-  published: { label: "Publicado", color: "bg-green-100 text-green-700", icon: <CheckCircle className="w-3 h-3" /> },
-  failed: { label: "Falhou", color: "bg-red-100 text-red-700", icon: <AlertCircle className="w-3 h-3" /> },
+  draft: { label: "Rascunho", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", icon: <Clock className="w-3 h-3" /> },
+  published: { label: "Publicado", color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400", icon: <CheckCircle className="w-3 h-3" /> },
+  failed: { label: "Falhou", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400", icon: <AlertCircle className="w-3 h-3" /> },
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  post: "Post",
-  story: "Story",
-  reels: "Reels",
-};
-
-const PEAK_HOURS = ["11:00", "14:00", "19:00", "21:00"];
-
+const TYPE_LABELS: Record<string, string> = { post: "Post", story: "Story", reels: "Reels" };
 const AI_STYLE_LABELS: Record<AiStyle, string> = {
   realistic: "Fotorrealista",
   cartoon: "Cartoon / Divertido",
@@ -41,8 +38,62 @@ const AI_STYLE_LABELS: Record<AiStyle, string> = {
   minimalist: "Minimalista / Moderno",
 };
 
+// ─── KPI Card ─────────────────────────────────────────────────────────────────
+function KpiCard({ icon, label, value, sub, color, loading }: {
+  icon: React.ReactNode; label: string; value: string | number; sub?: string;
+  color: string; loading?: boolean;
+}) {
+  return (
+    <Card>
+      <CardContent className="pt-4 pb-3">
+        <div className="flex items-center gap-2 mb-1">
+          <span className={color}>{icon}</span>
+          <span className="text-xs text-muted-foreground font-medium">{label}</span>
+        </div>
+        {loading ? (
+          <Skeleton className="h-7 w-24 mt-1" />
+        ) : (
+          <>
+            <p className={`text-2xl font-bold ${color}`}>{value}</p>
+            {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Campaign Row ─────────────────────────────────────────────────────────────
+function CampaignRow({ campaign }: { campaign: any }) {
+  const ctrColor = campaign.ctr >= 2 ? "text-green-600" : campaign.ctr >= 1 ? "text-yellow-600" : "text-red-500";
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+      <div className="w-2 h-2 rounded-full bg-pink-500 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{campaign.campaignName}</p>
+        <div className="flex items-center gap-3 mt-1 flex-wrap">
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Eye className="w-3 h-3" /> {campaign.impressions.toLocaleString("pt-BR")}
+          </span>
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Users className="w-3 h-3" /> {campaign.reach.toLocaleString("pt-BR")}
+          </span>
+          <span className={`text-xs font-semibold flex items-center gap-1 ${ctrColor}`}>
+            <MousePointer className="w-3 h-3" /> CTR {campaign.ctr.toFixed(2)}%
+          </span>
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-sm font-bold text-pink-600">R${campaign.spend.toFixed(2)}</p>
+        <p className="text-xs text-muted-foreground">CPM R${campaign.cpm.toFixed(2)}</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function InstagramPage() {
-  const [activeTab, setActiveTab] = useState("feed");
+  const [activeTab, setActiveTab] = useState("overview");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [publishingId, setPublishingId] = useState<number | null>(null);
   const [aiMode, setAiMode] = useState(false);
@@ -51,6 +102,7 @@ export default function InstagramPage() {
   const [generatedImageUrl, setGeneratedImageUrl] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
+  const [adsDatePreset, setAdsDatePreset] = useState<"last_7d" | "last_14d" | "last_30d" | "last_90d" | "this_month" | "last_month">("last_30d");
   const [newPost, setNewPost] = useState({
     type: "post" as PostType,
     caption: "",
@@ -58,12 +110,23 @@ export default function InstagramPage() {
     promotionTitle: "",
   });
 
-  // Queries
-  const accountQuery = trpc.instagram.getAccountInfo.useQuery();
+  // ── Queries ──────────────────────────────────────────────────────────────
+  const accountQuery = trpc.instagram.getAccountInfo.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const postsQuery = trpc.instagram.getPosts.useQuery();
-  const recentQuery = trpc.instagram.getRecentPosts.useQuery({ limit: 10 });
+  const recentQuery = trpc.instagram.getRecentPosts.useQuery({ limit: 10 }, { staleTime: 5 * 60 * 1000 });
+  const perfQuery = trpc.instagram.getPerformanceSummary.useQuery({ limit: 10 }, { staleTime: 5 * 60 * 1000 });
 
-  // Mutations
+  const [stableAdsPreset] = useState<typeof adsDatePreset>(adsDatePreset);
+  const adsQuery = trpc.instagram.getMetaAdsCampaigns.useQuery(
+    { datePreset: adsDatePreset },
+    { staleTime: 5 * 60 * 1000 }
+  );
+  const adsByAdQuery = trpc.instagram.getMetaAdsInsightsByAd.useQuery(
+    { datePreset: adsDatePreset },
+    { staleTime: 5 * 60 * 1000 }
+  );
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
   const generateImageMut = trpc.instagram.generateImage.useMutation({
     onSuccess: (data) => {
       const url = data.imageUrl ?? "";
@@ -72,15 +135,12 @@ export default function InstagramPage() {
       toast.success("Imagem gerada com sucesso!");
       setIsGenerating(false);
     },
-    onError: (e) => {
-      toast.error(`Erro ao gerar imagem: ${e.message}`);
-      setIsGenerating(false);
-    },
+    onError: (e) => { toast.error(`Erro ao gerar imagem: ${e.message}`); setIsGenerating(false); },
   });
 
   const createDraftMut = trpc.instagram.createDraft.useMutation({
     onSuccess: () => {
-      toast.success(scheduledAt ? "Post agendado com sucesso!" : "Rascunho criado com sucesso!");
+      toast.success(scheduledAt ? "Post agendado!" : "Rascunho criado!");
       postsQuery.refetch();
       setShowCreateModal(false);
       resetModal();
@@ -89,595 +149,574 @@ export default function InstagramPage() {
   });
 
   const markPublishedMut = trpc.instagram.markPublished.useMutation({
-    onSuccess: () => {
-      toast.success("Post marcado como publicado!");
-      postsQuery.refetch();
-      setPublishingId(null);
-    },
-    onError: (e) => {
-      toast.error(`Erro: ${e.message}`);
-      setPublishingId(null);
-    },
+    onSuccess: () => { toast.success("Post marcado como publicado!"); postsQuery.refetch(); setPublishingId(null); },
+    onError: (e) => { toast.error(`Erro: ${e.message}`); setPublishingId(null); },
   });
 
   const deleteMut = trpc.instagram.deleteDraft.useMutation({
-    onSuccess: () => {
-      toast.success("Rascunho excluído.");
-      postsQuery.refetch();
-    },
-    onError: (e) => toast.error(`Erro: ${e.message}`),
-  });
-
-  const syncMut = trpc.instagram.syncMetrics.useMutation({
-    onSuccess: (data) => {
-      toast.success(`${data.updated} post(s) atualizado(s).`);
-      postsQuery.refetch();
-    },
+    onSuccess: () => { toast.success("Rascunho excluído."); postsQuery.refetch(); },
     onError: (e) => toast.error(`Erro: ${e.message}`),
   });
 
   const resetModal = () => {
     setNewPost({ type: "post", caption: "", imageUrl: "", promotionTitle: "" });
-    setAiMode(false);
-    setAiPrompt("");
-    setAiStyle("realistic");
-    setGeneratedImageUrl("");
-    setScheduledAt("");
+    setAiMode(false); setAiPrompt(""); setAiStyle("realistic");
+    setGeneratedImageUrl(""); setScheduledAt("");
   };
 
-  const handleGenerateImage = () => {
-    if (!aiPrompt.trim()) { toast.error("Descreva a promoção para gerar a imagem"); return; }
-    setIsGenerating(true);
-    generateImageMut.mutate({ prompt: aiPrompt, style: aiStyle });
-  };
-
-  const handleSaveDraft = () => {
-    const imageUrl = generatedImageUrl || newPost.imageUrl;
-    if (!imageUrl) { toast.error("Adicione uma imagem ou gere uma com IA"); return; }
-    createDraftMut.mutate({
-      type: newPost.type,
-      caption: newPost.caption || undefined,
-      imageUrl: imageUrl as string,
-      promotionTitle: newPost.promotionTitle || undefined,
-      aiPrompt: aiMode ? aiPrompt : undefined,
-      scheduledAt: scheduledAt || undefined,
-    });
-  };
-
-  const account = accountQuery.data as {
-    username?: string; name?: string; followers?: number; posts?: number; bio?: string; profile_picture?: string
-  } | null;
-
+  // ── Derived data ──────────────────────────────────────────────────────────
+  const account = accountQuery.data as any;
   const localPosts = postsQuery.data ?? [];
-  const recentPosts = (recentQuery.data as { data?: unknown[] } | null)?.data ?? [];
+  const recentPosts = (recentQuery.data as any)?.data ?? [];
   const drafts = localPosts.filter(p => p.status === "draft");
   const published = localPosts.filter(p => p.status === "published");
-
-  // Posts agendados (scheduledAt no futuro)
   const scheduled = drafts.filter(p => p.scheduledAt && new Date(p.scheduledAt) > new Date());
+  const adsSummary = adsQuery.data?.summary;
+  const adsCampaigns = adsQuery.data?.campaigns ?? [];
+  const adsByAd = adsByAdQuery.data ?? [];
+  const perf = perfQuery.data;
+
+  // ── Engagement rate estimado ──────────────────────────────────────────────
+  const engagementRate = account?.followers && perf
+    ? (((perf.avgLikes + perf.avgComments) / account.followers) * 100).toFixed(2)
+    : null;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <BackButton />
-        <div className="flex items-center gap-2">
-          <Instagram className="w-7 h-7 text-pink-500" />
-          <div>
-            <h1 className="text-2xl font-bold">Instagram</h1>
-            <p className="text-sm text-muted-foreground">Gerencie posts e promoções da Duo Gelatto</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Conta conectada */}
-      {account && (
-        <Card className="border-pink-200 bg-gradient-to-r from-pink-50 to-purple-50">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-4">
-              {account.profile_picture && (
-                <img src={account.profile_picture} alt="Perfil" className="w-14 h-14 rounded-full border-2 border-pink-300" />
-              )}
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-lg">@{account.username}</span>
-                  <Badge className="bg-pink-100 text-pink-700 border-pink-200">Conectado</Badge>
-                </div>
-                <p className="text-sm text-muted-foreground">{account.name}</p>
-              </div>
-              <div className="flex gap-6 text-center">
-                <div>
-                  <p className="text-xl font-bold text-pink-600">{account.followers?.toLocaleString("pt-BR")}</p>
-                  <p className="text-xs text-muted-foreground">Seguidores</p>
-                </div>
-                <div>
-                  <p className="text-xl font-bold text-purple-600">{account.posts}</p>
-                  <p className="text-xs text-muted-foreground">Posts</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {!account && !accountQuery.isLoading && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-3 text-yellow-800">
-              <AlertCircle className="w-5 h-5" />
-              <div>
-                <p className="font-semibold">Instagram não conectado</p>
-                <p className="text-sm">Acesse as Configurações do Manus → Integrações → Instagram para conectar a conta da Duo Gelatto.</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Agendados pendentes */}
-      {scheduled.length > 0 && (
-        <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-3 text-blue-800">
-              <Calendar className="w-5 h-5" />
-              <div>
-                <p className="font-semibold">{scheduled.length} post(s) agendado(s)</p>
-                <p className="text-sm">Próximo: {scheduled[0].promotionTitle ?? "Post"} em {new Date(scheduled[0].scheduledAt!).toLocaleString("pt-BR")}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+    <DashboardLayout>
+      <div className="p-6 max-w-7xl mx-auto space-y-5">
+        {/* ── Header ──────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="feed" className="flex items-center gap-1">
-              <Image className="w-4 h-4" /> Feed
-            </TabsTrigger>
-            <TabsTrigger value="drafts" className="flex items-center gap-1">
-              <Clock className="w-4 h-4" /> Rascunhos
-              {drafts.length > 0 && (
-                <Badge className="ml-1 bg-orange-100 text-orange-700 text-xs px-1">{drafts.length}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="metrics" className="flex items-center gap-1">
-              <BarChart2 className="w-4 h-4" /> Métricas
-            </TabsTrigger>
-          </TabsList>
-          <Button onClick={() => setShowCreateModal(true)} className="bg-gradient-to-r from-pink-500 to-purple-600 text-white hover:from-pink-600 hover:to-purple-700">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center">
+              <Instagram className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold">Instagram + Meta Ads</h1>
+              <p className="text-sm text-muted-foreground">Desempenho orgânico e campanhas pagas</p>
+            </div>
+          </div>
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            className="bg-gradient-to-r from-pink-500 to-purple-600 text-white hover:from-pink-600 hover:to-purple-700"
+          >
             <Plus className="w-4 h-4 mr-1" /> Criar Post
           </Button>
         </div>
 
-        {/* Feed */}
-        <TabsContent value="feed" className="mt-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-lg">Posts Recentes no Instagram</h2>
-            <Button variant="outline" size="sm" onClick={() => recentQuery.refetch()}>
-              <RefreshCw className="w-4 h-4 mr-1" /> Atualizar
-            </Button>
-          </div>
-
-          {recentQuery.isLoading && (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="aspect-square bg-gray-100 rounded-xl animate-pulse" />
-              ))}
-            </div>
-          )}
-
-          {!recentQuery.isLoading && recentPosts.length === 0 && (
-            <div className="text-center py-16 text-muted-foreground">
-              <Instagram className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>Nenhum post encontrado.</p>
-              <p className="text-sm">Conecte o Instagram da Duo Gelatto para ver o feed.</p>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {(recentPosts as Array<{
-              id: string; thumbnail_url?: string; media_url?: string; media_type?: string;
-              timestamp?: string; like_count?: number; comments_count?: number; permalink?: string
-            }>).map((post) => (
-              <div key={post.id} className="group relative aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer">
-                {(post.thumbnail_url || post.media_url) && (
-                  <img
-                    src={post.thumbnail_url ?? post.media_url}
-                    alt="Post"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                  />
+        {/* ── Conta conectada ──────────────────────────────────────────────── */}
+        {accountQuery.isLoading ? (
+          <Card><CardContent className="pt-4"><Skeleton className="h-16 w-full" /></CardContent></Card>
+        ) : account ? (
+          <Card className="border-pink-200/50 bg-gradient-to-r from-pink-50/50 to-purple-50/50 dark:from-pink-950/20 dark:to-purple-950/20">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-center gap-4">
+                {account.profile_picture && (
+                  <img src={account.profile_picture} alt="Perfil" className="w-14 h-14 rounded-full border-2 border-pink-300 object-cover" style={{ width: 56, height: 56 }} />
                 )}
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 text-white">
-                  <div className="flex items-center gap-3 text-sm font-semibold">
-                    <span className="flex items-center gap-1"><Heart className="w-4 h-4" /> {post.like_count ?? 0}</span>
-                    <span className="flex items-center gap-1"><MessageCircle className="w-4 h-4" /> {post.comments_count ?? 0}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-base">@{account.username}</span>
+                    <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0 text-xs">
+                      <CheckCircle className="w-3 h-3 mr-1" /> Conectado
+                    </Badge>
                   </div>
-                  {post.permalink && (
-                    <a href={post.permalink} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs underline">
-                      <ExternalLink className="w-3 h-3" /> Ver no Instagram
-                    </a>
+                  <p className="text-sm text-muted-foreground truncate">{account.name}</p>
+                </div>
+                <div className="flex gap-6 text-center shrink-0">
+                  <div>
+                    <p className="text-xl font-bold text-pink-600">{account.followers?.toLocaleString("pt-BR") ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground">Seguidores</p>
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold text-purple-600">{account.posts ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground">Posts</p>
+                  </div>
+                  {engagementRate && (
+                    <div>
+                      <p className="text-xl font-bold text-green-600">{engagementRate}%</p>
+                      <p className="text-xs text-muted-foreground">Engajamento</p>
+                    </div>
                   )}
                 </div>
-                <div className="absolute top-2 right-2">
-                  <Badge className="bg-black/60 text-white text-xs">{post.media_type ?? "POST"}</Badge>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20">
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-3 text-yellow-800 dark:text-yellow-400">
+                <AlertCircle className="w-5 h-5" />
+                <div>
+                  <p className="font-semibold">Instagram não conectado</p>
+                  <p className="text-sm">Acesse as Configurações do Manus → Integrações → Instagram para conectar.</p>
                 </div>
               </div>
-            ))}
-          </div>
-        </TabsContent>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Rascunhos */}
-        <TabsContent value="drafts" className="mt-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-lg">Rascunhos e Publicados</h2>
-          </div>
-
-          {localPosts.length === 0 && (
-            <div className="text-center py-16 text-muted-foreground">
-              <Image className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>Nenhum rascunho criado ainda.</p>
-              <p className="text-sm">Clique em "Criar Post" para começar.</p>
-            </div>
-          )}
-
-          <div className="space-y-3">
-            {localPosts.map((post) => {
-              const statusInfo = STATUS_LABELS[post.status] ?? STATUS_LABELS.draft;
-              const isScheduled = post.scheduledAt && new Date(post.scheduledAt) > new Date();
-              return (
-                <Card key={post.id} className="overflow-hidden">
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-4">
-                      {post.imageUrl && (
-                        <img
-                          src={post.imageUrl}
-                          alt="Preview"
-                          className="w-20 h-20 rounded-lg object-cover flex-shrink-0 border"
-                        />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <Badge variant="outline" className="text-xs">{TYPE_LABELS[post.type] ?? post.type}</Badge>
-                          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${statusInfo.color}`}>
-                            {statusInfo.icon} {statusInfo.label}
-                          </span>
-                          {isScheduled && (
-                            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">
-                              <Calendar className="w-3 h-3" />
-                              Agendado: {new Date(post.scheduledAt!).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                          )}
-                          {post.aiPrompt && (
-                            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
-                              <Sparkles className="w-3 h-3" /> IA
-                            </span>
-                          )}
-                          {post.promotionTitle && (
-                            <span className="text-xs text-muted-foreground truncate">📣 {post.promotionTitle}</span>
-                          )}
-                        </div>
-                        {post.caption && (
-                          <p className="text-sm text-muted-foreground line-clamp-2">{post.caption}</p>
-                        )}
-                        {post.status === "published" && (
-                          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1"><Heart className="w-3 h-3 text-red-400" /> {post.likes ?? 0}</span>
-                            <span className="flex items-center gap-1"><Eye className="w-3 h-3 text-blue-400" /> {post.reach ?? 0}</span>
-                            <span className="flex items-center gap-1"><Users className="w-3 h-3 text-purple-400" /> {post.impressions ?? 0}</span>
-                          </div>
-                        )}
-                        {post.errorMessage && (
-                          <p className="text-xs text-red-500 mt-1">Erro: {post.errorMessage}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {post.status === "draft" && (
-                          <Button
-                            size="sm"
-                            className="bg-gradient-to-r from-pink-500 to-purple-600 text-white"
-                            onClick={() => {
-                              setPublishingId(post.id);
-                              markPublishedMut.mutate({ postId: post.id });
-                            }}
-                            disabled={publishingId === post.id}
-                          >
-                            {publishingId === post.id ? (
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <><Send className="w-4 h-4 mr-1" /> Publicado</>
-                            )}
-                          </Button>
-                        )}
-                        {post.status === "draft" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-red-500 hover:bg-red-50"
-                            onClick={() => deleteMut.mutate({ postId: post.id })}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </TabsContent>
-
-        {/* Métricas */}
-        <TabsContent value="metrics" className="mt-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-lg">Métricas dos Posts Publicados</h2>
-            <Button variant="outline" size="sm" onClick={() => syncMut.mutate()} disabled={syncMut.isPending}>
-              <RefreshCw className={`w-4 h-4 mr-1 ${syncMut.isPending ? "animate-spin" : ""}`} />
-              Sincronizar Métricas
-            </Button>
-          </div>
-
-          {published.length === 0 && (
-            <div className="text-center py-16 text-muted-foreground">
-              <BarChart2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>Nenhum post publicado ainda.</p>
-              <p className="text-sm">Crie e publique posts para ver as métricas aqui.</p>
-            </div>
-          )}
-
-          {published.length > 0 && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                {[
-                  { label: "Total de Curtidas", value: published.reduce((s, p) => s + (p.likes ?? 0), 0), icon: <Heart className="w-5 h-5 text-red-400" />, color: "text-red-600" },
-                  { label: "Alcance Total", value: published.reduce((s, p) => s + (p.reach ?? 0), 0), icon: <Eye className="w-5 h-5 text-blue-400" />, color: "text-blue-600" },
-                  { label: "Impressões", value: published.reduce((s, p) => s + (p.impressions ?? 0), 0), icon: <Users className="w-5 h-5 text-purple-400" />, color: "text-purple-600" },
-                  { label: "Comentários", value: published.reduce((s, p) => s + (p.comments ?? 0), 0), icon: <MessageCircle className="w-5 h-5 text-green-400" />, color: "text-green-600" },
-                ].map((kpi) => (
-                  <Card key={kpi.label}>
-                    <CardContent className="pt-4 pb-3">
-                      <div className="flex items-center gap-2 mb-1">{kpi.icon}<span className="text-xs text-muted-foreground">{kpi.label}</span></div>
-                      <p className={`text-2xl font-bold ${kpi.color}`}>{kpi.value.toLocaleString("pt-BR")}</p>
-                    </CardContent>
-                  </Card>
-                ))}
+        {/* ── Agendados pendentes ───────────────────────────────────────────── */}
+        {scheduled.length > 0 && (
+          <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20">
+            <CardContent className="pt-3 pb-3">
+              <div className="flex items-center gap-3 text-blue-700 dark:text-blue-400">
+                <Calendar className="w-4 h-4" />
+                <p className="text-sm font-semibold">{scheduled.length} post(s) agendado(s)</p>
+                <span className="text-sm text-muted-foreground">· Próximo: {scheduled[0].promotionTitle ?? "Post"} em {new Date(scheduled[0].scheduledAt!).toLocaleString("pt-BR")}</span>
               </div>
+            </CardContent>
+          </Card>
+        )}
 
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Desempenho por Post</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {published.map((post) => (
-                      <div key={post.id} className="flex items-center gap-4 p-3 rounded-lg bg-muted/40">
-                        {post.imageUrl && (
-                          <img src={post.imageUrl} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{post.promotionTitle ?? post.caption?.slice(0, 50) ?? "Post sem título"}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {post.publishedAt ? new Date(post.publishedAt).toLocaleDateString("pt-BR") : "—"}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground flex-shrink-0">
-                          <span className="flex items-center gap-1"><Heart className="w-3.5 h-3.5 text-red-400" /> {post.likes ?? 0}</span>
-                          <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5 text-blue-400" /> {post.reach ?? 0}</span>
-                          <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-purple-400" /> {post.impressions ?? 0}</span>
-                          <span className="flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5 text-green-400" /> {post.comments ?? 0}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </>
-          )}
-        </TabsContent>
-      </Tabs>
+        {/* ── Tabs ─────────────────────────────────────────────────────────── */}
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="overview" className="flex items-center gap-1.5 text-xs">
+              <Activity className="w-3.5 h-3.5" /> Visão Geral
+            </TabsTrigger>
+            <TabsTrigger value="ads" className="flex items-center gap-1.5 text-xs">
+              <Megaphone className="w-3.5 h-3.5" /> Campanhas
+              {adsSummary && <Badge className="ml-1 bg-pink-100 text-pink-700 text-xs px-1 py-0">{adsCampaigns.length}</Badge>}
+            </TabsTrigger>
+            <TabsTrigger value="feed" className="flex items-center gap-1.5 text-xs">
+              <Grid3X3 className="w-3.5 h-3.5" /> Feed
+            </TabsTrigger>
+            <TabsTrigger value="drafts" className="flex items-center gap-1.5 text-xs">
+              <Clock className="w-3.5 h-3.5" /> Rascunhos
+              {drafts.length > 0 && <Badge className="ml-1 bg-orange-100 text-orange-700 text-xs px-1 py-0">{drafts.length}</Badge>}
+            </TabsTrigger>
+          </TabsList>
 
-      {/* Modal Criar Post */}
-      <Dialog open={showCreateModal} onOpenChange={(open) => { setShowCreateModal(open); if (!open) resetModal(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Instagram className="w-5 h-5 text-pink-500" />
-              Criar Post de Promoção
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {/* Título e tipo */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Título da Promoção</Label>
-                <Input
-                  placeholder="Ex: Sorvete 2 por 1 no domingo!"
-                  value={newPost.promotionTitle}
-                  onChange={(e) => setNewPost(p => ({ ...p, promotionTitle: e.target.value }))}
-                />
+          {/* ════════════════════════════════════════════════════════════════
+              TAB: VISÃO GERAL
+          ════════════════════════════════════════════════════════════════ */}
+          <TabsContent value="overview" className="mt-4 space-y-5">
+            {/* KPIs Instagram orgânico */}
+            <div>
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
+                <Instagram className="w-4 h-4 text-pink-500" /> Performance Orgânica — últimos 10 posts
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <KpiCard icon={<Heart className="w-5 h-5" />} label="Média de Curtidas" value={perf?.avgLikes?.toLocaleString("pt-BR") ?? "—"} color="text-red-500" loading={perfQuery.isLoading} />
+                <KpiCard icon={<MessageCircle className="w-5 h-5" />} label="Média de Comentários" value={perf?.avgComments?.toLocaleString("pt-BR") ?? "—"} color="text-blue-500" loading={perfQuery.isLoading} />
+                <KpiCard icon={<TrendingUp className="w-5 h-5" />} label="Total de Curtidas" value={perf?.totalLikes?.toLocaleString("pt-BR") ?? "—"} sub="últimos 10 posts" color="text-pink-500" loading={perfQuery.isLoading} />
+                <KpiCard icon={<Play className="w-5 h-5" />} label="Formato Top" value={perf?.topContentType ?? "—"} sub="mais frequente" color="text-purple-500" loading={perfQuery.isLoading} />
               </div>
-              <div>
-                <Label>Tipo de Conteúdo</Label>
-                <Select value={newPost.type} onValueChange={(v) => setNewPost(p => ({ ...p, type: v as PostType }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+            </div>
+
+            {/* KPIs Meta Ads */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-orange-500" /> Meta Ads — {adsDatePreset.replace("last_", "últimos ").replace("d", " dias").replace("this_month", "este mês").replace("last_month", "mês passado")}
+                </h3>
+                <Select value={adsDatePreset} onValueChange={(v) => setAdsDatePreset(v as any)}>
+                  <SelectTrigger className="w-36 h-7 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="post">Post (Feed)</SelectItem>
-                    <SelectItem value="story">Story</SelectItem>
-                    <SelectItem value="reels">Reels</SelectItem>
+                    <SelectItem value="last_7d">Últimos 7 dias</SelectItem>
+                    <SelectItem value="last_14d">Últimos 14 dias</SelectItem>
+                    <SelectItem value="last_30d">Últimos 30 dias</SelectItem>
+                    <SelectItem value="last_90d">Últimos 90 dias</SelectItem>
+                    <SelectItem value="this_month">Este mês</SelectItem>
+                    <SelectItem value="last_month">Mês passado</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              {adsQuery.isLoading ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[...Array(4)].map((_, i) => <Card key={i}><CardContent className="pt-4"><Skeleton className="h-16 w-full" /></CardContent></Card>)}
+                </div>
+              ) : adsSummary ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <KpiCard icon={<DollarSign className="w-5 h-5" />} label="Gasto Total" value={`R$${adsSummary.totalSpend.toFixed(2)}`} sub={`${adsSummary.activeCampaigns} campanhas`} color="text-green-600" />
+                  <KpiCard icon={<Eye className="w-5 h-5" />} label="Impressões" value={adsSummary.totalImpressions.toLocaleString("pt-BR")} sub={`Alcance: ${adsSummary.totalReach.toLocaleString("pt-BR")}`} color="text-blue-500" />
+                  <KpiCard icon={<MousePointer className="w-5 h-5" />} label="Cliques no Link" value={adsSummary.totalLinkClicks.toLocaleString("pt-BR")} sub={`CTR médio: ${adsSummary.avgCtr.toFixed(2)}%`} color="text-orange-500" />
+                  <KpiCard icon={<Target className="w-5 h-5" />} label="CPM Médio" value={`R$${adsSummary.avgCpm.toFixed(2)}`} sub="custo por mil impressões" color="text-purple-500" />
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="pt-6 pb-6 text-center text-muted-foreground">
+                    <Megaphone className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">Nenhuma campanha ativa no período selecionado.</p>
+                  </CardContent>
+                </Card>
+              )}
             </div>
 
-            {/* Imagem — modo manual ou IA */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <Label>Imagem</Label>
-                <Button
-                  type="button"
-                  variant={aiMode ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setAiMode(!aiMode)}
-                  className={aiMode ? "bg-purple-600 hover:bg-purple-700 text-white" : ""}
-                >
-                  <Wand2 className="w-3.5 h-3.5 mr-1" />
-                  {aiMode ? "Modo IA ativo" : "Gerar com IA"}
+            {/* Post destaque */}
+            {perf?.topPost && (
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-yellow-500" /> Post com Melhor Desempenho
+                </h3>
+                <Card>
+                  <CardContent className="pt-4 pb-4">
+                    <div className="flex items-center gap-4">
+                      {perf.topPost.thumbnail && (
+                        <img src={perf.topPost.thumbnail} alt="Top post" className="w-16 h-16 rounded-lg object-cover shrink-0" style={{ width: 64, height: 64 }} />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium line-clamp-2">{perf.topPost.caption?.slice(0, 120) ?? "Post sem legenda"}</p>
+                        <div className="flex items-center gap-4 mt-2">
+                          <span className="flex items-center gap-1 text-sm text-red-500 font-semibold"><Heart className="w-4 h-4" /> {perf.topPost.likes}</span>
+                          <span className="flex items-center gap-1 text-sm text-blue-500 font-semibold"><MessageCircle className="w-4 h-4" /> {perf.topPost.comments}</span>
+                        </div>
+                      </div>
+                      {perf.topPost.permalink && (
+                        <a href={perf.topPost.permalink} target="_blank" rel="noreferrer" className="shrink-0 text-pink-500 hover:text-pink-600">
+                          <ExternalLink className="w-5 h-5" />
+                        </a>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Campanhas resumidas */}
+            {adsCampaigns.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-pink-500" /> Campanhas Ativas
+                </h3>
+                <Card>
+                  <CardContent className="pt-3 pb-3 space-y-2">
+                    {adsCampaigns.slice(0, 5).map((c: any) => (
+                      <CampaignRow key={c.campaignId ?? c.campaignName} campaign={c} />
+                    ))}
+                    {adsCampaigns.length > 5 && (
+                      <button onClick={() => setActiveTab("ads")} className="w-full text-xs text-pink-500 hover:underline flex items-center justify-center gap-1 pt-1">
+                        Ver todas as {adsCampaigns.length} campanhas <ChevronRight className="w-3 h-3" />
+                      </button>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ════════════════════════════════════════════════════════════════
+              TAB: CAMPANHAS META ADS
+          ════════════════════════════════════════════════════════════════ */}
+          <TabsContent value="ads" className="mt-4 space-y-5">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-lg flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-orange-500" /> Campanhas Meta Ads
+              </h2>
+              <div className="flex items-center gap-2">
+                <Select value={adsDatePreset} onValueChange={(v) => setAdsDatePreset(v as any)}>
+                  <SelectTrigger className="w-40 h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="last_7d">Últimos 7 dias</SelectItem>
+                    <SelectItem value="last_14d">Últimos 14 dias</SelectItem>
+                    <SelectItem value="last_30d">Últimos 30 dias</SelectItem>
+                    <SelectItem value="last_90d">Últimos 90 dias</SelectItem>
+                    <SelectItem value="this_month">Este mês</SelectItem>
+                    <SelectItem value="last_month">Mês passado</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={() => { adsQuery.refetch(); adsByAdQuery.refetch(); }}>
+                  <RefreshCw className={`w-4 h-4 ${adsQuery.isFetching ? "animate-spin" : ""}`} />
                 </Button>
               </div>
+            </div>
 
-              {!aiMode ? (
-                <>
-                  <Input
-                    placeholder="https://... (URL pública da imagem)"
-                    value={newPost.imageUrl}
-                    onChange={(e) => setNewPost(p => ({ ...p, imageUrl: e.target.value }))}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Faça upload da imagem no CDN do Manus e cole a URL aqui.
-                  </p>
-                </>
-              ) : (
-                <div className="space-y-3 p-4 rounded-lg border border-purple-200 bg-purple-50">
-                  <div className="flex items-center gap-2 text-purple-700 text-sm font-medium">
-                    <Sparkles className="w-4 h-4" />
-                    Geração de Imagem por IA
+            {/* Resumo */}
+            {adsSummary && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <KpiCard icon={<DollarSign className="w-5 h-5" />} label="Gasto Total" value={`R$${adsSummary.totalSpend.toFixed(2)}`} color="text-green-600" />
+                <KpiCard icon={<Eye className="w-5 h-5" />} label="Impressões" value={adsSummary.totalImpressions.toLocaleString("pt-BR")} color="text-blue-500" />
+                <KpiCard icon={<Users className="w-5 h-5" />} label="Alcance" value={adsSummary.totalReach.toLocaleString("pt-BR")} color="text-purple-500" />
+                <KpiCard icon={<MousePointer className="w-5 h-5" />} label="Cliques" value={adsSummary.totalLinkClicks.toLocaleString("pt-BR")} sub={`CTR ${adsSummary.avgCtr.toFixed(2)}%`} color="text-orange-500" />
+              </div>
+            )}
+
+            {/* Tabela de campanhas */}
+            {adsQuery.isLoading ? (
+              <Card><CardContent className="pt-4 space-y-3">
+                {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
+              </CardContent></Card>
+            ) : adsCampaigns.length > 0 ? (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Desempenho por Campanha</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {adsCampaigns.map((c: any) => (
+                    <div key={c.campaignId ?? c.campaignName} className="p-3 rounded-lg bg-muted/30 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold truncate flex-1">{c.campaignName}</p>
+                        <span className="text-sm font-bold text-green-600 shrink-0">R${c.spend.toFixed(2)}</span>
+                      </div>
+                      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs text-muted-foreground">
+                        <div><p className="font-semibold text-foreground">{c.impressions.toLocaleString("pt-BR")}</p><p>Impressões</p></div>
+                        <div><p className="font-semibold text-foreground">{c.reach.toLocaleString("pt-BR")}</p><p>Alcance</p></div>
+                        <div><p className={`font-semibold ${c.ctr >= 2 ? "text-green-600" : c.ctr >= 1 ? "text-yellow-600" : "text-red-500"}`}>{c.ctr.toFixed(2)}%</p><p>CTR</p></div>
+                        <div><p className="font-semibold text-foreground">R${c.cpc.toFixed(2)}</p><p>CPC</p></div>
+                        <div><p className="font-semibold text-foreground">R${c.cpm.toFixed(2)}</p><p>CPM</p></div>
+                        <div><p className="font-semibold text-foreground">{c.linkClicks.toLocaleString("pt-BR")}</p><p>Cliques</p></div>
+                      </div>
+                      {c.dateStart && (
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(c.dateStart).toLocaleDateString("pt-BR")} → {c.dateStop ? new Date(c.dateStop).toLocaleDateString("pt-BR") : "hoje"}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="pt-10 pb-10 text-center text-muted-foreground">
+                  <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p>Nenhuma campanha encontrada no período.</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Top anúncios */}
+            {adsByAd.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Target className="w-4 h-4 text-purple-500" /> Top Anúncios por Desempenho
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(adsByAd as any[]).slice(0, 8).map((ad: any) => (
+                    <div key={ad.adId ?? ad.adName} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{ad.adName}</p>
+                        <p className="text-xs text-muted-foreground truncate">{ad.campaignName}</p>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs shrink-0">
+                        <span className="text-muted-foreground">{ad.impressions.toLocaleString("pt-BR")} imp.</span>
+                        <span className={`font-semibold ${ad.ctr >= 2 ? "text-green-600" : ad.ctr >= 1 ? "text-yellow-600" : "text-red-500"}`}>{ad.ctr.toFixed(2)}%</span>
+                        <span className="font-semibold text-green-600">R${ad.spend.toFixed(2)}</span>
+                        {ad.qualityRanking && (
+                          <Badge variant="outline" className="text-xs py-0">{ad.qualityRanking.replace("_", " ").toLowerCase()}</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* ════════════════════════════════════════════════════════════════
+              TAB: FEED
+          ════════════════════════════════════════════════════════════════ */}
+          <TabsContent value="feed" className="mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg">Posts Recentes no Instagram</h2>
+              <Button variant="outline" size="sm" onClick={() => recentQuery.refetch()}>
+                <RefreshCw className={`w-4 h-4 mr-1 ${recentQuery.isFetching ? "animate-spin" : ""}`} /> Atualizar
+              </Button>
+            </div>
+            {recentQuery.isLoading && (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {[...Array(8)].map((_, i) => <div key={i} className="aspect-square bg-muted rounded-xl animate-pulse" />)}
+              </div>
+            )}
+            {!recentQuery.isLoading && recentPosts.length === 0 && (
+              <div className="text-center py-16 text-muted-foreground">
+                <Instagram className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p>Nenhum post encontrado.</p>
+                <p className="text-sm">Conecte o Instagram da Duo Gelatto para ver o feed.</p>
+              </div>
+            )}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {(recentPosts as any[]).map((post: any) => (
+                <div key={post.id} className="group relative aspect-square rounded-xl overflow-hidden bg-muted cursor-pointer">
+                  {(post.thumbnail_url || post.media_url) && (
+                    <img src={post.thumbnail_url ?? post.media_url} alt="Post" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" />
+                  )}
+                  <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 text-white">
+                    <div className="flex items-center gap-3 text-sm font-semibold">
+                      <span className="flex items-center gap-1"><Heart className="w-4 h-4" /> {post.like_count ?? 0}</span>
+                      <span className="flex items-center gap-1"><MessageCircle className="w-4 h-4" /> {post.comments_count ?? 0}</span>
+                    </div>
+                    {post.permalink && (
+                      <a href={post.permalink} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs underline">
+                        <ExternalLink className="w-3 h-3" /> Ver no Instagram
+                      </a>
+                    )}
+                  </div>
+                  <div className="absolute top-2 right-2">
+                    <Badge className="bg-black/60 text-white text-xs border-0">{post.media_type ?? "POST"}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* ════════════════════════════════════════════════════════════════
+              TAB: RASCUNHOS
+          ════════════════════════════════════════════════════════════════ */}
+          <TabsContent value="drafts" className="mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg">Rascunhos e Publicados</h2>
+            </div>
+            {localPosts.length === 0 && (
+              <div className="text-center py-16 text-muted-foreground">
+                <Image className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p>Nenhum rascunho criado ainda.</p>
+                <p className="text-sm">Clique em "Criar Post" para começar.</p>
+              </div>
+            )}
+            <div className="space-y-3">
+              {localPosts.map((post) => {
+                const statusInfo = STATUS_LABELS[post.status] ?? STATUS_LABELS.draft;
+                const isScheduled = post.scheduledAt && new Date(post.scheduledAt) > new Date();
+                return (
+                  <Card key={post.id} className="overflow-hidden">
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-4">
+                        {post.imageUrl && (
+                          <img src={post.imageUrl} alt="Preview" className="w-20 h-20 rounded-lg object-cover flex-shrink-0 border" style={{ width: 80, height: 80 }} />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <Badge variant="outline" className="text-xs">{TYPE_LABELS[post.type] ?? post.type}</Badge>
+                            <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${statusInfo.color}`}>
+                              {statusInfo.icon} {statusInfo.label}
+                            </span>
+                            {isScheduled && (
+                              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                                <Calendar className="w-3 h-3" />
+                                {new Date(post.scheduledAt!).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            )}
+                            {post.aiPrompt && (
+                              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+                                <Sparkles className="w-3 h-3" /> IA
+                              </span>
+                            )}
+                          </div>
+                          {post.caption && <p className="text-sm text-muted-foreground line-clamp-2">{post.caption}</p>}
+                          {post.status === "published" && (
+                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1"><Heart className="w-3 h-3 text-red-400" /> {post.likes ?? 0}</span>
+                              <span className="flex items-center gap-1"><Eye className="w-3 h-3 text-blue-400" /> {post.reach ?? 0}</span>
+                              <span className="flex items-center gap-1"><Users className="w-3 h-3 text-purple-400" /> {post.impressions ?? 0}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {post.status === "draft" && (
+                            <Button size="sm" className="bg-gradient-to-r from-pink-500 to-purple-600 text-white"
+                              onClick={() => { setPublishingId(post.id); markPublishedMut.mutate({ postId: post.id }); }}
+                              disabled={publishingId === post.id}>
+                              {publishingId === post.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4 mr-1" /> Publicado</>}
+                            </Button>
+                          )}
+                          {post.status === "draft" && (
+                            <Button size="sm" variant="outline" className="text-red-500 hover:bg-red-50"
+                              onClick={() => deleteMut.mutate({ postId: post.id })}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        {/* ── Modal: Criar Post ─────────────────────────────────────────────── */}
+        <Dialog open={showCreateModal} onOpenChange={(open) => { if (!open) { setShowCreateModal(false); resetModal(); } }}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Instagram className="w-5 h-5 text-pink-500" /> Criar Post / Rascunho
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Tipo de conteúdo</Label>
+                  <Select value={newPost.type} onValueChange={(v) => setNewPost(p => ({ ...p, type: v as PostType }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="post">Post</SelectItem>
+                      <SelectItem value="story">Story</SelectItem>
+                      <SelectItem value="reels">Reels</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Título da promoção</Label>
+                  <Input placeholder="Ex: Combo Verão" value={newPost.promotionTitle} onChange={(e) => setNewPost(p => ({ ...p, promotionTitle: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <Label>Legenda (caption)</Label>
+                <Textarea placeholder="Escreva a legenda do post..." rows={3} value={newPost.caption} onChange={(e) => setNewPost(p => ({ ...p, caption: e.target.value }))} />
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant={aiMode ? "default" : "outline"} size="sm" onClick={() => setAiMode(true)} className={aiMode ? "bg-purple-600 text-white" : ""}>
+                  <Wand2 className="w-4 h-4 mr-1" /> Gerar com IA
+                </Button>
+                <Button variant={!aiMode ? "default" : "outline"} size="sm" onClick={() => setAiMode(false)}>
+                  <Image className="w-4 h-4 mr-1" /> URL da Imagem
+                </Button>
+              </div>
+              {aiMode ? (
+                <div className="space-y-3">
+                  <div>
+                    <Label>Descreva a promoção</Label>
+                    <Textarea placeholder="Ex: sorvete de açaí com granola e leite condensado, fundo branco..." rows={2} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} />
                   </div>
                   <div>
-                    <Label className="text-xs">Descreva a promoção ou imagem desejada</Label>
-                    <Textarea
-                      placeholder="Ex: Sorvete de morango com calda de chocolate, fundo colorido, estilo verão, com texto 'Duo Gelatto'"
-                      value={aiPrompt}
-                      onChange={(e) => setAiPrompt(e.target.value)}
-                      rows={3}
-                      maxLength={500}
-                    />
-                    <p className="text-xs text-muted-foreground mt-1 text-right">{aiPrompt.length}/500</p>
-                  </div>
-                  <div>
-                    <Label className="text-xs">Estilo Visual</Label>
+                    <Label>Estilo visual</Label>
                     <Select value={aiStyle} onValueChange={(v) => setAiStyle(v as AiStyle)}>
-                      <SelectTrigger className="bg-white">
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {(Object.keys(AI_STYLE_LABELS) as AiStyle[]).map((s) => (
-                          <SelectItem key={s} value={s}>{AI_STYLE_LABELS[s]}</SelectItem>
-                        ))}
+                        {Object.entries(AI_STYLE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button
-                    type="button"
-                    onClick={handleGenerateImage}
-                    disabled={isGenerating || !aiPrompt.trim()}
-                    className="w-full bg-purple-600 hover:bg-purple-700 text-white"
-                  >
-                    {isGenerating ? (
-                      <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Gerando imagem...</>
-                    ) : (
-                      <><Sparkles className="w-4 h-4 mr-2" /> Gerar Imagem com IA</>
-                    )}
+                  <Button onClick={() => { setIsGenerating(true); generateImageMut.mutate({ prompt: aiPrompt, style: aiStyle }); }} disabled={isGenerating || !aiPrompt.trim()} className="w-full">
+                    {isGenerating ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Gerando...</> : <><Sparkles className="w-4 h-4 mr-2" /> Gerar Imagem</>}
                   </Button>
                   {generatedImageUrl && (
-                    <div className="text-center">
-                      <p className="text-xs text-green-600 font-medium mb-2">✓ Imagem gerada com sucesso!</p>
-                      <img
-                        src={generatedImageUrl}
-                        alt="Imagem gerada"
-                        className="rounded-lg max-h-48 mx-auto border-2 border-purple-300"
-                      />
+                    <div className="rounded-lg overflow-hidden border">
+                      <img src={generatedImageUrl} alt="Gerada" className="w-full aspect-square object-cover" />
                     </div>
                   )}
                 </div>
-              )}
-
-              {/* Preview da imagem manual */}
-              {!aiMode && newPost.imageUrl && (
-                <div className="rounded-lg overflow-hidden border aspect-square max-h-48 flex items-center justify-center bg-gray-50 mt-2">
-                  <img src={newPost.imageUrl} alt="Preview" className="max-h-48 object-contain" onError={(e) => (e.currentTarget.style.display = "none")} />
-                </div>
-              )}
-            </div>
-
-            {/* Legenda */}
-            <div>
-              <Label>Legenda (Caption)</Label>
-              <Textarea
-                placeholder="Escreva a legenda do post... Use emojis e hashtags! 🍦 #duogelatto #sorvete #goiania"
-                value={newPost.caption}
-                onChange={(e) => setNewPost(p => ({ ...p, caption: e.target.value }))}
-                rows={4}
-                maxLength={2200}
-              />
-              <p className="text-xs text-muted-foreground mt-1 text-right">{newPost.caption.length}/2200</p>
-            </div>
-
-            {/* Agendamento */}
-            <div className="p-4 rounded-lg border border-blue-200 bg-blue-50 space-y-3">
-              <div className="flex items-center gap-2 text-blue-700 text-sm font-medium">
-                <Calendar className="w-4 h-4" />
-                Agendamento (opcional)
-              </div>
-              <div>
-                <Label className="text-xs">Data e hora de publicação</Label>
-                <Input
-                  type="datetime-local"
-                  value={scheduledAt}
-                  onChange={(e) => setScheduledAt(e.target.value)}
-                  min={new Date().toISOString().slice(0, 16)}
-                  className="bg-white"
-                />
-              </div>
-              <div>
-                <p className="text-xs text-blue-600 font-medium mb-2">Horários de maior engajamento:</p>
-                <div className="flex gap-2 flex-wrap">
-                  {PEAK_HOURS.map((h) => {
-                    const today = new Date();
-                    today.setHours(parseInt(h.split(":")[0]), 0, 0, 0);
-                    const isoVal = today.toISOString().slice(0, 16);
-                    return (
-                      <Button
-                        key={h}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="text-xs bg-white border-blue-300 text-blue-700 hover:bg-blue-100"
-                        onClick={() => setScheduledAt(isoVal)}
-                      >
-                        {h}
-                      </Button>
-                    );
-                  })}
-                </div>
-              </div>
-              {scheduledAt && (
-                <p className="text-xs text-blue-700 font-medium">
-                  ✓ Agendado para: {new Date(scheduledAt).toLocaleString("pt-BR")}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowCreateModal(false); resetModal(); }}>Cancelar</Button>
-            <Button
-              className="bg-gradient-to-r from-pink-500 to-purple-600 text-white"
-              onClick={handleSaveDraft}
-              disabled={createDraftMut.isPending || isGenerating}
-            >
-              {createDraftMut.isPending ? (
-                <RefreshCw className="w-4 h-4 animate-spin mr-1" />
-              ) : scheduledAt ? (
-                <><Calendar className="w-4 h-4 mr-1" /> Agendar Post</>
               ) : (
-                <><Plus className="w-4 h-4 mr-1" /> Salvar Rascunho</>
+                <div>
+                  <Label>URL da imagem</Label>
+                  <Input placeholder="https://..." value={newPost.imageUrl} onChange={(e) => setNewPost(p => ({ ...p, imageUrl: e.target.value }))} />
+                </div>
               )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+              <div>
+                <Label>Agendar para (opcional)</Label>
+                <Input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setShowCreateModal(false); resetModal(); }}>Cancelar</Button>
+              <Button onClick={() => {
+                const imageUrl = generatedImageUrl || newPost.imageUrl;
+                if (!imageUrl) { toast.error("Adicione uma imagem ou gere uma com IA"); return; }
+                createDraftMut.mutate({ type: newPost.type, caption: newPost.caption || undefined, imageUrl: imageUrl as string, promotionTitle: newPost.promotionTitle || undefined, aiPrompt: aiMode ? aiPrompt : undefined, scheduledAt: scheduledAt || undefined });
+              }} disabled={createDraftMut.isPending} className="bg-gradient-to-r from-pink-500 to-purple-600 text-white">
+                {createDraftMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : scheduledAt ? <><Calendar className="w-4 h-4 mr-1" /> Agendar</> : <><CheckCircle className="w-4 h-4 mr-1" /> Salvar Rascunho</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </DashboardLayout>
   );
 }
