@@ -125,6 +125,14 @@ export default function InstagramPage() {
     { datePreset: adsDatePreset },
     { staleTime: 5 * 60 * 1000 }
   );
+  const cacheStatusQuery = trpc.instagram.getCacheStatus.useQuery(undefined, { staleTime: 60 * 1000 });
+  const requestSyncMut = trpc.instagram.requestSync.useMutation({
+    onSuccess: (data) => {
+      if (data.success) toast.success(data.message);
+      else toast.error(data.message);
+    },
+    onError: (e) => toast.error(`Erro ao solicitar sincronização: ${e.message}`),
+  });
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const generateImageMut = trpc.instagram.generateImage.useMutation({
@@ -195,12 +203,37 @@ export default function InstagramPage() {
               <p className="text-sm text-muted-foreground">Desempenho orgânico e campanhas pagas</p>
             </div>
           </div>
-          <Button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-gradient-to-r from-pink-500 to-purple-600 text-white hover:from-pink-600 hover:to-purple-700"
-          >
-            <Plus className="w-4 h-4 mr-1" /> Criar Post
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Status do cache */}
+            {cacheStatusQuery.data && (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-lg">
+                <div className={`w-2 h-2 rounded-full ${cacheStatusQuery.data.isConnected ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                <span className="hidden sm:inline">
+                  {cacheStatusQuery.data.lastSync
+                    ? `Sincronizado ${new Date(cacheStatusQuery.data.lastSync).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+                    : 'Aguardando sync'}
+                </span>
+              </div>
+            )}
+            {/* Botão Sincronizar */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => requestSyncMut.mutate()}
+              disabled={requestSyncMut.isPending}
+              className="gap-1.5"
+              title="Solicitar atualização dos dados do Instagram e Meta Ads"
+            >
+              <RefreshCw className={`w-4 h-4 ${requestSyncMut.isPending ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{requestSyncMut.isPending ? 'Enviando...' : 'Sincronizar'}</span>
+            </Button>
+            <Button
+              onClick={() => setShowCreateModal(true)}
+              className="bg-gradient-to-r from-pink-500 to-purple-600 text-white hover:from-pink-600 hover:to-purple-700"
+            >
+              <Plus className="w-4 h-4 mr-1" /> Criar Post
+            </Button>
+          </div>
         </div>
 
         {/* ── Conta conectada ──────────────────────────────────────────────── */}

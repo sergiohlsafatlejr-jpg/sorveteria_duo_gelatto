@@ -203,9 +203,49 @@ export const instagramRouter = router({
       )
     ).orderBy(instagramPosts.scheduledAt);
   }),
-
-  // ── Sincronizar métricas ───────────────────────────────────────────────────
+  // ── Sincronizar métricas (legado) ─────────────────────────────────────────────
   syncMetrics: protectedProcedure.mutation(async () => {
     return { updated: 0 };
+  }),
+
+  // ── Status do cache (quando foi a última sincronização) ───────────────────
+  getCacheStatus: protectedProcedure.query(async () => {
+    try {
+      const db = await getDb();
+      if (!db) return { lastSync: null, isConnected: false };
+      const igRows = await db.select().from(instagramCache)
+        .where(eq(instagramCache.cacheKey, 'account_info')).limit(1);
+      const metaRows = await db.select().from(metaAdsCache)
+        .where(eq(metaAdsCache.cacheKey, 'campaigns_last_30d')).limit(1);
+      const igSync = igRows[0]?.syncedAt ?? null;
+      const metaSync = metaRows[0]?.syncedAt ?? null;
+      const lastSyncMs = [igSync, metaSync]
+        .filter(Boolean)
+        .map(d => new Date(d as Date).getTime());
+      const lastSync = lastSyncMs.length > 0 ? new Date(Math.max(...lastSyncMs)).toISOString() : null;
+      return {
+        isConnected: igRows.length > 0,
+        lastSync,
+        igSyncedAt: igSync ? new Date(igSync as Date).toISOString() : null,
+        metaSyncedAt: metaSync ? new Date(metaSync as Date).toISOString() : null,
+      };
+    } catch {
+      return { isConnected: false, lastSync: null, igSyncedAt: null, metaSyncedAt: null };
+    }
+  }),
+
+  // ── Solicitar sincronização manual (envia notificação ao owner) ─────────────
+  requestSync: protectedProcedure.mutation(async ({ ctx }) => {
+    try {
+      const { notifyOwner } = await import('../_core/notification');
+      const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      await notifyOwner({
+        title: 'Solicitação de Sincronização Instagram/Meta Ads',
+        content: `O usuário ${ctx.user.name} solicitou uma sincronização manual dos dados do Instagram e Meta Ads em ${now}.`,
+      });
+      return { success: true, message: 'Solicitação enviada! Os dados serão atualizados em breve.' };
+    } catch {
+      return { success: false, message: 'Não foi possível enviar a solicitação.' };
+    }
   }),
 });
