@@ -126,6 +126,8 @@ export default function InstagramPage() {
     { staleTime: 5 * 60 * 1000 }
   );
   const cacheStatusQuery = trpc.instagram.getCacheStatus.useQuery(undefined, { staleTime: 60 * 1000 });
+  const weeklyTrendQuery = trpc.instagram.getWeeklyTrend.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
+  const ctrAlertsQuery = trpc.instagram.getCtrAlerts.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const requestSyncMut = trpc.instagram.requestSync.useMutation({
     onSuccess: (data) => {
       if (data.success) toast.success(data.message);
@@ -183,6 +185,8 @@ export default function InstagramPage() {
   const adsCampaigns = adsQuery.data?.campaigns ?? [];
   const adsByAd = adsByAdQuery.data ?? [];
   const perf = perfQuery.data;
+  const weeklyTrend = (weeklyTrendQuery.data as any)?.weeks ?? [];
+  const ctrAlerts = (ctrAlertsQuery.data as any) ?? [];
 
   // ── Engagement rate estimado ──────────────────────────────────────────────
   const engagementRate = account?.followers && perf
@@ -507,6 +511,113 @@ export default function InstagramPage() {
                 <CardContent className="pt-10 pb-10 text-center text-muted-foreground">
                   <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
                   <p>Nenhuma campanha encontrada no período.</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Alertas de CTR Baixo ───────────────────────────────────────────────── */}
+            {ctrAlerts.length > 0 && (
+              <Card className="border-red-200 bg-red-50/50 dark:bg-red-950/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2 text-red-600">
+                    <AlertCircle className="w-4 h-4" /> Alerta: CTR Abaixo de 1%
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="text-xs text-muted-foreground mb-3">
+                    As campanhas abaixo estão com CTR crítico (&lt;1%). Considere pausar, ajustar o criativo ou o público-alvo.
+                  </p>
+                  {(ctrAlerts as any[]).map((alert: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between p-2.5 rounded-lg bg-red-100/60 dark:bg-red-900/20">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-red-700 dark:text-red-400 truncate">{alert.campaignName}</p>
+                        <p className="text-xs text-muted-foreground">Semana: {alert.week} · {alert.impressions?.toLocaleString('pt-BR')} impressões</p>
+                      </div>
+                      <div className="text-right shrink-0 ml-3">
+                        <p className="text-sm font-bold text-red-600">{Number(alert.ctr).toFixed(2)}%</p>
+                        <p className="text-xs text-muted-foreground">R${Number(alert.spend).toFixed(2)} gasto</p>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Gráfico de Evolução Semanal ─────────────────────────────────────────── */}
+            {weeklyTrend.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-pink-500" /> Evolução Semanal — CTR e Gasto
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-2 pr-4 text-xs text-muted-foreground font-medium">Semana</th>
+                          <th className="text-right py-2 px-2 text-xs text-muted-foreground font-medium">Impressões</th>
+                          <th className="text-right py-2 px-2 text-xs text-muted-foreground font-medium">Cliques</th>
+                          <th className="text-right py-2 px-2 text-xs text-muted-foreground font-medium">CTR Médio</th>
+                          <th className="text-right py-2 pl-2 text-xs text-muted-foreground font-medium">Gasto</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(weeklyTrend as any[]).map((week: any, i: number) => {
+                          const prevWeek = i > 0 ? weeklyTrend[i - 1] : null;
+                          const ctrDelta = prevWeek ? (week.totals.avgCtr - prevWeek.totals.avgCtr) : 0;
+                          const spendDelta = prevWeek ? (week.totals.spend - prevWeek.totals.spend) : 0;
+                          return (
+                            <tr key={i} className="border-b last:border-0 hover:bg-muted/20">
+                              <td className="py-2.5 pr-4 font-medium text-xs">{week.weekLabel}</td>
+                              <td className="py-2.5 px-2 text-right text-xs">{week.totals.impressions?.toLocaleString('pt-BR')}</td>
+                              <td className="py-2.5 px-2 text-right text-xs">{week.totals.totalClicks?.toLocaleString('pt-BR')}</td>
+                              <td className="py-2.5 px-2 text-right">
+                                <span className={`text-xs font-semibold ${
+                                  week.totals.avgCtr >= 1.5 ? 'text-green-600' :
+                                  week.totals.avgCtr >= 1.0 ? 'text-yellow-600' : 'text-red-500'
+                                }`}>{Number(week.totals.avgCtr).toFixed(2)}%</span>
+                                {prevWeek && (
+                                  <span className={`ml-1 text-xs ${ctrDelta >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                    {ctrDelta >= 0 ? '↑' : '↓'}{Math.abs(ctrDelta).toFixed(2)}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 pl-2 text-right">
+                                <span className="text-xs font-semibold">R${Number(week.totals.spend).toFixed(2)}</span>
+                                {prevWeek && (
+                                  <span className={`ml-1 text-xs ${spendDelta >= 0 ? 'text-orange-500' : 'text-green-500'}`}>
+                                    {spendDelta >= 0 ? '+' : ''}{spendDelta.toFixed(2)}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t bg-muted/20">
+                          <td className="py-2 pr-4 text-xs font-bold">Total</td>
+                          <td className="py-2 px-2 text-right text-xs font-bold">
+                            {(weeklyTrend as any[]).reduce((s: number, w: any) => s + (w.totals.impressions ?? 0), 0).toLocaleString('pt-BR')}
+                          </td>
+                          <td className="py-2 px-2 text-right text-xs font-bold">
+                            {(weeklyTrend as any[]).reduce((s: number, w: any) => s + (w.totals.totalClicks ?? 0), 0).toLocaleString('pt-BR')}
+                          </td>
+                          <td className="py-2 px-2 text-right text-xs font-bold">
+                            {((weeklyTrend as any[]).reduce((s: number, w: any) => s + Number(w.totals.avgCtr), 0) / weeklyTrend.length).toFixed(2)}%
+                          </td>
+                          <td className="py-2 pl-2 text-right text-xs font-bold">
+                            R${(weeklyTrend as any[]).reduce((s: number, w: any) => s + Number(w.totals.spend), 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-3">
+                    ↑ / ↓ indica variação em relação à semana anterior. CTR verde ≥ 1,5% · amarelo ≥ 1% · vermelho &lt; 1%.
+                  </p>
                 </CardContent>
               </Card>
             )}

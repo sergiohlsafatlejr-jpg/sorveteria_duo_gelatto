@@ -234,6 +234,34 @@ export const instagramRouter = router({
     }
   }),
 
+  // ── Tendência semanal de CTR e gasto (últimas 4 semanas) ─────────────────────
+  getWeeklyTrend: protectedProcedure.query(async () => {
+    const cached = await getCacheData('meta_ads_cache', 'weekly_trend') as any;
+    if (!cached) return { weeks: [] };
+    return cached;
+  }),
+
+  // ── Alertas de CTR baixo (< 1%) ───────────────────────────────────────────────
+  getCtrAlerts: protectedProcedure.query(async () => {
+    const cached = await getCacheData('meta_ads_cache', 'weekly_trend') as any;
+    if (!cached?.weeks) return [];
+    const alerts: Array<{ campaignName: string; ctr: number; week: string; spend: number; impressions: number }> = [];
+    for (const week of cached.weeks) {
+      for (const camp of week.campaigns ?? []) {
+        if (camp.ctr < 1.0) {
+          alerts.push({
+            campaignName: camp.name,
+            ctr: camp.ctr,
+            week: week.weekLabel,
+            spend: camp.spend,
+            impressions: camp.impressions,
+          });
+        }
+      }
+    }
+    return alerts;
+  }),
+
   // ── Solicitar sincronização manual (envia notificação ao owner) ─────────────
   requestSync: protectedProcedure.mutation(async ({ ctx }) => {
     try {
