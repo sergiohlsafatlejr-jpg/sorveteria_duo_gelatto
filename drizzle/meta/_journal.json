@@ -162,6 +162,13 @@
       "when": 1777303970963,
       "tag": "0022_talented_master_chief",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1777305009377,
+      "tag": "0023_flimsy_photon",
+      "breakpoints": true
     }
   ]
 }

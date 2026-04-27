@@ -147,4 +147,25 @@ Olá, {{nome}}!
 
 Venha nos visitar! 😊
 📍 Duo Gelatto — Goiânia/GO`,
+
+  welcome: `🍦 *Bem-vindo(a) à Duo Gelatto!* 💜
+
+Olá, {{nome}}! 😊
+
+Você acaba de entrar no nosso *Programa de Fidelidade*!
+A cada compra você acumula pontos e ganha descontos especiais.
+
+🏆 Meta para resgate: *{{meta}} pontos*
+🔗 Acompanhe seu saldo: {{link}}
+
+Obrigado por escolher a Duo Gelatto! 💜`,
+
+  birthday: `🎂 *Feliz Aniversário, {{nome}}!* 🎉
+
+A equipe da *Duo Gelatto* deseja um dia muito especial para você! 💜
+
+🍦 Como presente, venha nos visitar hoje e ganhe uma surpresa especial!
+📊 Seu saldo atual: *{{saldo}} pontos*
+
+Com carinho, Duo Gelatto 💜`,
 };

@@ -422,10 +422,14 @@ export const whatsappConfig = mysqlTable("whatsapp_config", {
   msgGoalNear: text("msgGoalNear"),         // Mensagem quando próximo da meta (80%)
   msgGoalReached: text("msgGoalReached"),   // Mensagem ao atingir a meta
   msgPromotion: text("msgPromotion"),       // Mensagem de promoção genérica
+  msgWelcome: text("msgWelcome"),            // Mensagem de boas-vindas ao cadastrar
+  msgBirthday: text("msgBirthday"),          // Mensagem de feliz aniversário
   // Notification toggles
   notifyOnPoints: boolean("notifyOnPoints").default(true).notNull(),
   notifyOnGoalNear: boolean("notifyOnGoalNear").default(true).notNull(),
   notifyOnGoalReached: boolean("notifyOnGoalReached").default(true).notNull(),
+  notifyOnWelcome: boolean("notifyOnWelcome").default(true).notNull(),
+  notifyOnBirthday: boolean("notifyOnBirthday").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

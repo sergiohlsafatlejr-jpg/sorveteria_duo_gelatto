@@ -71,6 +71,56 @@ const customersRouter = router({
         targetId: id,
         details: `Cliente criado: ${input.fullName}`,
       });
+      // ── WhatsApp boas-vindas (fire-and-forget) ────────────────────────────
+      if (input.phone) {
+        void (async () => {
+          try {
+            const { getWhatsappConfig, createWhatsappLog } = await import("./db.whatsapp");
+            const { sendWhatsAppMessage, buildMessage, DEFAULT_TEMPLATES } = await import("./zapi");
+            const waConfig = await getWhatsappConfig();
+            if (!waConfig || !waConfig.active || !waConfig.notifyOnWelcome) return;
+            const rules = await db.getPointsRules();
+            const meta = rules[0]?.rewardThreshold ?? 100;
+            // Gerar token de fidelidade para o link
+            const { customerLoyaltyTokens } = await import("../drizzle/schema");
+            const { getDb } = await import("./db");
+            const dbInst = await getDb();
+            const { eq } = await import("drizzle-orm");
+            const cryptoMod = await import("crypto");
+            let loyaltyToken: string;
+            if (dbInst) {
+              const existingToken = await dbInst.select().from(customerLoyaltyTokens).where(eq(customerLoyaltyTokens.customerId, id)).limit(1);
+              if (existingToken.length > 0) {
+                loyaltyToken = existingToken[0].token;
+              } else {
+                loyaltyToken = cryptoMod.randomBytes(32).toString("hex");
+                await dbInst.insert(customerLoyaltyTokens).values({ customerId: id, token: loyaltyToken });
+              }
+            } else {
+              loyaltyToken = cryptoMod.randomBytes(32).toString("hex");
+            }
+            const link = `https://duogelatto-wyap3gu8.manus.space/fidelidade/${loyaltyToken}`;
+            const template = waConfig.msgWelcome || DEFAULT_TEMPLATES.welcome;
+            const message = buildMessage(template, { nome: input.fullName, meta, link });
+            const result = await sendWhatsAppMessage(
+              { instanceId: waConfig.instanceId, token: waConfig.token },
+              input.phone!,
+              message
+            );
+            await createWhatsappLog({
+              customerId: id,
+              phone: input.phone!,
+              type: "welcome",
+              message,
+              status: result.success ? "sent" : "failed",
+              errorMessage: result.error ?? null,
+              sentAt: result.success ? new Date() : undefined,
+            });
+          } catch (err) {
+            console.error("[WhatsApp] Welcome error:", err);
+          }
+        })();
+      }
       return { id };
     }),
 
@@ -290,35 +340,30 @@ const pointsRouter = router({
         void (async () => {
           try {
             const { getWhatsappConfig, createWhatsappLog } = await import("./db.whatsapp");
-            const { sendWhatsAppMessage, buildMessage } = await import("./zapi");
+               const { sendWhatsAppMessage, buildMessage, DEFAULT_TEMPLATES } = await import("./zapi");
             const waConfig = await getWhatsappConfig();
             if (!waConfig || !waConfig.active || !waConfig.notifyOnPoints) return;
-
             const customer = await db.getCustomerById(input.customerId);
             if (!customer || !customer.phone) return;
-
             const rules = await db.getPointsRules();
             const activeRule = rules[0];
             const meta = activeRule ? activeRule.rewardThreshold : 100;
             const saldo = customer.totalPoints;
             const faltam = Math.max(0, meta - saldo);
             const pct = saldo / meta;
-
             // Determine which message to send
             let template: string | null = null;
             let type = "points_earned";
-
             if (saldo >= meta && waConfig.notifyOnGoalReached) {
-              template = waConfig.msgGoalReached;
+              template = waConfig.msgGoalReached || DEFAULT_TEMPLATES.goalReached;
               type = "goal_reached";
             } else if (pct >= 0.8 && waConfig.notifyOnGoalNear) {
-              template = waConfig.msgGoalNear;
+              template = waConfig.msgGoalNear || DEFAULT_TEMPLATES.goalNear;
               type = "goal_near";
             } else if (waConfig.notifyOnPoints) {
-              template = waConfig.msgPointsEarned;
+              template = waConfig.msgPointsEarned || DEFAULT_TEMPLATES.pointsEarned;
               type = "points_earned";
             }
-
             if (!template) return;
 
             const message = buildMessage(template, {

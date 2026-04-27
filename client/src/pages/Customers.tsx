@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { ChevronDown, ChevronUp, Edit, Gift, Plus, Search, ShoppingBag, ShoppingCart, TrendingUp, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Edit, Gift, Link2, Plus, Search, ShoppingBag, ShoppingCart, TrendingUp, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -329,6 +329,26 @@ export default function Customers() {
                       <p className="text-xs text-muted-foreground">{c.phone ?? "—"}</p>
                     </div>
                     <div className="flex gap-1 shrink-0 ml-2">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-pink-600 hover:text-pink-700"
+                        title="Copiar link de fidelidade"
+                        onClick={async () => {
+                          try {
+                            const result = await utils.points.getPublicToken.fetch({ customerId: c.id });
+                            if (result) {
+                              const url = `${window.location.origin}/fidelidade/${result}`;
+                              await navigator.clipboard.writeText(url);
+                              toast.success(`Link copiado! Cole no WhatsApp para ${c.fullName}`);
+                            }
+                          } catch {
+                            toast.error("Erro ao gerar link de fidelidade");
+                          }
+                        }}
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"
