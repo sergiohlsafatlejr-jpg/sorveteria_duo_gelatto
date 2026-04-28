@@ -4,16 +4,18 @@
  * Autenticação: cookie app_session_id (role: user ou admin)
  */
 import { Router } from "express";
-import { getDb } from "../db";
+import { getDb, getUserByOpenId } from "../db";
 import {
   inoveConnectorConfig,
   products,
   stockMovements,
+  finDailyRevenue,
 } from "../../drizzle/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import * as mssqlLib from "mssql";
 import { notifyOwner } from "../_core/notification";
 import { sdk } from "../_core/sdk";
+import { ENV } from "../_core/env";
 
 // ── Tipo do pool mssql ──────────────────────────────────────────────────────
 type MssqlPool = {
@@ -177,6 +179,107 @@ async function runSyncStock() {
 
 // ── Router Express ──────────────────────────────────────────────────────────
 export const scheduledRouter = Router();
+
+// ── Sincronizar vendas do dia anterior do INOVE → Previsão de Faturamento ──
+async function runSyncRevenue(): Promise<{ date: string; total: number; alreadyExisted: boolean }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB indisponível");
+
+  // Buscar config do conector INOVE
+  const rows = await db.select().from(inoveConnectorConfig).limit(1);
+  if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE não está ativo");
+  const config = rows[0];
+
+  // Conectar ao SQL Server INOVE
+  const pool = await createInovePool(config);
+  try {
+    // Buscar total de vendas do dia anterior (horário de Brasília = GETDATE()-1)
+    const result = await pool.request().query(`
+      SELECT
+        CAST(DATEADD(day, -1, CAST(GETDATE() as date)) as varchar(10)) as data_ontem,
+        CAST(ISNULL(SUM(VEN_TOTAL), 0) as float) as total_vendas,
+        COUNT(*) as qtd_vendas
+      FROM VENDAS
+      WHERE VEN_SITUACAO = 2
+        AND CAST(VEN_DATA_FIM as date) = CAST(DATEADD(day, -1, GETDATE()) as date)
+    `);
+    await pool.close();
+
+    const row = result.recordset[0] as { data_ontem: string; total_vendas: number; qtd_vendas: number };
+    if (!row || !row.data_ontem) throw new Error("Nenhum dado retornado do INOVE");
+
+    const revenueDate = row.data_ontem; // YYYY-MM-DD
+    const totalVendas = row.total_vendas ?? 0;
+
+    // Buscar userId do dono do sistema
+    const ownerUser = await getUserByOpenId(ENV.ownerOpenId);
+    if (!ownerUser) throw new Error("Usuário dono não encontrado no sistema");
+
+    // Verificar se já existe registro para essa data
+    const existing = await db.select()
+      .from(finDailyRevenue)
+      .where(and(
+        eq(finDailyRevenue.userId, ownerUser.id),
+        eq(finDailyRevenue.revenueDate, revenueDate),
+      ))
+      .limit(1);
+
+    const alreadyExisted = existing.length > 0;
+
+    if (alreadyExisted) {
+      // Atualizar se já existe
+      await db.update(finDailyRevenue)
+        .set({
+          realAmount: String(totalVendas.toFixed(2)),
+          note: `Importado automaticamente do PDV INOVE (${row.qtd_vendas} vendas)`,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(finDailyRevenue.userId, ownerUser.id),
+          eq(finDailyRevenue.revenueDate, revenueDate),
+        ));
+    } else {
+      // Inserir novo registro
+      await db.insert(finDailyRevenue).values({
+        userId: ownerUser.id,
+        revenueDate,
+        realAmount: String(totalVendas.toFixed(2)),
+        note: `Importado automaticamente do PDV INOVE (${row.qtd_vendas} vendas)`,
+      });
+    }
+
+    return { date: revenueDate, total: totalVendas, alreadyExisted };
+  } catch (err) {
+    await pool.close().catch(() => {});
+    throw new Error(err instanceof Error ? err.message : String(err));
+  }
+}
+
+scheduledRouter.post("/api/scheduled/sync-revenue", async (req, res) => {
+  try {
+    const user = await sdk.authenticateRequest(req).catch(() => null);
+    if (!user) {
+      res.status(401).json({ error: "Não autorizado" });
+      return;
+    }
+
+    const result = await runSyncRevenue();
+
+    const action = result.alreadyExisted ? "atualizado" : "registrado";
+    const msg = `✅ Faturamento real ${action} automaticamente:\n• Data: ${result.date}\n• Total vendas INOVE: R$ ${result.total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n• Previsão de Faturamento atualizada`;
+    await notifyOwner({ title: "Faturamento Real INOVE Sincronizado", content: msg }).catch(() => {});
+
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[scheduled/sync-revenue] Erro:", message);
+    await notifyOwner({
+      title: "❌ Falha na Sincronização de Faturamento",
+      content: `Erro ao importar vendas do INOVE para Previsão de Faturamento: ${message}`,
+    }).catch(() => {});
+    res.status(500).json({ error: message });
+  }
+});
 
 scheduledRouter.post("/api/scheduled/sync-stock", async (req, res) => {
   try {
