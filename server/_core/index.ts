@@ -8,6 +8,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { salesImportExpressRouter } from "../routers/sales-import";
+import { scheduledRouter } from "../routers/scheduledRoutes";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -38,6 +39,8 @@ async function startServer() {
   registerOAuthRoutes(app);
   // Sales import file upload
   app.use(salesImportExpressRouter);
+  // Scheduled tasks endpoints
+  app.use(scheduledRouter);
   // tRPC API
   app.use(
     "/api/trpc",
