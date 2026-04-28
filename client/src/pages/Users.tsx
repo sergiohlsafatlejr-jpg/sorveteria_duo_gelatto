@@ -113,6 +113,15 @@ const MODULE_GROUPS = [
     ],
   },
   {
+    group: "Relatórios INOVE",
+    color: "text-teal-600",
+    modules: [
+      { key: "inove-product-sales", label: "Vendas por Produto" },
+      { key: "inove-cost-margin", label: "Custo x Margem" },
+      { key: "inove-managerial", label: "Relatórios Gerenciais" },
+    ],
+  },
+  {
     group: "Administração",
     color: "text-red-600",
     modules: [

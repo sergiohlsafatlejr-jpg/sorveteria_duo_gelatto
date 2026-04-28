@@ -47,6 +47,9 @@ import AdLibrary from "./pages/AdLibrary";
 import GiroEstoque from "./pages/GiroEstoque";
 import InoveConnector from "./pages/InoveConnector";
 import InoveReports from "./pages/InoveReports";
+import InoveProductSales from "./pages/InoveProductSales";
+import InoveCostMargin from "./pages/InoveCostMargin";
+import InoveManagerial from "./pages/InoveManagerial";
 import PublicLoyalty from "./pages/PublicLoyalty";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
@@ -100,6 +103,9 @@ function Router() {
       <Route path="/connector">{() => <ProtectedRoute path="/connector"><Connector /></ProtectedRoute>}</Route>
       <Route path="/inove-connector">{() => <ProtectedRoute path="/inove-connector"><InoveConnector /></ProtectedRoute>}</Route>
       <Route path="/inove-reports">{() => <ProtectedRoute path="/inove-reports"><InoveReports /></ProtectedRoute>}</Route>
+      <Route path="/inove/product-sales">{() => <ProtectedRoute path="/inove/product-sales"><InoveProductSales /></ProtectedRoute>}</Route>
+      <Route path="/inove/cost-margin">{() => <ProtectedRoute path="/inove/cost-margin"><InoveCostMargin /></ProtectedRoute>}</Route>
+      <Route path="/inove/managerial">{() => <ProtectedRoute path="/inove/managerial"><InoveManagerial /></ProtectedRoute>}</Route>
       {/* Página pública de fidelidade — sem login */}
       <Route path="/fidelidade/:token" component={PublicLoyalty} />
       {/* Acesso negado */}

@@ -1248,5 +1248,240 @@ export const inoveRouter = router({
       }
     }),
 
+  // ── Relatório de Vendas por Produto (mês selecionado vs mês anterior) ────────
+  getSalesByProduct: protectedProcedure
+    .input(z.object({ month: z.string() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE inativo");
+      const config = rows[0];
+      const [year, month] = input.month.split("-").map(Number);
+      const prevDate = new Date(year, month - 2, 1);
+      const prevYear = prevDate.getFullYear();
+      const prevMonth = prevDate.getMonth() + 1;
+      try {
+        const pool = await createInovePool(config);
+        const currRes = await pool.request().query(`
+          SELECT
+            p.PRODUTO as produtoId,
+            p.PRO_DESCRICAO as nome,
+            p.PRO_CODIGO as codPdv,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamento
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND YEAR(v.VEN_DATA_FIM) = ${year}
+            AND MONTH(v.VEN_DATA_FIM) = ${month}
+          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO
+          ORDER BY faturamento DESC
+        `);
+        const prevRes = await pool.request().query(`
+          SELECT
+            p.PRODUTO as produtoId,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamento
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND YEAR(v.VEN_DATA_FIM) = ${prevYear}
+            AND MONTH(v.VEN_DATA_FIM) = ${prevMonth}
+          GROUP BY p.PRODUTO
+        `);
+        await pool.close();
+        type CurrRow = { produtoId: number; nome: string; codPdv: string; qtd: number; faturamento: number };
+        type PrevRow = { produtoId: number; qtd: number; faturamento: number };
+        const curr = currRes.recordset as CurrRow[];
+        const prev = prevRes.recordset as PrevRow[];
+        const prevMap = new Map(prev.map(p => [Number(p.produtoId), p]));
+        const top10 = curr.slice(0, 10).map(c => {
+          const p = prevMap.get(Number(c.produtoId));
+          const variacao = p && Number(p.faturamento) > 0
+            ? ((Number(c.faturamento) - Number(p.faturamento)) / Number(p.faturamento)) * 100
+            : null;
+          return {
+            produtoId: Number(c.produtoId),
+            nome: c.nome,
+            codPdv: c.codPdv,
+            qtd: Number(c.qtd),
+            faturamento: Number(c.faturamento),
+            faturamentoPrev: p ? Number(p.faturamento) : null,
+            qtdPrev: p ? Number(p.qtd) : null,
+            variacao,
+          };
+        });
+        const totalFaturamento = curr.reduce((s, c) => s + Number(c.faturamento), 0);
+        const totalQtd = curr.reduce((s, c) => s + Number(c.qtd), 0);
+        const totalFaturamentoPrev = prev.reduce((s, p) => s + Number(p.faturamento), 0);
+        const top10Faturamento = top10.reduce((s, c) => s + c.faturamento, 0);
+        const top10Qtd = top10.reduce((s, c) => s + c.qtd, 0);
+        return {
+          month: input.month,
+          prevMonth: `${prevYear}-${String(prevMonth).padStart(2, '0')}`,
+          top10,
+          totalFaturamento,
+          totalQtd,
+          totalFaturamentoPrev,
+          top10Faturamento,
+          top10Qtd,
+          totalProdutos: curr.length,
+        };
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+  // ── Relatório de Custo x Margem com dados reais de vendas do INOVE ──────────
+  getCostMarginFull: protectedProcedure
+    .input(z.object({
+      search: z.string().optional(),
+      sortBy: z.enum(["revenue", "margin", "profit", "qty"]).default("revenue"),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE inativo");
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const sf = input.search
+          ? `AND p.PRO_DESCRICAO LIKE '%${input.search.replace(/'/g, "''")}%'`
+          : "";
+        const res = await pool.request().query(`
+          SELECT
+            p.PRODUTO as produtoId,
+            p.PRO_DESCRICAO as nome,
+            p.PRO_CODIGO as codPdv,
+            ISNULL(CAST(p.PRO_CUSTO as float), 0) as custo,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as receita,
+            CAST(AVG(iv.ITE_VALOR) as float) as precoMedio
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= DATEADD(month, -12, GETDATE())
+            ${sf}
+          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_CUSTO
+          ORDER BY receita DESC
+        `);
+        await pool.close();
+        type Row = { produtoId: number; nome: string; codPdv: string; custo: number; qtd: number; receita: number; precoMedio: number };
+        const data = (res.recordset as Row[]).map(r => {
+          const custo = Number(r.custo);
+          const qtd = Number(r.qtd);
+          const receita = Number(r.receita);
+          const precoMedio = Number(r.precoMedio);
+          const cmv = custo * qtd;
+          const lucroBruto = receita - cmv;
+          const margem = receita > 0 ? (lucroBruto / receita) * 100 : 0;
+          return { produtoId: Number(r.produtoId), nome: r.nome, codPdv: r.codPdv, custo, qtd, receita, precoMedio, cmv, lucroBruto, margem, semCusto: custo === 0 };
+        });
+        data.sort((a, b) => {
+          if (input.sortBy === "margin") return b.margem - a.margem;
+          if (input.sortBy === "profit") return b.lucroBruto - a.lucroBruto;
+          if (input.sortBy === "qty") return b.qtd - a.qtd;
+          return b.receita - a.receita;
+        });
+        const totalReceita = data.reduce((s, r) => s + r.receita, 0);
+        const totalCmv = data.filter(r => !r.semCusto).reduce((s, r) => s + r.cmv, 0);
+        const totalLucro = data.filter(r => !r.semCusto).reduce((s, r) => s + r.lucroBruto, 0);
+        return {
+          items: data,
+          totalReceita,
+          totalCmv,
+          totalLucro,
+          margemGeral: totalReceita > 0 ? (totalLucro / totalReceita) * 100 : 0,
+          semCustoCount: data.filter(r => r.semCusto).length,
+        };
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+  // ── Relatório Gerencial: KPIs + Top Receita + Top Qtd + Pagamentos + Estoque ─
+  getManagerialReport: protectedProcedure
+    .input(z.object({ month: z.string().optional() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE inativo");
+      const config = rows[0];
+      const dateFilter = input.month
+        ? `AND YEAR(v.VEN_DATA_FIM) = ${input.month.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.month.split('-')[1]}`
+        : `AND v.VEN_DATA_FIM >= DATEADD(month, -12, GETDATE())`;
+      const dateFilterSimple = input.month
+        ? `AND YEAR(VEN_DATA_FIM) = ${input.month.split('-')[0]} AND MONTH(VEN_DATA_FIM) = ${input.month.split('-')[1]}`
+        : `AND VEN_DATA_FIM >= DATEADD(month, -12, GETDATE())`;
+      try {
+        const pool = await createInovePool(config);
+        const topReceita = await pool.request().query(`
+          SELECT TOP 10 p.PRO_DESCRICAO as nome,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as receita,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd
+          FROM ITENS_VENDAS iv JOIN VENDAS v ON v.VENDA = iv.VENDA JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2 ${dateFilter}
+          GROUP BY p.PRO_DESCRICAO ORDER BY receita DESC
+        `);
+        const topQtd = await pool.request().query(`
+          SELECT TOP 10 p.PRO_DESCRICAO as nome,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as receita
+          FROM ITENS_VENDAS iv JOIN VENDAS v ON v.VENDA = iv.VENDA JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2 ${dateFilter}
+          GROUP BY p.PRO_DESCRICAO ORDER BY qtd DESC
+        `);
+        const pagamentos = await pool.request().query(`
+          SELECT fp.PAG_NOME as forma,
+            CAST(SUM(pv.PAG_VALOR) as float) as total,
+            COUNT(DISTINCT pv.VENDA) as qtdVendas
+          FROM PAGAMENTOS_VENDAS pv
+          JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+          JOIN VENDAS v ON v.VENDA = pv.VENDA
+          WHERE v.VEN_SITUACAO = 2 ${dateFilter}
+          GROUP BY fp.PAG_NOME ORDER BY total DESC
+        `);
+        const kpis = await pool.request().query(`
+          SELECT COUNT(DISTINCT v.VENDA) as totalVendas,
+            CAST(SUM(v.VEN_TOTAL) as float) as receita,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as itensVendidos,
+            COUNT(DISTINCT p.PRODUTO) as produtosAnalisados
+          FROM VENDAS v JOIN ITENS_VENDAS iv ON iv.VENDA = v.VENDA JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2 ${dateFilter}
+        `);
+        const estoque = await pool.request().query(`
+          SELECT TOP 50 p.PRO_DESCRICAO as nome, p.PRO_CODIGO as codigo,
+            ISNULL(CAST(p.PRO_CUSTO as float), 0) as custo,
+            ISNULL(CAST(p.PRO_VENDA as float), 0) as venda,
+            ISNULL((SELECT TOP 1 CAST(MVE_SALDO_ATUAL as float) FROM MOVIMENTOS_ESTOQUES me WHERE me.PRODUTO = p.PRODUTO ORDER BY me.MOVIMENTO_ESTOQUE DESC), 0) as saldo
+          FROM PRODUTOS p WHERE p.PRO_ATIVO = 1 ORDER BY p.PRO_DESCRICAO
+        `);
+        await pool.close();
+        type KpiRow = { totalVendas: number; receita: number; itensVendidos: number; produtosAnalisados: number };
+        const k = (kpis.recordset[0] as KpiRow) ?? { totalVendas: 0, receita: 0, itensVendidos: 0, produtosAnalisados: 0 };
+        return {
+          kpis: {
+            totalVendas: Number(k.totalVendas),
+            receita: Number(k.receita),
+            itensVendidos: Number(k.itensVendidos),
+            produtosAnalisados: Number(k.produtosAnalisados),
+            ticketMedio: Number(k.itensVendidos) > 0 ? Number(k.receita) / Number(k.itensVendidos) : 0,
+          },
+          topReceita: (topReceita.recordset as Array<{ nome: string; receita: number; qtd: number }>).map(r => ({ nome: r.nome, receita: Number(r.receita), qtd: Number(r.qtd) })),
+          topQtd: (topQtd.recordset as Array<{ nome: string; qtd: number; receita: number }>).map(r => ({ nome: r.nome, qtd: Number(r.qtd), receita: Number(r.receita) })),
+          pagamentos: (pagamentos.recordset as Array<{ forma: string; total: number; qtdVendas: number }>).map(r => ({ forma: r.forma, total: Number(r.total), qtdVendas: Number(r.qtdVendas) })),
+          estoque: (estoque.recordset as Array<{ nome: string; codigo: string; custo: number; venda: number; saldo: number }>).map(r => ({ nome: r.nome, codigo: r.codigo, custo: Number(r.custo), venda: Number(r.venda), saldo: Number(r.saldo) })),
+        };
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
 });
 

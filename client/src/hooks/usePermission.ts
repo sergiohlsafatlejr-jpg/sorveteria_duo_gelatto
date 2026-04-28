@@ -54,6 +54,9 @@ const PATH_TO_MODULE: Record<string, string> = {
   "/fin/costs-register": "fin-costs",
   "/fin/settings": "fin-dashboard",
   "/fin/monthly-comparison": "fin-dre",
+  "/inove/product-sales": "inove-product-sales",
+  "/inove/cost-margin": "inove-cost-margin",
+  "/inove/managerial": "inove-managerial",
 };
 
 // Permissões padrão por papel (fallback quando não há permissão customizada)
