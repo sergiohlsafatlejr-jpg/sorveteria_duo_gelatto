@@ -721,7 +721,205 @@ export const inoveRouter = router({
       }
     }),
 
-  // ── Detalhes de uma venda do INOVE ────────────────────────────────────────
+  // ── Sincronizar estoque INOVE → sistema local ───────────────────────────────────────────
+  syncStockFromInove: adminProcedure.mutation(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const rows = await db.select().from(inoveConnectorConfig).limit(1);
+    if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE não está ativo");
+    const config = rows[0];
+    const pool = await createInovePool(config);
+    try {
+      // Buscar todos os produtos do INOVE com saldo e custo
+      const result = await pool.request().query(`
+        SELECT
+          p.PRODUTO as inove_id,
+          p.PRO_NOME as nome,
+          p.PRO_CODIGO_BARRAS as barcode,
+          CAST(ISNULL(p.PRO_CUSTO, 0) as float) as custo,
+          CAST(ISNULL(p.PRO_VENDA, 0) as float) as venda,
+          CAST(ISNULL(
+            (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
+             WHERE PRODUTO = p.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC), 0
+          ) as float) as saldo
+        FROM PRODUTOS p
+        WHERE p.PRO_ATIVO = 'S' AND p.PRO_ESTOQUE = 'S'
+        ORDER BY p.PRO_NOME
+      `);
+      await pool.close();
+
+      const inoveProducts = result.recordset as Array<{
+        inove_id: number; nome: string; barcode: string | null;
+        custo: number; venda: number; saldo: number;
+      }>;
+
+      // Buscar produtos locais para vincular por barcode ou externalCode
+      const { products, stockMovements } = await import("../../drizzle/schema");
+      const localProducts = await db.select({
+        id: products.id,
+        name: products.name,
+        barcode: products.barcode,
+        externalCode: products.externalCode,
+        currentStock: products.currentStock,
+      }).from(products).where(eq(products.active, true));
+
+      let synced = 0;
+      let created = 0;
+      let costUpdated = 0;
+      const errors: string[] = [];
+
+      for (const ip of inoveProducts) {
+        try {
+          const bc = ip.barcode ? String(ip.barcode).trim() : null;
+          // Tentar vincular: barcode local = barcode INOVE, ou externalCode = barcode INOVE
+          let local = bc
+            ? localProducts.find(lp =>
+                (lp.barcode && lp.barcode.trim() === bc) ||
+                (lp.externalCode && lp.externalCode.trim() === bc)
+              )
+            : undefined;
+
+          const saldoInt = Math.round(ip.saldo);
+
+          if (local) {
+            // Atualizar saldo e custo
+            const updates: Record<string, unknown> = {
+              currentStock: saldoInt,
+              updatedAt: new Date(),
+            };
+            if (ip.custo > 0) {
+              updates.costPrice = String(ip.custo.toFixed(2));
+              costUpdated++;
+            }
+            await db.update(products).set(updates).where(eq(products.id, local.id));
+
+            // Registrar movimentação de ajuste se saldo mudou
+            if (local.currentStock !== saldoInt) {
+              await db.insert(stockMovements).values({
+                productId: local.id,
+                type: "adjustment",
+                quantity: Math.abs(saldoInt - local.currentStock),
+                previousStock: local.currentStock,
+                newStock: saldoInt,
+                reason: `Sincronização INOVE (barcode: ${bc ?? ip.inove_id})`,
+              });
+            }
+            synced++;
+          } else if (ip.nome && ip.nome.trim().length > 1) {
+            // Criar produto novo no sistema local
+            const newProd = await db.insert(products).values({
+              name: ip.nome.trim(),
+              barcode: bc ?? undefined,
+              externalCode: bc ?? String(ip.inove_id),
+              costPrice: ip.custo > 0 ? String(ip.custo.toFixed(2)) : "0.00",
+              salePrice: ip.venda > 0 ? String(ip.venda.toFixed(2)) : "0.00",
+              currentStock: saldoInt,
+              minStock: 5,
+              unit: "un",
+              active: true,
+            });
+            const newId = (newProd as unknown as { insertId: number }).insertId;
+            if (saldoInt !== 0) {
+              await db.insert(stockMovements).values({
+                productId: newId,
+                type: "adjustment",
+                quantity: Math.abs(saldoInt),
+                previousStock: 0,
+                newStock: saldoInt,
+                reason: `Importado do INOVE (barcode: ${bc ?? ip.inove_id})`,
+              });
+            }
+            created++;
+          }
+        } catch (e) {
+          errors.push(`${ip.nome}: ${String(e)}`);
+        }
+      }
+
+      return { synced, created, costUpdated, total: inoveProducts.length, errors: errors.slice(0, 10) };
+    } catch (err) {
+      await pool.close().catch(() => {});
+      throw new Error(err instanceof Error ? err.message : String(err));
+    }
+  }),
+
+  // ── Vendas por Hora (relatório) ─────────────────────────────────────────────────────────
+  getSalesByHour: protectedProcedure
+    .input(z.object({
+      days: z.number().int().min(1).max(365).default(30),
+      dateFrom: z.string().optional(),
+      dateTo: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return [];
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        let dateFilter = `VEN_DATA_FIM >= DATEADD(day, -${input.days}, GETDATE())`;
+        if (input.dateFrom && input.dateTo) {
+          dateFilter = `VEN_DATA_FIM >= '${input.dateFrom}' AND VEN_DATA_FIM <= '${input.dateTo} 23:59:59'`;
+        }
+        const result = await pool.request().query(`
+          SELECT
+            DATEPART(HOUR, VEN_DATA_FIM) as hora,
+            COUNT(*) as qtd_vendas,
+            CAST(SUM(VEN_TOTAL) as float) as total,
+            CAST(AVG(VEN_TOTAL) as float) as ticket_medio
+          FROM VENDAS
+          WHERE VEN_SITUACAO = 2 AND ${dateFilter}
+          GROUP BY DATEPART(HOUR, VEN_DATA_FIM)
+          ORDER BY hora
+        `);
+        await pool.close();
+        return result.recordset as Array<{ hora: number; qtd_vendas: number; total: number; ticket_medio: number }>;
+      } catch {
+        return [];
+      }
+    }),
+
+  // ── Vendas por Tipo de Pagamento (relatório) ────────────────────────────────────────────
+  getSalesByPaymentType: protectedProcedure
+    .input(z.object({
+      days: z.number().int().min(1).max(365).default(30),
+      dateFrom: z.string().optional(),
+      dateTo: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return [];
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        let dateFilter = `v.VEN_DATA_FIM >= DATEADD(day, -${input.days}, GETDATE())`;
+        if (input.dateFrom && input.dateTo) {
+          dateFilter = `v.VEN_DATA_FIM >= '${input.dateFrom}' AND v.VEN_DATA_FIM <= '${input.dateTo} 23:59:59'`;
+        }
+        const result = await pool.request().query(`
+          SELECT
+            fp.PAG_NOME as forma,
+            COUNT(DISTINCT pv.VENDA) as qtd_vendas,
+            CAST(SUM(pv.PAG_VALOR) as float) as total,
+            CAST(AVG(pv.PAG_VALOR) as float) as ticket_medio
+          FROM PAGAMENTOS_VENDAS pv
+          JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+          JOIN VENDAS v ON v.VENDA = pv.VENDA
+          WHERE v.VEN_SITUACAO = 2 AND ${dateFilter}
+          GROUP BY fp.PAG_NOME
+          ORDER BY total DESC
+        `);
+        await pool.close();
+        return result.recordset as Array<{ forma: string; qtd_vendas: number; total: number; ticket_medio: number }>;
+      } catch {
+        return [];
+      }
+    }),
+
+  // ── Detalhes de uma venda do INOVE ────────────────────────────────────────────────
   getSaleDetail: protectedProcedure
     .input(z.object({ vendaId: z.number().int() }))
     .query(async ({ input }) => {
