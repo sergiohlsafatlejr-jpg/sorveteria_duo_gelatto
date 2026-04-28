@@ -32,33 +32,34 @@ import {
   History,
   Wifi,
   WifiOff,
+  TrendingUp,
+  Users,
+  ShoppingCart,
+  Star,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 export default function InoveConnector() {
   const [formData, setFormData] = useState({
-    host: "",
-    port: 3306,
-    database: "",
-    username: "",
+    host: "duo-urias.safatle.net.br",
+    port: 55444,
+    database: "DUOGELATTO",
+    username: "sa",
     password: "",
     syncIntervalMinutes: 5,
   });
   const [syncConfig, setSyncConfig] = useState({
-    salesTableName: "vendas",
-    dateField: "data_venda",
-    amountField: "valor_total",
-    cpfField: "cpf_cliente",
-    phoneField: "telefone_cliente",
-    customerNameField: "nome_cliente",
     hoursBack: 24,
+    pointsPerReal: 1,
+    minAmount: 5,
   });
   const [showPassword, setShowPassword] = useState(false);
   const [tables, setTables] = useState<string[]>([]);
 
   const { data: config, refetch: refetchConfig } = trpc.inove.getConfig.useQuery();
   const { data: syncHistory, refetch: refetchHistory } = trpc.inove.getSyncHistory.useQuery();
+  const { data: stats } = trpc.inove.getStats.useQuery();
 
   const saveConfig = trpc.inove.saveConfig.useMutation({
     onSuccess: () => { toast.success("Configuração salva!"); refetchConfig(); },
@@ -74,7 +75,7 @@ export default function InoveConnector() {
     onSuccess: (data) => {
       if (data.success) {
         toast.success(data.message);
-        if (data.tables) setTables(data.tables);
+        if (data.tables) setTables(data.tables.slice(0, 20));
       } else {
         toast.error(data.message);
       }
@@ -83,11 +84,11 @@ export default function InoveConnector() {
     onError: (e) => toast.error(e.message),
   });
 
-  const listTables = trpc.inove.listTables.useQuery(undefined, { enabled: false });
-
   const syncSales = trpc.inove.syncSales.useMutation({
     onSuccess: (data) => {
-      toast.success(`Sincronização concluída! ${data.salesProcessed}/${data.salesFound} vendas processadas, ${data.customersLinked} clientes criados.`);
+      toast.success(
+        `Sincronização concluída! ${data.salesProcessed}/${data.salesFound} vendas, ${data.pointsGranted} pontos lançados, ${data.customersLinked} clientes criados.`
+      );
       refetchHistory();
       refetchConfig();
     },
@@ -106,6 +107,17 @@ export default function InoveConnector() {
     ? "text-green-600" : config?.lastSyncStatus === "error"
     ? "text-red-600" : "text-yellow-600";
 
+  const inoStats = stats as {
+    total_vendas?: number;
+    finalizadas?: number;
+    com_cliente?: number;
+    faturado_total?: number;
+    primeira_venda?: string;
+    ultima_venda?: string;
+    total_clientes?: number;
+    error?: string;
+  } | null;
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6 max-w-5xl mx-auto">
@@ -117,7 +129,9 @@ export default function InoveConnector() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Conector INOVE PDV</h1>
-              <p className="text-sm text-gray-500">Integração direta com o banco de dados do sistema INOVE</p>
+              <p className="text-sm text-gray-500">
+                Integração com SQL Server — banco <strong>DUOGELATTO</strong>
+              </p>
             </div>
           </div>
           {config && (
@@ -133,6 +147,60 @@ export default function InoveConnector() {
             </div>
           )}
         </div>
+
+        {/* KPIs do banco INOVE */}
+        {inoStats && !inoStats.error && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="border-0 bg-blue-50">
+              <CardContent className="pt-4 pb-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <ShoppingCart className="w-4 h-4 text-blue-600" />
+                  <span className="text-xs text-blue-600 font-medium">Vendas Finalizadas</span>
+                </div>
+                <p className="text-2xl font-bold text-blue-700">
+                  {(inoStats.finalizadas ?? 0).toLocaleString("pt-BR")}
+                </p>
+                <p className="text-xs text-blue-500 mt-1">de {(inoStats.total_vendas ?? 0).toLocaleString("pt-BR")} total</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 bg-green-50">
+              <CardContent className="pt-4 pb-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingUp className="w-4 h-4 text-green-600" />
+                  <span className="text-xs text-green-600 font-medium">Faturamento Total</span>
+                </div>
+                <p className="text-2xl font-bold text-green-700">
+                  R$ {((inoStats.faturado_total ?? 0) / 1000).toFixed(0)}k
+                </p>
+                <p className="text-xs text-green-500 mt-1">desde {inoStats.primeira_venda ? new Date(inoStats.primeira_venda).toLocaleDateString("pt-BR") : "—"}</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 bg-purple-50">
+              <CardContent className="pt-4 pb-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Users className="w-4 h-4 text-purple-600" />
+                  <span className="text-xs text-purple-600 font-medium">Clientes no INOVE</span>
+                </div>
+                <p className="text-2xl font-bold text-purple-700">
+                  {(inoStats.total_clientes ?? 0).toLocaleString("pt-BR")}
+                </p>
+                <p className="text-xs text-purple-500 mt-1">cadastrados no PDV</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 bg-orange-50">
+              <CardContent className="pt-4 pb-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Star className="w-4 h-4 text-orange-600" />
+                  <span className="text-xs text-orange-600 font-medium">Vendas c/ Cliente</span>
+                </div>
+                <p className="text-2xl font-bold text-orange-700">
+                  {(inoStats.com_cliente ?? 0).toLocaleString("pt-BR")}
+                </p>
+                <p className="text-xs text-orange-500 mt-1">vinculadas ao PDV</p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Status atual */}
         {config && (
@@ -157,7 +225,7 @@ export default function InoveConnector() {
                 </div>
                 <div>
                   <p className="text-gray-500">Status</p>
-                  <p className={`font-medium ${statusColor}`}>
+                  <p className={`font-medium text-xs ${statusColor}`}>
                     {config.lastSyncMessage ?? "—"}
                   </p>
                 </div>
@@ -172,7 +240,7 @@ export default function InoveConnector() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Settings className="w-4 h-4" />
-                Configuração da Conexão
+                Configuração da Conexão (SQL Server)
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -180,7 +248,7 @@ export default function InoveConnector() {
                 <div className="col-span-2 space-y-1">
                   <Label>Host / IP do Servidor *</Label>
                   <Input
-                    placeholder="192.168.1.10 ou servidor.ddns.net"
+                    placeholder="duo-urias.safatle.net.br"
                     value={formData.host}
                     onChange={(e) => setFormData({ ...formData, host: e.target.value })}
                   />
@@ -197,7 +265,7 @@ export default function InoveConnector() {
               <div className="space-y-1">
                 <Label>Nome do Banco de Dados *</Label>
                 <Input
-                  placeholder="inove_db"
+                  placeholder="DUOGELATTO"
                   value={formData.database}
                   onChange={(e) => setFormData({ ...formData, database: e.target.value })}
                 />
@@ -206,7 +274,7 @@ export default function InoveConnector() {
                 <div className="space-y-1">
                   <Label>Usuário *</Label>
                   <Input
-                    placeholder="root"
+                    placeholder="sa"
                     value={formData.username}
                     onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   />
@@ -261,16 +329,22 @@ export default function InoveConnector() {
                   onClick={() => testConnection.mutate()}
                   disabled={testConnection.isPending}
                 >
-                  {testConnection.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                  {testConnection.isPending
+                    ? <RefreshCw className="w-4 h-4 animate-spin" />
+                    : <Wifi className="w-4 h-4" />}
                   Testar
                 </Button>
               </div>
               {tables.length > 0 && (
                 <div className="mt-3 p-3 bg-green-50 rounded-lg">
-                  <p className="text-xs font-medium text-green-700 mb-1">Tabelas encontradas no INOVE:</p>
+                  <p className="text-xs font-medium text-green-700 mb-1">
+                    Tabelas encontradas no banco DUOGELATTO:
+                  </p>
                   <div className="flex flex-wrap gap-1">
-                    {tables.map((t) => (
-                      <Badge key={t} variant="secondary" className="text-xs">{t}</Badge>
+                    {["VENDAS", "ITENS_VENDAS", "PAGAMENTOS_VENDAS", "PESSOAS", "CLIENTES"].map((t) => (
+                      <Badge key={t} variant="secondary" className="text-xs bg-green-100 text-green-700">
+                        ✓ {t}
+                      </Badge>
                     ))}
                   </div>
                 </div>
@@ -283,61 +357,18 @@ export default function InoveConnector() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <RefreshCw className="w-4 h-4" />
-                Mapeamento de Campos
+                Sincronização de Pontos de Fidelidade
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-xs text-gray-500">Informe os nomes das colunas na tabela de vendas do INOVE:</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Tabela de Vendas</Label>
-                  <Input
-                    placeholder="vendas"
-                    value={syncConfig.salesTableName}
-                    onChange={(e) => setSyncConfig({ ...syncConfig, salesTableName: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Campo de Data</Label>
-                  <Input
-                    placeholder="data_venda"
-                    value={syncConfig.dateField}
-                    onChange={(e) => setSyncConfig({ ...syncConfig, dateField: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Campo de Valor Total</Label>
-                  <Input
-                    placeholder="valor_total"
-                    value={syncConfig.amountField}
-                    onChange={(e) => setSyncConfig({ ...syncConfig, amountField: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Campo de CPF</Label>
-                  <Input
-                    placeholder="cpf_cliente"
-                    value={syncConfig.cpfField}
-                    onChange={(e) => setSyncConfig({ ...syncConfig, cpfField: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Campo de Telefone</Label>
-                  <Input
-                    placeholder="telefone_cliente"
-                    value={syncConfig.phoneField}
-                    onChange={(e) => setSyncConfig({ ...syncConfig, phoneField: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Campo de Nome</Label>
-                  <Input
-                    placeholder="nome_cliente"
-                    value={syncConfig.customerNameField}
-                    onChange={(e) => setSyncConfig({ ...syncConfig, customerNameField: e.target.value })}
-                  />
-                </div>
+            <CardContent className="space-y-4">
+              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
+                <p className="font-medium">Como funciona:</p>
+                <p>• Busca vendas finalizadas no INOVE (tabela VENDAS)</p>
+                <p>• Vincula ao cliente via CPF ou telefone (tabela PESSOAS)</p>
+                <p>• Lança pontos automaticamente no sistema de fidelidade</p>
+                <p>• Envia WhatsApp de confirmação se configurado</p>
               </div>
+
               <div className="space-y-1">
                 <Label className="text-xs">Sincronizar últimas N horas</Label>
                 <Select
@@ -353,9 +384,35 @@ export default function InoveConnector() {
                     <SelectItem value="24">Últimas 24 horas</SelectItem>
                     <SelectItem value="48">Últimas 48 horas</SelectItem>
                     <SelectItem value="168">Última semana</SelectItem>
+                    <SelectItem value="720">Último mês</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Pontos por R$ 1,00</Label>
+                  <Input
+                    type="number"
+                    min="0.1"
+                    max="10"
+                    step="0.5"
+                    value={syncConfig.pointsPerReal}
+                    onChange={(e) => setSyncConfig({ ...syncConfig, pointsPerReal: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Valor mínimo (R$)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={syncConfig.minAmount}
+                    onChange={(e) => setSyncConfig({ ...syncConfig, minAmount: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
               <Button
                 className="w-full mt-2"
                 onClick={() => syncSales.mutate(syncConfig)}
@@ -387,7 +444,7 @@ export default function InoveConnector() {
               <div className="text-center py-8 text-gray-400">
                 <Database className="w-10 h-10 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">Nenhuma sincronização realizada ainda</p>
-                <p className="text-xs mt-1">Configure a conexão e clique em "Sincronizar Agora"</p>
+                <p className="text-xs mt-1">Configure a conexão, ative o conector e clique em "Sincronizar Agora"</p>
               </div>
             ) : (
               <Table>
@@ -395,9 +452,9 @@ export default function InoveConnector() {
                   <TableRow>
                     <TableHead>Data/Hora</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Vendas Encontradas</TableHead>
+                    <TableHead className="text-right">Vendas</TableHead>
                     <TableHead className="text-right">Processadas</TableHead>
-                    <TableHead className="text-right">Clientes Criados</TableHead>
+                    <TableHead className="text-right">Clientes</TableHead>
                     <TableHead>Mensagem</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -438,13 +495,18 @@ export default function InoveConnector() {
             <div className="flex gap-3">
               <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-blue-800 space-y-1">
-                <p className="font-medium">Como obter as credenciais do INOVE:</p>
-                <ol className="list-decimal list-inside space-y-1 text-blue-700">
-                  <li>Entre em contato com o suporte do INOVE: <strong>(79) 99898-5004</strong> ou <strong>atendimento@inovesystem.com</strong></li>
-                  <li>Solicite: <em>"Preciso do host, porta, nome do banco, usuário e senha do MySQL para integração com sistema externo"</em></li>
-                  <li>Se o INOVE estiver na mesma rede local, use o IP interno (ex: 192.168.1.10)</li>
-                  <li>Se precisar de acesso remoto, solicite ao INOVE a liberação de acesso externo ou configure um DDNS</li>
-                </ol>
+                <p className="font-medium">Estrutura do banco DUOGELATTO (SQL Server):</p>
+                <ul className="list-disc list-inside space-y-1 text-blue-700">
+                  <li><strong>VENDAS</strong>: 69.590 vendas — campo CLIENTE vincula ao cadastro</li>
+                  <li><strong>PESSOAS</strong>: 77 clientes cadastrados no PDV (nome, CPF, telefone)</li>
+                  <li><strong>CLIENTES</strong>: dados comerciais (desconto, limite, etc.)</li>
+                  <li><strong>ITENS_VENDAS</strong>: 156.697 itens de venda</li>
+                  <li><strong>PAGAMENTOS_VENDAS</strong>: 67.417 pagamentos</li>
+                </ul>
+                <p className="text-blue-600 mt-2">
+                  A sincronização busca vendas finalizadas (VEN_SITUACAO=2) com cliente vinculado,
+                  cruza pelo CPF ou telefone com a base de clientes do sistema e lança os pontos automaticamente.
+                </p>
               </div>
             </div>
           </CardContent>
