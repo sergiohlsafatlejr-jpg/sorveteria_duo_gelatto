@@ -310,3 +310,260 @@ scheduledRouter.post("/api/scheduled/sync-stock", async (req, res) => {
     res.status(500).json({ error: message });
   }
 });
+
+// ── Relatório Semanal Automático ─────────────────────────────────────────────
+scheduledRouter.post("/api/scheduled/weekly-report", async (req, res) => {
+  try {
+    const user = await sdk.authenticateRequest(req).catch(() => null);
+    if (!user) {
+      res.status(401).json({ error: "Não autorizado" });
+      return;
+    }
+
+    const db = await getDb();
+    if (!db) throw new Error("Banco de dados indisponível");
+
+    // 1. Buscar configuração do conector INOVE
+    const [config] = await db.select().from(inoveConnectorConfig).limit(1);
+    if (!config || !config.active) {
+      res.json({ ok: false, reason: "Conector INOVE inativo" });
+      return;
+    }
+
+    const pool = await createInovePool({
+      host: config.host,
+      port: config.port ?? 1433,
+      username: config.username,
+      password: config.password,
+      database: config.database,
+    });
+
+    // 2. Calcular datas da semana anterior (segunda a domingo, horário Brasília)
+    // SQL Server GETDATE() já está em horário de Brasília
+    const weeklyQuery = `
+      DECLARE @hoje DATE = CAST(GETDATE() AS DATE);
+      DECLARE @inicioSemanaAtual DATE = DATEADD(DAY, -(DATEPART(WEEKDAY, @hoje) + 5) % 7, @hoje);
+      DECLARE @inicioSemanaAnterior DATE = DATEADD(DAY, -7, @inicioSemanaAtual);
+      DECLARE @fimSemanaAnterior DATE = DATEADD(DAY, -1, @inicioSemanaAtual);
+
+      -- Totais semana anterior
+      SELECT
+        @inicioSemanaAnterior AS semana_inicio,
+        @fimSemanaAnterior AS semana_fim,
+        COUNT(*) AS total_vendas,
+        ISNULL(SUM(VEN_TOTAL), 0) AS faturamento,
+        ISNULL(AVG(VEN_TOTAL), 0) AS ticket_medio
+      FROM VENDAS
+      WHERE VEN_SITUACAO = 2
+        AND CAST(VEN_DATA_FIM AS DATE) BETWEEN @inicioSemanaAnterior AND @fimSemanaAnterior;
+
+      -- Totais semana retrasada (para comparativo)
+      SELECT
+        COUNT(*) AS total_vendas_ant,
+        ISNULL(SUM(VEN_TOTAL), 0) AS faturamento_ant
+      FROM VENDAS
+      WHERE VEN_SITUACAO = 2
+        AND CAST(VEN_DATA_FIM AS DATE) BETWEEN DATEADD(DAY, -14, @inicioSemanaAtual) AND DATEADD(DAY, -8, @inicioSemanaAtual);
+
+      -- Top 10 produtos da semana anterior
+      SELECT TOP 10
+        P.PRO_DESCRICAO AS produto,
+        SUM(IV.IVE_QUANTIDADE) AS qtd,
+        SUM(IV.IVE_TOTAL) AS total
+      FROM ITENS_VENDAS IV
+      JOIN PRODUTOS P ON P.PRODUTO = IV.PRODUTO
+      JOIN VENDAS V ON V.VENDA = IV.VENDA
+      WHERE V.VEN_SITUACAO = 2
+        AND CAST(V.VEN_DATA_FIM AS DATE) BETWEEN @inicioSemanaAnterior AND @fimSemanaAnterior
+      GROUP BY P.PRO_DESCRICAO
+      ORDER BY total DESC;
+
+      -- Vendas por dia da semana anterior
+      SELECT
+        CAST(VEN_DATA_FIM AS DATE) AS dia,
+        COUNT(*) AS vendas,
+        ISNULL(SUM(VEN_TOTAL), 0) AS total
+      FROM VENDAS
+      WHERE VEN_SITUACAO = 2
+        AND CAST(VEN_DATA_FIM AS DATE) BETWEEN @inicioSemanaAnterior AND @fimSemanaAnterior
+      GROUP BY CAST(VEN_DATA_FIM AS DATE)
+      ORDER BY dia;
+    `;
+
+    const result = await pool.request().query(weeklyQuery) as unknown as {
+      recordsets: Record<string, unknown>[][];
+    };
+    await pool.close();
+
+    const [resumoArr, comparativoArr, topProdutosArr, porDiaArr] = result.recordsets;
+    const resumo = resumoArr[0] as {
+      semana_inicio: Date; semana_fim: Date;
+      total_vendas: number; faturamento: number; ticket_medio: number;
+    };
+    const comparativo = comparativoArr[0] as {
+      total_vendas_ant: number; faturamento_ant: number;
+    };
+    const topProdutos = topProdutosArr as { produto: string; qtd: number; total: number }[];
+    const porDia = porDiaArr as { dia: Date; vendas: number; total: number }[];
+
+    // 3. Formatar datas
+    const fmtDate = (d: Date) => {
+      const dt = new Date(d);
+      return dt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    };
+    const fmtMoney = (v: number) =>
+      Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+    const varFaturamento = resumo.faturamento - comparativo.faturamento_ant;
+    const varPct = comparativo.faturamento_ant > 0
+      ? ((varFaturamento / comparativo.faturamento_ant) * 100).toFixed(1)
+      : "N/A";
+    const sinal = varFaturamento >= 0 ? "▲" : "▼";
+
+    // 4. Montar HTML do e-mail
+    const topProdutosHtml = topProdutos
+      .map((p, i) =>
+        `<tr style="background:${i % 2 === 0 ? "#f9f9f9" : "#fff"}">
+          <td style="padding:6px 10px">${i + 1}. ${p.produto}</td>
+          <td style="padding:6px 10px;text-align:right">${Number(p.qtd).toFixed(0)} un</td>
+          <td style="padding:6px 10px;text-align:right">${fmtMoney(p.total)}</td>
+        </tr>`
+      )
+      .join("");
+
+    const porDiaHtml = porDia
+      .map(d =>
+        `<tr>
+          <td style="padding:5px 10px">${fmtDate(d.dia)}</td>
+          <td style="padding:5px 10px;text-align:right">${d.vendas}</td>
+          <td style="padding:5px 10px;text-align:right">${fmtMoney(d.total)}</td>
+        </tr>`
+      )
+      .join("");
+
+    const htmlBody = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:0 auto;padding:20px">
+  <div style="background:linear-gradient(135deg,#6c3fc5,#e91e8c);padding:24px;border-radius:12px;text-align:center;margin-bottom:24px">
+    <h1 style="color:#fff;margin:0;font-size:22px">🍦 Duo Gelatto</h1>
+    <p style="color:rgba(255,255,255,0.9);margin:8px 0 0">Relatório Semanal — ${fmtDate(resumo.semana_inicio)} a ${fmtDate(resumo.semana_fim)}</p>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
+    <div style="background:#f0f4ff;border-radius:8px;padding:16px;text-align:center">
+      <div style="font-size:24px;font-weight:bold;color:#6c3fc5">${fmtMoney(resumo.faturamento)}</div>
+      <div style="font-size:12px;color:#666;margin-top:4px">Faturamento</div>
+    </div>
+    <div style="background:#f0fff4;border-radius:8px;padding:16px;text-align:center">
+      <div style="font-size:24px;font-weight:bold;color:#16a34a">${resumo.total_vendas}</div>
+      <div style="font-size:12px;color:#666;margin-top:4px">Vendas</div>
+    </div>
+    <div style="background:#fff7f0;border-radius:8px;padding:16px;text-align:center">
+      <div style="font-size:24px;font-weight:bold;color:#ea580c">${fmtMoney(resumo.ticket_medio)}</div>
+      <div style="font-size:12px;color:#666;margin-top:4px">Ticket Médio</div>
+    </div>
+  </div>
+
+  <div style="background:${varFaturamento >= 0 ? "#f0fff4" : "#fff0f0"};border-radius:8px;padding:14px;margin-bottom:24px;text-align:center">
+    <strong>Comparativo com semana anterior:</strong>
+    ${sinal} ${fmtMoney(Math.abs(varFaturamento))} (${varPct}%) em relação a ${fmtMoney(comparativo.faturamento_ant)}
+  </div>
+
+  <h3 style="color:#6c3fc5;border-bottom:2px solid #6c3fc5;padding-bottom:8px">🏆 Top 10 Produtos</h3>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+    <thead>
+      <tr style="background:#6c3fc5;color:#fff">
+        <th style="padding:8px 10px;text-align:left">Produto</th>
+        <th style="padding:8px 10px;text-align:right">Qtd</th>
+        <th style="padding:8px 10px;text-align:right">Total</th>
+      </tr>
+    </thead>
+    <tbody>${topProdutosHtml}</tbody>
+  </table>
+
+  <h3 style="color:#6c3fc5;border-bottom:2px solid #6c3fc5;padding-bottom:8px">📅 Vendas por Dia</h3>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+    <thead>
+      <tr style="background:#6c3fc5;color:#fff">
+        <th style="padding:8px 10px;text-align:left">Data</th>
+        <th style="padding:8px 10px;text-align:right">Vendas</th>
+        <th style="padding:8px 10px;text-align:right">Total</th>
+      </tr>
+    </thead>
+    <tbody>${porDiaHtml}</tbody>
+  </table>
+
+  <div style="text-align:center;color:#999;font-size:12px;margin-top:24px;border-top:1px solid #eee;padding-top:16px">
+    Relatório gerado automaticamente pelo Sistema Duo Gelatto<br>
+    Dados do PDV INOVE — ${new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}
+  </div>
+</body>
+</html>`;
+
+    // 5. Texto simples para fallback
+    const textBody = `Relatório Semanal Duo Gelatto — ${fmtDate(resumo.semana_inicio)} a ${fmtDate(resumo.semana_fim)}
+Faturamento: ${fmtMoney(resumo.faturamento)} | Vendas: ${resumo.total_vendas} | Ticket Médio: ${fmtMoney(resumo.ticket_medio)}
+Comparativo: ${sinal} ${fmtMoney(Math.abs(varFaturamento))} (${varPct}%) vs semana anterior
+
+Top Produtos:
+${topProdutos.map((p, i) => `${i + 1}. ${p.produto} — ${fmtMoney(p.total)}`).join("\n")}`;
+
+    // 6. Buscar e-mails de admin e manager
+    const { users } = await import("../../drizzle/schema");
+    const { inArray } = await import("drizzle-orm");
+    const db2 = await getDb();
+    if (!db2) throw new Error("Banco de dados indisponível");
+    const adminUsers = await db2
+      .select({ name: users.name, email: users.email })
+      .from(users)
+      .where(inArray(users.role, ["admin", "manager"]));
+
+    const emails = adminUsers
+      .map((u: { name: string | null; email: string | null }) => u.email)
+      .filter((e: string | null): e is string => typeof e === "string" && e.includes("@"));
+
+    // 7. Enviar e-mails
+    let emailsSent = 0;
+    if (emails.length > 0) {
+      const { sendEmail, isEmailConfigured } = await import("../_core/email");
+      if (isEmailConfigured()) {
+        const subject = `📊 Relatório Semanal Duo Gelatto — ${fmtDate(resumo.semana_inicio)} a ${fmtDate(resumo.semana_fim)}`;
+        for (const email of emails) {
+          const sent = await sendEmail({ to: email, subject, html: htmlBody, text: textBody });
+          if (sent) emailsSent++;
+        }
+      }
+    }
+
+    // 8. Notificar dono via sistema
+    const notifContent = `📊 Relatório Semanal ${fmtDate(resumo.semana_inicio)} a ${fmtDate(resumo.semana_fim)}
+• Faturamento: ${fmtMoney(resumo.faturamento)} (${sinal} ${varPct}% vs semana anterior)
+• Vendas: ${resumo.total_vendas} | Ticket Médio: ${fmtMoney(resumo.ticket_medio)}
+• Top produto: ${topProdutos[0]?.produto ?? "N/A"} (${fmtMoney(topProdutos[0]?.total ?? 0)})
+• E-mails enviados: ${emailsSent}/${emails.length}`;
+
+    await notifyOwner({ title: "📊 Relatório Semanal Duo Gelatto", content: notifContent }).catch(() => {});
+
+    res.json({
+      ok: true,
+      semana: `${fmtDate(resumo.semana_inicio)} a ${fmtDate(resumo.semana_fim)}`,
+      faturamento: resumo.faturamento,
+      totalVendas: resumo.total_vendas,
+      ticketMedio: resumo.ticket_medio,
+      emailsSent,
+      emailsTotal: emails.length,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[scheduled/weekly-report] Erro:", message);
+    await notifyOwner({
+      title: "❌ Falha no Relatório Semanal",
+      content: `Erro ao gerar relatório semanal: ${message}`,
+    }).catch(() => {});
+    res.status(500).json({ error: message });
+  }
+});
+
+// scheduledRouter já exportado na linha 181
