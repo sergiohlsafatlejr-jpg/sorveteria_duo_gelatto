@@ -480,4 +480,290 @@ export const inoveRouter = router({
     if (!db) return [];
     return db.select().from(inoveSyncLog).orderBy(desc(inoveSyncLog.syncedAt)).limit(20);
   }),
+
+  // ── Dados de Vendas por Dia (gráfico) ────────────────────────────────────
+  getSalesByDay: protectedProcedure
+    .input(z.object({ days: z.number().int().min(1).max(365).default(30) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return [];
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const result = await pool.request().query(`
+          SELECT
+            CONVERT(varchar(10), VEN_DATA_FIM, 23) as dia,
+            COUNT(*) as qtd,
+            CAST(SUM(VEN_TOTAL) as float) as total
+          FROM VENDAS
+          WHERE VEN_SITUACAO = 2
+            AND VEN_DATA_FIM >= DATEADD(day, -${input.days}, GETDATE())
+          GROUP BY CONVERT(varchar(10), VEN_DATA_FIM, 23)
+          ORDER BY dia
+        `);
+        await pool.close();
+        return result.recordset as Array<{ dia: string; qtd: number; total: number }>;
+      } catch {
+        return [];
+      }
+    }),
+
+  // ── Top Produtos Mais Vendidos ────────────────────────────────────────────
+  getTopProducts: protectedProcedure
+    .input(z.object({ days: z.number().int().min(1).max(365).default(30), limit: z.number().int().min(1).max(50).default(10) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return [];
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const result = await pool.request().query(`
+          SELECT TOP ${input.limit}
+            p.PRO_NOME as nome,
+            CAST(SUM(i.ITE_QUANTIDADE) as float) as qtd,
+            CAST(SUM(i.ITE_VALOR * i.ITE_QUANTIDADE) as float) as total
+          FROM ITENS_VENDAS i
+          JOIN VENDAS v ON i.VENDA = v.VENDA
+          JOIN PRODUTOS p ON i.PRODUTO = p.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= DATEADD(day, -${input.days}, GETDATE())
+          GROUP BY p.PRO_NOME
+          ORDER BY total DESC
+        `);
+        await pool.close();
+        return result.recordset as Array<{ nome: string; qtd: number; total: number }>;
+      } catch {
+        return [];
+      }
+    }),
+
+  // ── KPIs do INOVE ─────────────────────────────────────────────────────────
+  getKpis: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const rows = await db.select().from(inoveConnectorConfig).limit(1);
+    if (rows.length === 0 || !rows[0].active) return null;
+    const config = rows[0];
+    try {
+      const pool = await createInovePool(config);
+      const hoje = await pool.request().query(`
+        SELECT COUNT(*) as qtd, ISNULL(CAST(SUM(VEN_TOTAL) as float),0) as total
+        FROM VENDAS WHERE VEN_SITUACAO = 2 AND CONVERT(date, VEN_DATA_FIM) = CONVERT(date, GETDATE())
+      `);
+      const mes = await pool.request().query(`
+        SELECT COUNT(*) as qtd, ISNULL(CAST(SUM(VEN_TOTAL) as float),0) as total
+        FROM VENDAS WHERE VEN_SITUACAO = 2
+          AND YEAR(VEN_DATA_FIM) = YEAR(GETDATE()) AND MONTH(VEN_DATA_FIM) = MONTH(GETDATE())
+      `);
+      const ticket = await pool.request().query(`
+        SELECT ISNULL(CAST(AVG(VEN_TOTAL) as float),0) as ticket_medio
+        FROM VENDAS WHERE VEN_SITUACAO = 2 AND VEN_DATA_FIM >= DATEADD(day, -30, GETDATE())
+      `);
+      const ontem = await pool.request().query(`
+        SELECT COUNT(*) as qtd, ISNULL(CAST(SUM(VEN_TOTAL) as float),0) as total
+        FROM VENDAS WHERE VEN_SITUACAO = 2
+          AND CONVERT(date, VEN_DATA_FIM) = CONVERT(date, DATEADD(day, -1, GETDATE()))
+      `);
+      await pool.close();
+      return {
+        vendas_hoje: hoje.recordset[0] as { qtd: number; total: number },
+        vendas_mes: mes.recordset[0] as { qtd: number; total: number },
+        ticket_medio: (ticket.recordset[0] as { ticket_medio: number }).ticket_medio,
+        vendas_ontem: ontem.recordset[0] as { qtd: number; total: number },
+      };
+    } catch {
+      return null;
+    }
+  }),
+
+  // ── Estoque do INOVE ──────────────────────────────────────────────────────
+  getStock: protectedProcedure
+    .input(z.object({
+      search: z.string().optional(),
+      grupo: z.string().optional(),
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(1).max(100).default(50),
+      lowStock: z.boolean().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return { items: [], total: 0, grupos: [] };
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const offset = (input.page - 1) * input.pageSize;
+        const searchFilter = input.search ? `AND p.PRO_NOME LIKE '%${input.search.replace(/'/g, "''")}%'` : '';
+        const grupoFilter = input.grupo ? `AND g.GRU_NOME = '${input.grupo.replace(/'/g, "''")}'` : '';
+        const lowStockFilter = input.lowStock ? 'AND saldo.saldo_atual <= 5' : '';
+
+        const result = await pool.request().query(`
+          WITH SaldoAtual AS (
+            SELECT PRODUTO,
+              (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
+               WHERE PRODUTO = p2.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC) as saldo_atual
+            FROM PRODUTOS p2
+            WHERE p2.PRO_ATIVO = 'S' AND p2.PRO_ESTOQUE = 'S'
+          )
+          SELECT
+            p.PRODUTO as id,
+            p.PRO_NOME as nome,
+            ISNULL(g.GRU_NOME, 'Sem Grupo') as grupo,
+            CAST(p.PRO_VENDA as float) as preco_venda,
+            CAST(ISNULL(p.PRO_CUSTO, 0) as float) as preco_custo,
+            CAST(ISNULL(saldo.saldo_atual, 0) as float) as saldo_atual
+          FROM PRODUTOS p
+          LEFT JOIN GRUPOS_DE_PRODUTOS g ON p.GRUPO_DE_PRODUTOS = g.GRUPO_DE_PRODUTOS
+          LEFT JOIN SaldoAtual saldo ON saldo.PRODUTO = p.PRODUTO
+          WHERE p.PRO_ATIVO = 'S' AND p.PRO_ESTOQUE = 'S'
+            ${searchFilter} ${grupoFilter} ${lowStockFilter}
+          ORDER BY p.PRO_NOME
+          OFFSET ${offset} ROWS FETCH NEXT ${input.pageSize} ROWS ONLY
+        `);
+
+        const countResult = await pool.request().query(`
+          WITH SaldoAtual AS (
+            SELECT PRODUTO,
+              (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
+               WHERE PRODUTO = p2.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC) as saldo_atual
+            FROM PRODUTOS p2
+            WHERE p2.PRO_ATIVO = 'S' AND p2.PRO_ESTOQUE = 'S'
+          )
+          SELECT COUNT(*) as total
+          FROM PRODUTOS p
+          LEFT JOIN GRUPOS_DE_PRODUTOS g ON p.GRUPO_DE_PRODUTOS = g.GRUPO_DE_PRODUTOS
+          LEFT JOIN SaldoAtual saldo ON saldo.PRODUTO = p.PRODUTO
+          WHERE p.PRO_ATIVO = 'S' AND p.PRO_ESTOQUE = 'S'
+            ${searchFilter} ${grupoFilter} ${lowStockFilter}
+        `);
+
+        const gruposResult = await pool.request().query(`
+          SELECT DISTINCT ISNULL(g.GRU_NOME, 'Sem Grupo') as grupo
+          FROM PRODUTOS p
+          LEFT JOIN GRUPOS_DE_PRODUTOS g ON p.GRUPO_DE_PRODUTOS = g.GRUPO_DE_PRODUTOS
+          WHERE p.PRO_ATIVO = 'S' AND p.PRO_ESTOQUE = 'S'
+          ORDER BY grupo
+        `);
+
+        await pool.close();
+        return {
+          items: result.recordset as Array<{ id: number; nome: string; grupo: string; preco_venda: number; preco_custo: number; saldo_atual: number }>,
+          total: (countResult.recordset[0] as { total: number }).total,
+          grupos: (gruposResult.recordset as Array<{ grupo: string }>).map(r => r.grupo),
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(msg);
+      }
+    }),
+
+  // ── Vendas Recentes do INOVE ──────────────────────────────────────────────
+  getRecentSales: protectedProcedure
+    .input(z.object({
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(1).max(100).default(20),
+      days: z.number().int().min(1).max(365).default(30),
+      search: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return { items: [], total: 0 };
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const offset = (input.page - 1) * input.pageSize;
+        const searchFilter = input.search
+          ? `AND (p.PES_NOME LIKE '%${input.search.replace(/'/g, "''")}%' OR CAST(v.VENDA as varchar) LIKE '%${input.search.replace(/'/g, "''")}%')`
+          : '';
+
+        const result = await pool.request().query(`
+          SELECT
+            v.VENDA as id,
+            CONVERT(varchar(19), v.VEN_DATA_FIM, 120) as data,
+            CAST(v.VEN_TOTAL as float) as total,
+            ISNULL(p.PES_NOME, v.VEN_NOME_CLIENTE) as cliente,
+            v.VEN_SITUACAO as situacao
+          FROM VENDAS v
+          LEFT JOIN CLIENTES c ON v.CLIENTE = c.PESSOA
+          LEFT JOIN PESSOAS p ON c.PESSOA = p.PESSOA
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= DATEADD(day, -${input.days}, GETDATE())
+            ${searchFilter}
+          ORDER BY v.VEN_DATA_FIM DESC
+          OFFSET ${offset} ROWS FETCH NEXT ${input.pageSize} ROWS ONLY
+        `);
+
+        const countResult = await pool.request().query(`
+          SELECT COUNT(*) as total
+          FROM VENDAS v
+          LEFT JOIN CLIENTES c ON v.CLIENTE = c.PESSOA
+          LEFT JOIN PESSOAS p ON c.PESSOA = p.PESSOA
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= DATEADD(day, -${input.days}, GETDATE())
+            ${searchFilter}
+        `);
+
+        await pool.close();
+        return {
+          items: result.recordset as Array<{ id: number; data: string; total: number; cliente: string | null; situacao: number }>,
+          total: (countResult.recordset[0] as { total: number }).total,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(msg);
+      }
+    }),
+
+  // ── Detalhes de uma venda do INOVE ────────────────────────────────────────
+  getSaleDetail: protectedProcedure
+    .input(z.object({ vendaId: z.number().int() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return null;
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const venda = await pool.request().query(`
+          SELECT v.VENDA as id, CONVERT(varchar(19), v.VEN_DATA_FIM, 120) as data,
+            CAST(v.VEN_TOTAL as float) as total, ISNULL(p.PES_NOME, v.VEN_NOME_CLIENTE) as cliente,
+            p.PES_TELEFONE as telefone, p.PES_RG_CPF as cpf
+          FROM VENDAS v
+          LEFT JOIN CLIENTES c ON v.CLIENTE = c.PESSOA
+          LEFT JOIN PESSOAS p ON c.PESSOA = p.PESSOA
+          WHERE v.VENDA = ${input.vendaId}
+        `);
+        const itens = await pool.request().query(`
+          SELECT i.ITE_NOME as nome, CAST(i.ITE_QUANTIDADE as float) as qtd,
+            CAST(i.ITE_VALOR as float) as valor_unit,
+            CAST(i.ITE_VALOR * i.ITE_QUANTIDADE as float) as total
+          FROM ITENS_VENDAS i WHERE i.VENDA = ${input.vendaId}
+          ORDER BY i.ITE_NUMERO
+        `);
+        const pagamentos = await pool.request().query(`
+          SELECT f.FOR_DESCRICAO as forma, CAST(pag.PAG_VALOR as float) as valor
+          FROM PAGAMENTOS_VENDAS pag
+          LEFT JOIN FORMAS_PAGAMENTOS f ON pag.FORMA_PAGAMENTO = f.FORMA_PAGAMENTO
+          WHERE pag.VENDA = ${input.vendaId}
+        `);
+        await pool.close();
+        return {
+          venda: venda.recordset[0] as { id: number; data: string; total: number; cliente: string | null; telefone: string | null; cpf: string | null } | undefined,
+          itens: itens.recordset as Array<{ nome: string; qtd: number; valor_unit: number; total: number }>,
+          pagamentos: pagamentos.recordset as Array<{ forma: string; valor: number }>,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(msg);
+      }
+    }),
 });
+

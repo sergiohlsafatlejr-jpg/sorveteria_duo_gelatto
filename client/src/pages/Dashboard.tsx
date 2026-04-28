@@ -68,8 +68,6 @@ function StatCard({
 
 export default function Dashboard() {
   const { data: metrics, isLoading } = trpc.dashboard.metrics.useQuery();
-  const { data: chartData } = trpc.dashboard.chartData.useQuery({ days: 30 });
-  const { data: topProducts } = trpc.dashboard.topProducts.useQuery({ limit: 5 });
   const { data: birthdays } = trpc.dashboard.birthdays.useQuery();
   const { data: lowStock } = trpc.dashboard.lowStock.useQuery();
   const { data: topPointsCustomers = [] } = trpc.dashboard.topCustomersByPoints.useQuery({ limit: 8 });
@@ -79,11 +77,24 @@ export default function Dashboard() {
     { staleTime: 10 * 60 * 1000 }
   );
 
-  const salesChart = (chartData ?? []).map((d) => ({
-    date: new Date(d.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-    total: parseFloat(d.total),
-    count: d.count,
-  }));
+  // Dados do INOVE (PDV SQL Server)
+  const { data: inoveSalesByDay = [] } = trpc.inove.getSalesByDay.useQuery({ days: 30 });
+  const { data: inoveTopProducts = [] } = trpc.inove.getTopProducts.useQuery({ days: 30, limit: 8 });
+  const { data: inoveKpis } = trpc.inove.getKpis.useQuery();
+
+  // Gráfico: prioriza INOVE se disponível, senão usa dados locais
+  const salesChart = inoveSalesByDay.length > 0
+    ? inoveSalesByDay.map((d) => ({
+        date: new Date(d.dia + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        total: d.total,
+        count: d.qtd,
+      }))
+    : [];
+
+  // Top produtos: prioriza INOVE
+  const topProductsChart = inoveTopProducts.length > 0
+    ? inoveTopProducts.map((p) => ({ productName: p.nome.slice(0, 20), totalQty: p.qtd, totalRevenue: p.total }))
+    : [];
 
   return (
     <DashboardLayout>
@@ -119,22 +130,22 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* KPI Cards */}
+        {/* KPI Cards — prioriza INOVE quando conectado */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             title="Vendas Hoje"
-            value={formatCurrency(metrics?.todaySalesTotal ?? 0)}
-            subtitle={(metrics?.importTodayTotal ?? 0) > 0
-              ? `incl. R$ ${(metrics!.importTodayTotal!).toFixed(2).replace('.', ',')} PDV`
+            value={formatCurrency(inoveKpis ? inoveKpis.vendas_hoje.total : (metrics?.todaySalesTotal ?? 0))}
+            subtitle={inoveKpis
+              ? `${inoveKpis.vendas_hoje.qtd} transações · PDV`
               : `${metrics?.todaySalesCount ?? 0} transações`}
             icon={ShoppingCart}
             gradient="bg-gradient-to-br from-violet-600 to-purple-700"
           />
           <StatCard
             title="Vendas do Mês"
-            value={formatCurrency(metrics?.monthSalesTotal ?? 0)}
-            subtitle={(metrics?.importMonthTotal ?? 0) > 0
-              ? `incl. ${formatCurrency(metrics!.importMonthTotal!)} PDV`
+            value={formatCurrency(inoveKpis ? inoveKpis.vendas_mes.total : (metrics?.monthSalesTotal ?? 0))}
+            subtitle={inoveKpis
+              ? `${inoveKpis.vendas_mes.qtd} transações · PDV`
               : `${metrics?.monthSalesCount ?? 0} transações`}
             icon={TrendingUp}
             gradient="bg-gradient-to-br from-pink-500 to-rose-600"
@@ -147,10 +158,10 @@ export default function Dashboard() {
             gradient="bg-gradient-to-br from-cyan-500 to-teal-600"
           />
           <StatCard
-            title="Produtos"
-            value={String(metrics?.totalProducts ?? 0)}
-            subtitle={`${metrics?.lowStockCount ?? 0} com estoque baixo`}
-            icon={Package}
+            title={inoveKpis ? "Ticket Médio (30d)" : "Produtos"}
+            value={inoveKpis ? formatCurrency(inoveKpis.ticket_medio) : String(metrics?.totalProducts ?? 0)}
+            subtitle={inoveKpis ? "média por venda · PDV" : `${metrics?.lowStockCount ?? 0} com estoque baixo`}
+            icon={inoveKpis ? DollarSign : Package}
             gradient="bg-gradient-to-br from-amber-500 to-orange-600"
           />
         </div>
@@ -162,6 +173,9 @@ export default function Dashboard() {
               <CardTitle className="text-base font-semibold flex items-center gap-2">
                 <BarChart3 className="h-4 w-4 text-primary" />
                 Vendas — Últimos 30 dias
+                {inoveSalesByDay.length > 0 && (
+                  <span className="ml-auto text-xs font-normal text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">PDV INOVE</span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -194,11 +208,16 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold">Mais Vendidos</CardTitle>
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                Mais Vendidos
+                {inoveTopProducts.length > 0 && (
+                  <span className="ml-auto text-xs font-normal text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">PDV INOVE</span>
+                )}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={topProducts ?? []} layout="vertical">
+                <BarChart data={topProductsChart} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.90 0.01 270)" />
                   <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} />
                   <YAxis

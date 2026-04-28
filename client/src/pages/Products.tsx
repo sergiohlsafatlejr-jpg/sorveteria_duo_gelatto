@@ -27,7 +27,10 @@ import {
   BarChart3,
   CalendarDays,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
+  Database,
   Edit,
   FileText,
   Package,
@@ -115,8 +118,151 @@ function PurchaseDetail({ purchases }: {
   );
 }
 
+// ─── Aba Estoque INOVE ─────────────────────────────────────────────────────
+function InoveStockTab() {
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [grupo, setGrupo] = useState("");
+  const [lowStock, setLowStock] = useState(false);
+  const pageSize = 50;
+
+  const { data, isLoading } = trpc.inove.getStock.useQuery({
+    page,
+    pageSize,
+    search: search || undefined,
+    grupo: grupo || undefined,
+    lowStock: lowStock || undefined,
+  });
+
+  const fmt = (v: number) =>
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
+  const total = data?.total ?? 0;
+  const totalPages = Math.ceil(total / pageSize);
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    setSearch(searchInput);
+    setPage(1);
+  }
+
+  const stockColor = (s: number) =>
+    s <= 0 ? "text-red-600 bg-red-50" :
+    s <= 5 ? "text-amber-600 bg-amber-50" :
+    "text-emerald-600 bg-emerald-50";
+
+  return (
+    <div className="space-y-4">
+      {/* Filtros */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <form onSubmit={handleSearch} className="flex gap-2 flex-1">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar produto no INOVE..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Button type="submit" variant="outline" size="sm">Buscar</Button>
+        </form>
+        <Select value={grupo} onValueChange={(v) => { setGrupo(v === "__all__" ? "" : v); setPage(1); }}>
+          <SelectTrigger className="w-48">
+            <SelectValue placeholder="Todos os grupos" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Todos os grupos</SelectItem>
+            {(data?.grupos ?? []).map((g) => (
+              <SelectItem key={g} value={g}>{g}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          variant={lowStock ? "default" : "outline"}
+          size="sm"
+          className="gap-2 shrink-0"
+          onClick={() => { setLowStock(!lowStock); setPage(1); }}
+        >
+          <AlertTriangle className="h-4 w-4" />
+          Estoque baixo
+        </Button>
+      </div>
+
+      {/* Resumo */}
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span>{total.toLocaleString("pt-BR")} produto(s) encontrado(s)</span>
+        <Badge variant="outline" className="text-emerald-600 border-emerald-200 bg-emerald-50 text-xs">
+          <Database className="h-3 w-3 mr-1" />
+          PDV INOVE
+        </Badge>
+      </div>
+
+      {/* Lista */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <Card key={i} className="animate-pulse"><CardContent className="p-4 h-24 bg-muted/30" /></Card>
+          ))}
+        </div>
+      ) : (data?.items ?? []).length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center py-12 text-center">
+            <Database className="h-10 w-10 text-muted-foreground/40 mb-3" />
+            <p className="text-muted-foreground text-sm">Nenhum produto encontrado no estoque do INOVE.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data!.items.map((p) => (
+              <Card key={p.id} className="hover:shadow-sm transition-shadow">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate">{p.nome}</p>
+                      <p className="text-xs text-muted-foreground">{p.grupo}</p>
+                    </div>
+                    <span className={`text-xs font-bold px-2 py-1 rounded-full shrink-0 ${stockColor(p.saldo_atual)}`}>
+                      {p.saldo_atual % 1 === 0 ? p.saldo_atual.toFixed(0) : p.saldo_atual.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <p className="text-muted-foreground">Venda</p>
+                      <p className="font-medium">{fmt(p.preco_venda)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Custo</p>
+                      <p className="font-medium">{fmt(p.preco_custo)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Paginação */}
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>Página {page} de {totalPages || 1}</span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="icon" className="h-7 w-7" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                <ChevronLeft className="h-3 w-3" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-7 w-7" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                <ChevronRight className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
-export default function Products() {
+function Products() {
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -275,6 +421,10 @@ export default function Products() {
 
         <Tabs defaultValue="products">
           <TabsList>
+            <TabsTrigger value="inove" className="gap-2">
+              <Database className="h-4 w-4" />
+              Estoque PDV INOVE
+            </TabsTrigger>
             <TabsTrigger value="products" className="gap-2">
               <Package className="h-4 w-4" />
               Produtos Cadastrados
@@ -284,6 +434,11 @@ export default function Products() {
               Relatório de Compras
             </TabsTrigger>
           </TabsList>
+
+          {/* ── Aba: Estoque INOVE ── */}
+          <TabsContent value="inove" className="mt-4">
+            <InoveStockTab />
+          </TabsContent>
 
           {/* ── Aba: Produtos ── */}
           <TabsContent value="products" className="space-y-4 mt-4">
@@ -695,3 +850,5 @@ export default function Products() {
     </DashboardLayout>
   );
 }
+
+export default Products;

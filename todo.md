@@ -787,3 +787,9 @@
 - [x] Frontend MetaAds.tsx: aba "Comparativo" com tabela de custo/conta alcançada e custo/clique no link + 2 gráficos
 - [x] Frontend MetaAds.tsx: aba "Recomendações" separada com badge de contagem no menu
 - [x] Frontend Dashboard.tsx: card resumo Meta Ads (7 dias) clícavel com 4 KPIs e link para /meta-ads
+
+## Integração INOVE — Módulos de Vendas, Estoque e Dashboard
+- [ ] Router inove-data.ts: endpoints para vendas por dia, top produtos, KPIs, estoque do INOVE
+- [ ] Dashboard: gráfico de vendas por dia e top produtos vindos do INOVE
+- [ ] Página Vendas: tabela de vendas recentes e KPIs do INOVE
+- [ ] Página Estoque/Produtos: saldo real do INOVE (MVE_SALDO_ATUAL)
