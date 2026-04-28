@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload, CopyPlus, Square, CheckSquare, Download } from "lucide-react";
+import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload, CopyPlus, Square, CheckSquare, Download, Database, Loader2 } from "lucide-react";
 import { exportToExcel } from "@/lib/exportExcel";
 import { cn } from "@/lib/utils";
 const fmtBRL = (v: number) =>
@@ -113,6 +113,40 @@ export default function FinPayables() {
   const toggleSelectAll = () => {
     if (selectedIds.size === data.length) setSelectedIds(new Set());
     else setSelectedIds(new Set(data.map(t => t.id)));
+  };
+
+  // Importar vendas de ontem do INOVE como receitas
+  const [inoveImportOpen, setInoveImportOpen] = useState(false);
+  const [inoveImportCategoryId, setInoveImportCategoryId] = useState("none");
+  const [inoveImportBankId, setInoveImportBankId] = useState("none");
+  const { data: vendasOntem, isLoading: loadingOntem } = trpc.inove.getVendasOntem.useQuery(undefined, { enabled: inoveImportOpen });
+
+  const importInoveMut = trpc.fin.transactions.create.useMutation({
+    onSuccess: () => { utils.fin.transactions.list.invalidate(); utils.fin.dashboard.invalidate(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleInoveImport = async () => {
+    if (!vendasOntem || vendasOntem.formas.length === 0) { toast.error("Nenhuma venda encontrada para ontem"); return; }
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+    const yStr = yesterday.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric" });
+    let count = 0;
+    for (const forma of vendasOntem.formas) {
+      if (Number(forma.valor) <= 0) continue;
+      await importInoveMut.mutateAsync({
+        description: `Vendas INOVE ${yStr} — ${forma.forma}`,
+        amount: Number(forma.valor),
+        dueDate: new Date(yesterday.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }).split("/").reverse().join("-") + "T12:00:00"),
+        categoryId: inoveImportCategoryId !== "none" ? parseInt(inoveImportCategoryId) : undefined,
+        bankId: inoveImportBankId !== "none" ? parseInt(inoveImportBankId) : undefined,
+        isPaid: true,
+        paymentDate: new Date(yesterday.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }).split("/").reverse().join("-") + "T12:00:00"),
+        notes: `Importado automaticamente do PDV INOVE. ${forma.qtd} transações.`,
+      });
+      count++;
+    }
+    toast.success(`${count} lançamento(s) importado(s) do INOVE!`);
+    setInoveImportOpen(false);
   };
 
   const importMut = trpc.fin.transactions.importExcel.useMutation({
@@ -230,6 +264,9 @@ export default function FinPayables() {
               <Download className="h-4 w-4" /> Exportar Excel
             </Button>
           )}
+          <Button variant="outline" onClick={() => setInoveImportOpen(true)} className="gap-2 border-emerald-500/50 text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950">
+            <Database className="h-4 w-4" /> Importar INOVE
+          </Button>
           <Button variant="outline" onClick={() => setShowImport(true)} className="gap-2">
             <FileSpreadsheet className="h-4 w-4" /> Importar Excel
           </Button>
@@ -482,6 +519,71 @@ export default function FinPayables() {
               <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileImport} />
             </div>
             {importMut.isPending && <p className="text-center text-sm text-muted-foreground animate-pulse">Importando...</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Importar INOVE */}
+      <Dialog open={inoveImportOpen} onOpenChange={setInoveImportOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-emerald-600" />
+              Importar Vendas de Ontem — INOVE
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {loadingOntem ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" /> Buscando dados do INOVE...
+              </div>
+            ) : vendasOntem ? (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3">
+                  <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Vendas de ontem: {fmtBRL(Number(vendasOntem.total))} ({vendasOntem.qtd} transações)</p>
+                </div>
+                <div className="space-y-1">
+                  {vendasOntem.formas.map((f: any, i: number) => (
+                    <div key={i} className="flex justify-between text-sm px-1">
+                      <span className="text-muted-foreground">{f.forma}</span>
+                      <span className="font-medium">{fmtBRL(Number(f.valor))}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Categoria</Label>
+                    <Select value={inoveImportCategoryId} onValueChange={setInoveImportCategoryId}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Categoria" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Sem categoria</SelectItem>
+                        {categories.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Banco</Label>
+                    <Select value={inoveImportBankId} onValueChange={setInoveImportBankId}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Banco" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Sem banco</SelectItem>
+                        {banks.map(b => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button
+                  className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
+                  onClick={handleInoveImport}
+                  disabled={importInoveMut.isPending}
+                >
+                  {importInoveMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+                  Importar {vendasOntem.formas.length} lançamento(s)
+                </Button>
+              </div>
+            ) : (
+              <p className="text-center text-sm text-muted-foreground py-4">Conector INOVE não configurado ou sem vendas ontem.</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>

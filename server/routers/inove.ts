@@ -25,6 +25,7 @@ import {
 import { eq, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
 import * as mssqlLib from "mssql";
+import { notifyOwner } from "../_core/notification";
 
 // ── Tipos do SQL Server ───────────────────────────────────────────────────────
 interface MssqlConfig {
@@ -552,32 +553,33 @@ export const inoveRouter = router({
     const config = rows[0];
     try {
       const pool = await createInovePool(config);
-      const hoje = await pool.request().query(`
+      // Uma única query com múltiplos resultsets para reduzir latência
+      const result = await pool.request().query(`
         SELECT COUNT(*) as qtd, ISNULL(CAST(SUM(VEN_TOTAL) as float),0) as total
-        FROM VENDAS WHERE VEN_SITUACAO = 2 AND CONVERT(date, VEN_DATA_FIM) = CONVERT(date, GETDATE())
-      `);
-      const mes = await pool.request().query(`
+        FROM VENDAS WHERE VEN_SITUACAO = 2 AND CONVERT(date, VEN_DATA_FIM) = CONVERT(date, GETDATE());
+
         SELECT COUNT(*) as qtd, ISNULL(CAST(SUM(VEN_TOTAL) as float),0) as total
         FROM VENDAS WHERE VEN_SITUACAO = 2
-          AND YEAR(VEN_DATA_FIM) = YEAR(GETDATE()) AND MONTH(VEN_DATA_FIM) = MONTH(GETDATE())
-      `);
-      const ticket = await pool.request().query(`
+          AND YEAR(VEN_DATA_FIM) = YEAR(GETDATE()) AND MONTH(VEN_DATA_FIM) = MONTH(GETDATE());
+
         SELECT ISNULL(CAST(AVG(VEN_TOTAL) as float),0) as ticket_medio
-        FROM VENDAS WHERE VEN_SITUACAO = 2 AND VEN_DATA_FIM >= DATEADD(day, -30, GETDATE())
-      `);
-      const ontem = await pool.request().query(`
+        FROM VENDAS WHERE VEN_SITUACAO = 2 AND VEN_DATA_FIM >= DATEADD(day, -30, GETDATE());
+
         SELECT COUNT(*) as qtd, ISNULL(CAST(SUM(VEN_TOTAL) as float),0) as total
         FROM VENDAS WHERE VEN_SITUACAO = 2
-          AND CONVERT(date, VEN_DATA_FIM) = CONVERT(date, DATEADD(day, -1, GETDATE()))
+          AND CONVERT(date, VEN_DATA_FIM) = CONVERT(date, DATEADD(day, -1, GETDATE()));
       `);
       await pool.close();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sets = (result as any).recordsets as Array<Array<Record<string, number>>>;
       return {
-        vendas_hoje: hoje.recordset[0] as { qtd: number; total: number },
-        vendas_mes: mes.recordset[0] as { qtd: number; total: number },
-        ticket_medio: (ticket.recordset[0] as { ticket_medio: number }).ticket_medio,
-        vendas_ontem: ontem.recordset[0] as { qtd: number; total: number },
+        vendas_hoje: { qtd: Number(sets[0][0].qtd), total: Number(sets[0][0].total) },
+        vendas_mes: { qtd: Number(sets[1][0].qtd), total: Number(sets[1][0].total) },
+        ticket_medio: Number(sets[2][0].ticket_medio),
+        vendas_ontem: { qtd: Number(sets[3][0].qtd), total: Number(sets[3][0].total) },
       };
-    } catch {
+    } catch (err) {
+      console.error('[getKpis] Erro:', err);
       return null;
     }
   }),
@@ -1206,6 +1208,45 @@ export const inoveRouter = router({
       return res.recordset as Array<{ forma: string; total: number; qtd: number }>;
     } catch { return []; }
   }),
+
+  // ── Alerta automático de estoque baixo ─────────────────────────────────────────────
+  checkLowStockAlert: protectedProcedure
+    .input(z.object({ threshold: z.number().default(0) }).optional())
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return { sent: false, reason: "Conector inativo" };
+      const config = rows[0];
+      const threshold = input?.threshold ?? 0;
+      try {
+        const pool = await createInovePool(config);
+        const result = await pool.request().query(`
+          SELECT TOP 50
+            p.PRO_NOME as nome,
+            p.PRO_CODIGO as codigo,
+            me.MVE_SALDO_ATUAL as saldo
+          FROM PRODUTOS p
+          INNER JOIN (
+            SELECT PRODUTO, MAX(MOVIMENTO_ESTOQUE) as ultimo_mov
+            FROM MOVIMENTOS_ESTOQUES GROUP BY PRODUTO
+          ) ult ON ult.PRODUTO = p.PRODUTO
+          INNER JOIN MOVIMENTOS_ESTOQUES me ON me.MOVIMENTO_ESTOQUE = ult.ultimo_mov
+          WHERE me.MVE_SALDO_ATUAL <= ${threshold}
+          ORDER BY me.MVE_SALDO_ATUAL ASC
+        `);
+        await pool.close();
+        const lowItems = result.recordset as Array<{ nome: string; codigo: string; saldo: number }>;
+        if (lowItems.length === 0) return { sent: false, reason: "Nenhum produto com estoque baixo" };
+        const lines = lowItems.slice(0, 20).map(i => `• ${i.nome}: ${i.saldo} un`).join("\n");
+        const content = `Foram encontrados ${lowItems.length} produto(s) com estoque ≤ ${threshold} no PDV INOVE:\n\n${lines}${lowItems.length > 20 ? `\n... e mais ${lowItems.length - 20} produto(s)` : ""}`;
+        const sent = await notifyOwner({ title: `⚠️ Alerta de Estoque Baixo — ${lowItems.length} produto(s)`, content });
+        return { sent, count: lowItems.length, items: lowItems.slice(0, 10) };
+      } catch (err) {
+        console.error("[checkLowStockAlert]", err);
+        throw new Error("Erro ao verificar estoque no INOVE");
+      }
+    }),
 
 });
 

@@ -7,6 +7,8 @@ import { Link } from "wouter";
 import {
   AlertTriangle,
   BarChart3,
+  Cloud,
+  CloudRain,
   DollarSign,
   Eye,
   IceCream,
@@ -14,11 +16,14 @@ import {
   MousePointerClick,
   Package,
   ShoppingCart,
+  Sun,
   TrendingUp,
   Users,
   Star,
   Trophy,
+  Wind,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -59,6 +64,80 @@ function StatCard({
           </div>
           <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
             <Icon className="h-5 w-5 text-white" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Widget de Previsão do Tempo (Open-Meteo — Uberlândia/MG) ─────────────────
+const WMO_ICONS: Record<number, { label: string; Icon: React.ElementType; color: string }> = {
+  0: { label: "Céu limpo", Icon: Sun, color: "text-yellow-500" },
+  1: { label: "Poucas nuvens", Icon: Sun, color: "text-yellow-400" },
+  2: { label: "Parcialmente nublado", Icon: Cloud, color: "text-slate-400" },
+  3: { label: "Nublado", Icon: Cloud, color: "text-slate-500" },
+  45: { label: "Névoa", Icon: Wind, color: "text-slate-400" },
+  48: { label: "Névoa", Icon: Wind, color: "text-slate-400" },
+  51: { label: "Garoa leve", Icon: CloudRain, color: "text-blue-400" },
+  61: { label: "Chuva leve", Icon: CloudRain, color: "text-blue-500" },
+  63: { label: "Chuva moderada", Icon: CloudRain, color: "text-blue-600" },
+  80: { label: "Pancadas leves", Icon: CloudRain, color: "text-blue-400" },
+  81: { label: "Pancadas", Icon: CloudRain, color: "text-blue-500" },
+  95: { label: "Tempestade", Icon: CloudRain, color: "text-indigo-600" },
+};
+function getWmo(code: number) {
+  return WMO_ICONS[code] ?? { label: "Variável", Icon: Cloud, color: "text-slate-400" };
+}
+const DIAS = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+function WeatherWidget() {
+  const [weather, setWeather] = useState<{
+    current: { temp: number; code: number; wind: number };
+    daily: Array<{ date: string; max: number; min: number; code: number; precip: number }>;
+  } | null>(null);
+  useEffect(() => {
+    // Uberlândia, MG — lat: -18.9186, lon: -48.2772
+    fetch("https://api.open-meteo.com/v1/forecast?latitude=-18.9186&longitude=-48.2772&current=temperature_2m,weathercode,windspeed_10m&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=America%2FSao_Paulo&forecast_days=4")
+      .then(r => r.json())
+      .then(d => {
+        setWeather({
+          current: { temp: Math.round(d.current.temperature_2m), code: d.current.weathercode, wind: Math.round(d.current.windspeed_10m) },
+          daily: d.daily.time.slice(0, 4).map((date: string, i: number) => ({
+            date, max: Math.round(d.daily.temperature_2m_max[i]), min: Math.round(d.daily.temperature_2m_min[i]),
+            code: d.daily.weathercode[i], precip: d.daily.precipitation_sum[i],
+          })),
+        });
+      }).catch(() => {});
+  }, []);
+  if (!weather) return null;
+  const now = getWmo(weather.current.code);
+  const NowIcon = now.Icon;
+  return (
+    <Card className="border-0 shadow-sm bg-gradient-to-br from-sky-50 to-blue-50 dark:from-sky-950/30 dark:to-blue-950/30">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <NowIcon className={`h-10 w-10 ${now.color}`} />
+            <div>
+              <p className="text-3xl font-bold text-foreground">{weather.current.temp}°C</p>
+              <p className="text-xs text-muted-foreground">{now.label} · Vento {weather.current.wind} km/h</p>
+              <p className="text-xs font-medium text-sky-700 dark:text-sky-400">Uberlândia, MG</p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            {weather.daily.slice(1).map((d, i) => {
+              const w = getWmo(d.code); const DIcon = w.Icon;
+              const date = new Date(d.date + "T12:00:00-03:00");
+              return (
+                <div key={i} className="text-center">
+                  <p className="text-xs text-muted-foreground font-medium">{DIAS[date.getDay()]}</p>
+                  <DIcon className={`h-5 w-5 mx-auto my-1 ${w.color}`} />
+                  <p className="text-xs font-semibold">{d.max}°</p>
+                  <p className="text-xs text-muted-foreground">{d.min}°</p>
+                  {d.precip > 0 && <p className="text-xs text-blue-500">{d.precip}mm</p>}
+                </div>
+              );
+            })}
           </div>
         </div>
       </CardContent>
@@ -166,6 +245,9 @@ export default function Dashboard() {
             gradient="bg-gradient-to-br from-amber-500 to-orange-600"
           />
         </div>
+
+        {/* Widget de Previsão do Tempo */}
+        <WeatherWidget />
 
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

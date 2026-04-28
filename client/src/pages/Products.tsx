@@ -30,9 +30,11 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Bell,
   Database,
   Edit,
   FileText,
+  Loader2,
   Package,
   Plus,
   Search,
@@ -119,6 +121,28 @@ function PurchaseDetail({ purchases }: {
 }
 
 // ─── Aba Estoque INOVE ─────────────────────────────────────────────────────
+function AlertButton() {
+  const alertMut = trpc.inove.checkLowStockAlert.useMutation({
+    onSuccess: (r) => {
+      if (r.sent) toast.success(`Alerta enviado! ${r.count} produto(s) com estoque baixo.`);
+      else toast.info(r.reason ?? "Nenhum produto com estoque baixo.");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="gap-2 shrink-0 border-amber-500/50 text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950"
+      onClick={() => alertMut.mutate({ threshold: 0 })}
+      disabled={alertMut.isPending}
+    >
+      {alertMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+      Alertar Estoque Baixo
+    </Button>
+  );
+}
+
 function InoveStockTab() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -188,6 +212,7 @@ function InoveStockTab() {
           <AlertTriangle className="h-4 w-4" />
           Estoque baixo
         </Button>
+        <AlertButton />
       </div>
 
       {/* Resumo */}
