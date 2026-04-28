@@ -81,11 +81,12 @@ export default function Dashboard() {
   const { data: inoveSalesByDay = [] } = trpc.inove.getSalesByDay.useQuery({ days: 30 });
   const { data: inoveTopProducts = [] } = trpc.inove.getTopProducts.useQuery({ days: 30, limit: 8 });
   const { data: inoveKpis } = trpc.inove.getKpis.useQuery();
+  const { data: vendasHoje } = trpc.inove.getVendasHoje.useQuery(undefined, { refetchInterval: 60000 });
 
   // Gráfico: prioriza INOVE se disponível, senão usa dados locais
   const salesChart = inoveSalesByDay.length > 0
     ? inoveSalesByDay.map((d) => ({
-        date: new Date(d.dia + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        date: new Date(d.dia + 'T00:00:00-03:00').toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' }),
         total: d.total,
         count: d.qtd,
       }))
@@ -134,9 +135,9 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             title="Vendas Hoje"
-            value={formatCurrency(inoveKpis ? inoveKpis.vendas_hoje.total : (metrics?.todaySalesTotal ?? 0))}
-            subtitle={inoveKpis
-              ? `${inoveKpis.vendas_hoje.qtd} transações · PDV`
+            value={formatCurrency(vendasHoje ? vendasHoje.total : (metrics?.todaySalesTotal ?? 0))}
+            subtitle={vendasHoje
+              ? `${vendasHoje.qtd} transações · PDV INOVE`
               : `${metrics?.todaySalesCount ?? 0} transações`}
             icon={ShoppingCart}
             gradient="bg-gradient-to-br from-violet-600 to-purple-700"

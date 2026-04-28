@@ -1,5 +1,6 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import BackButton from "@/components/BackButton";
+import { formatDateTimeBRT } from "@/lib/dateUtils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -180,7 +181,7 @@ function InoveSalesTab() {
                         </Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(s.data).toLocaleString("pt-BR")}
+                        {formatDateTimeBRT(s.data)}
                         {s.cliente && (
                           <span className="ml-2 flex items-center gap-1 inline-flex">
                             <User className="h-3 w-3" />
@@ -238,7 +239,7 @@ function InoveSalesTab() {
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground text-xs">Data</p>
-                    <p className="font-medium">{new Date(detail.venda.data).toLocaleString("pt-BR")}</p>
+                    <p className="font-medium">{formatDateTimeBRT(detail.venda.data)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground text-xs">Total</p>

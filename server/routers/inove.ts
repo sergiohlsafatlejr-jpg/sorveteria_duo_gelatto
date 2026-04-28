@@ -19,6 +19,8 @@ import {
   customers,
   customerPurchases,
   customerLoyaltyTokens,
+  products,
+  stockMovements,
 } from "../../drizzle/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
@@ -978,5 +980,232 @@ export const inoveRouter = router({
         throw new Error(msg);
       }
     }),
+
+  // ── KPI Vendas do Dia (INOVE) ─────────────────────────────────────────────────
+  getVendasHoje: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const rows = await db.select().from(inoveConnectorConfig).limit(1);
+    if (rows.length === 0 || !rows[0].active) return null;
+    const config = rows[0];
+    try {
+      const pool = await createInovePool(config);
+      const res = await pool.request().query(`
+        SELECT
+          COUNT(*) as qtd,
+          ISNULL(SUM(VEN_TOTAL), 0) as total,
+          ISNULL(AVG(VEN_TOTAL), 0) as ticketMedio,
+          ISNULL(SUM(CASE WHEN CAST(VEN_DATA_FIM AS TIME) < '12:00' THEN VEN_TOTAL ELSE 0 END), 0) as manha,
+          ISNULL(SUM(CASE WHEN CAST(VEN_DATA_FIM AS TIME) >= '12:00' THEN VEN_TOTAL ELSE 0 END), 0) as tarde
+        FROM VENDAS
+        WHERE CAST(VEN_DATA_FIM AS DATE) = CAST(GETDATE() AS DATE)
+          AND VEN_SITUACAO = 2
+      `);
+      await pool.close();
+      const r = res.recordset[0] as { qtd: number; total: number; ticketMedio: number; manha: number; tarde: number };
+      return { qtd: r.qtd, total: Number(r.total), ticketMedio: Number(r.ticketMedio), manha: Number(r.manha), tarde: Number(r.tarde) };
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : String(err));
+    }
+  }),
+
+  // ── Dados de Ontem por Forma de Pagamento (para Previsão de Pagamento) ────────
+  getVendasOntem: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const rows = await db.select().from(inoveConnectorConfig).limit(1);
+    if (rows.length === 0 || !rows[0].active) return null;
+    const config = rows[0];
+    try {
+      const pool = await createInovePool(config);
+      const res = await pool.request().query(`
+        SELECT fp.PAG_NOME as forma,
+          ISNULL(SUM(pv.PAG_VALOR), 0) as valor,
+          COUNT(DISTINCT pv.VENDA) as qtd
+        FROM PAGAMENTOS_VENDAS pv
+        JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+        JOIN VENDAS v ON v.VENDA = pv.VENDA
+        WHERE CAST(v.VEN_DATA_FIM AS DATE) = CAST(DATEADD(day,-1,GETDATE()) AS DATE)
+          AND v.VEN_SITUACAO = 2
+        GROUP BY fp.PAG_NOME ORDER BY valor DESC
+      `);
+      const tot = await pool.request().query(`
+        SELECT ISNULL(SUM(VEN_TOTAL),0) as total, COUNT(*) as qtd
+        FROM VENDAS
+        WHERE CAST(VEN_DATA_FIM AS DATE) = CAST(DATEADD(day,-1,GETDATE()) AS DATE)
+          AND VEN_SITUACAO = 2
+      `);
+      await pool.close();
+      return {
+        formas: res.recordset as Array<{ forma: string; valor: number; qtd: number }>,
+        total: Number((tot.recordset[0] as { total: number }).total),
+        qtd: Number((tot.recordset[0] as { qtd: number }).qtd),
+      };
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : String(err));
+    }
+  }),
+
+  // ── Médias Históricas por Mês (para Fluxo de Caixa Preditivo) ─────────────────
+  getMediasHistoricas: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const rows = await db.select().from(inoveConnectorConfig).limit(1);
+    if (rows.length === 0 || !rows[0].active) return null;
+    const config = rows[0];
+    try {
+      const pool = await createInovePool(config);
+      const res = await pool.request().query(`
+        SELECT MONTH(VEN_DATA_FIM) as mes, YEAR(VEN_DATA_FIM) as ano,
+          ISNULL(SUM(VEN_TOTAL), 0) as total, COUNT(*) as qtd,
+          ISNULL(AVG(VEN_TOTAL), 0) as ticketMedio
+        FROM VENDAS
+        WHERE VEN_SITUACAO = 2 AND VEN_DATA_FIM >= DATEADD(year,-3,GETDATE())
+        GROUP BY YEAR(VEN_DATA_FIM), MONTH(VEN_DATA_FIM)
+        ORDER BY ano, mes
+      `);
+      await pool.close();
+      return res.recordset as Array<{ mes: number; ano: number; total: number; qtd: number; ticketMedio: number }>;
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : String(err));
+    }
+  }),
+
+  // ── Baixa Automática de Estoque pelas Vendas INOVE ───────────────────────────
+  syncStockFromSales: protectedProcedure
+    .input(z.object({ hours: z.number().int().min(1).max(48).default(1) }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE não ativo");
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const itens = await pool.request().query(`
+          SELECT i.ITE_NOME as nome, p.PRO_CODIGO_BARRAS as barcode,
+            ISNULL(SUM(i.ITE_QUANTIDADE), 0) as qtdVendida
+          FROM ITENS_VENDAS i
+          JOIN VENDAS v ON v.VENDA = i.VENDA
+          LEFT JOIN PRODUTOS p ON p.PRODUTO = i.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= DATEADD(hour, -${input.hours}, GETDATE())
+          GROUP BY i.ITE_NOME, p.PRO_CODIGO_BARRAS
+        `);
+        await pool.close();
+        let baixados = 0; let naoEncontrados = 0;
+        const erros: string[] = [];
+        for (const item of itens.recordset as Array<{ nome: string; barcode: string | null; qtdVendida: number }>) {
+          try {
+            const qtd = Math.round(Number(item.qtdVendida));
+            if (qtd <= 0) continue;
+            const [local] = await db
+              .select({ id: products.id, currentStock: products.currentStock })
+              .from(products)
+              .where(item.barcode
+                ? sql`barcode = ${item.barcode} OR externalCode = ${item.barcode}`
+                : sql`name = ${item.nome}`)
+              .limit(1);
+            if (!local) { naoEncontrados++; continue; }
+            const novoSaldo = local.currentStock - qtd;
+            await db.update(products).set({ currentStock: novoSaldo, updatedAt: new Date() }).where(eq(products.id, local.id));
+            await db.insert(stockMovements).values({
+              productId: local.id, type: "sale", quantity: qtd,
+              previousStock: local.currentStock, newStock: novoSaldo,
+              reason: `Venda PDV INOVE (últimas ${input.hours}h)`,
+            });
+            baixados++;
+          } catch (e) { erros.push(`${item.nome}: ${String(e)}`); }
+        }
+        return { baixados, naoEncontrados, total: (itens.recordset as unknown[]).length, erros: erros.slice(0, 10) };
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+  // ── Relatório de Custo/Margem por Produto ─────────────────────────────────────
+  getCostMarginReport: protectedProcedure
+    .input(z.object({
+      search: z.string().optional(),
+      minMargin: z.number().optional(),
+      maxMargin: z.number().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) {
+        const prods = await db.select({
+          id: products.id, name: products.name, barcode: products.barcode,
+          costPrice: products.costPrice, salePrice: products.salePrice, currentStock: products.currentStock,
+        }).from(products).where(eq(products.active, true));
+        return prods.map(p => ({
+          id: p.id, nome: p.name, barcode: p.barcode,
+          custo: Number(p.costPrice), venda: Number(p.salePrice),
+          margem: p.salePrice && p.costPrice && Number(p.salePrice) > 0
+            ? ((Number(p.salePrice) - Number(p.costPrice)) / Number(p.salePrice)) * 100 : 0,
+          lucro: Number(p.salePrice) - Number(p.costPrice),
+          estoque: p.currentStock, fonte: "local" as const,
+        }));
+      }
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const sf = input.search ? `AND (p.PRO_DESCRICAO LIKE '%${input.search.replace(/'/g,"''")}%' OR p.PRO_CODIGO_BARRAS LIKE '%${input.search.replace(/'/g,"''")}%')` : "";
+        const res = await pool.request().query(`
+          SELECT p.PRODUTO as id, p.PRO_DESCRICAO as nome, p.PRO_CODIGO_BARRAS as barcode,
+            ISNULL(CAST(p.PRO_CUSTO as float), 0) as custo,
+            ISNULL(CAST(p.PRO_VENDA as float), 0) as venda,
+            ISNULL((
+              SELECT TOP 1 CAST(MVE_SALDO_ATUAL as float) FROM MOVIMENTOS_ESTOQUES me
+              WHERE me.PRODUTO = p.PRODUTO ORDER BY me.MOVIMENTO_ESTOQUE DESC
+            ), 0) as estoque
+          FROM PRODUTOS p WHERE p.PRO_ATIVO = 1 ${sf} ORDER BY p.PRO_DESCRICAO
+        `);
+        await pool.close();
+        return (res.recordset as Array<{ id: number; nome: string; barcode: string; custo: number; venda: number; estoque: number }>)
+          .map(p => ({
+            id: p.id, nome: p.nome, barcode: p.barcode,
+            custo: Number(p.custo), venda: Number(p.venda),
+            margem: p.venda > 0 ? ((p.venda - p.custo) / p.venda) * 100 : 0,
+            lucro: p.venda - p.custo, estoque: Number(p.estoque), fonte: "inove" as const,
+          }))
+          .filter(p => {
+            if (input.minMargin !== undefined && p.margem < input.minMargin) return false;
+            if (input.maxMargin !== undefined && p.margem > input.maxMargin) return false;
+            return true;
+          });
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+  // ── Vendas de ontem por forma de pagamento (para popular Previsão de Pagamento) ─────────────────────
+  getYesterdayByPayment: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return [];
+    const rows = await db.select().from(inoveConnectorConfig).limit(1);
+    if (rows.length === 0 || !rows[0].active) return [];
+    const config = rows[0];
+    try {
+      const pool = await createInovePool(config);
+      const res = await pool.request().query(`
+        SELECT
+          fp.PAG_NOME as forma,
+          CAST(SUM(pv.PAG_VALOR) as float) as total,
+          COUNT(DISTINCT pv.VENDA) as qtd
+        FROM PAGAMENTOS_VENDAS pv
+        JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+        JOIN VENDAS v ON v.VENDA = pv.VENDA
+        WHERE v.VEN_SITUACAO = 2
+          AND CAST(v.VEN_DATA_FIM as date) = CAST(DATEADD(day,-1,GETDATE()) as date)
+        GROUP BY fp.PAG_NOME
+        ORDER BY total DESC
+      `);
+      await pool.close();
+      return res.recordset as Array<{ forma: string; total: number; qtd: number }>;
+    } catch { return []; }
+  }),
+
 });
 

@@ -18,6 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useState, useMemo } from "react";
+import { todayBRT } from "@/lib/dateUtils";
 import { toast } from "sonner";
 import {
   BarChart,
@@ -61,8 +62,8 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 
 // ── Aba: Vendas por Hora ───────────────────────────────────────────────────────
 function SalesByHourTab() {
-  const today = new Date().toISOString().split("T")[0];
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0];
+  const today = todayBRT();
+  const thirtyDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).split("/").reverse().join("-"); })();
 
   const [dateFrom, setDateFrom] = useState(thirtyDaysAgo);
   const [dateTo, setDateTo] = useState(today);
@@ -241,8 +242,8 @@ function SalesByHourTab() {
 
 // ── Aba: Vendas por Tipo de Pagamento ─────────────────────────────────────────
 function SalesByPaymentTab() {
-  const today = new Date().toISOString().split("T")[0];
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0];
+  const today = todayBRT();
+  const thirtyDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).split("/").reverse().join("-"); })();
 
   const [dateFrom, setDateFrom] = useState(thirtyDaysAgo);
   const [dateTo, setDateTo] = useState(today);
