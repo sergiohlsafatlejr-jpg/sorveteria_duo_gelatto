@@ -60,6 +60,7 @@ import {
   Wallet,
   Megaphone,
   Search,
+  FileText,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -137,13 +138,26 @@ const menuGroups: MenuGroup[] = [
     ],
   },
   {
+    icon: FileText,
+    label: "Relatórios",
+    items: [
+      { icon: BarChart3, label: "Módulo de Relatórios", path: "/reports" },
+      { icon: BarChart2, label: "Relatório de Vendas", path: "/sales/sales-report" },
+      { icon: TrendingUp, label: "Relatórios Gerenciais", path: "/gerencial" },
+      { icon: BarChart3, label: "Relatórios INOVE PDV", path: "/inove-reports" },
+      { icon: CalendarDays, label: "Previsão de Faturamento", path: "/fin/forecast" },
+      { icon: Target, label: "Meta de Gerência", path: "/fin/goals" },
+      { icon: Activity, label: "Fluxo de Caixa", path: "/fin/cashflow" },
+      { icon: BarChart2, label: "Comparativo Mensal", path: "/fin/monthly-comparison" },
+    ],
+  },
+  {
     icon: UserCog,
     label: "Administração",
     items: [
       { icon: UserCog, label: "Usuários", path: "/users" },
       { icon: Database, label: "Conector Externo", path: "/connector" },
       { icon: Database, label: "Conector INOVE PDV", path: "/inove-connector" },
-      { icon: BarChart3, label: "Relatórios INOVE", path: "/inove-reports" },
     ],
   },
 ];

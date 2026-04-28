@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import {
   Sun, Cloud, CloudRain, CloudLightning, HelpCircle,
   TrendingUp, CalendarDays, DollarSign, Umbrella, Settings2,
-  ChevronLeft, ChevronRight, CheckCircle2, BarChart3, CopyPlus, Square, CheckSquare, Target, Trash2, AlertTriangle,
+  ChevronLeft, ChevronRight, CheckCircle2, BarChart3, CopyPlus, Square, CheckSquare, Target, Trash2, AlertTriangle, Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -216,6 +216,9 @@ export default function FinRevenueForecast() {
   });
 
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showInoveImport, setShowInoveImport] = useState(false);
+  const [inoveImporting, setInoveImporting] = useState(false);
+  const { data: vendasOntem } = trpc.inove.getVendasOntem.useQuery();
   const clearMonthMut = trpc.fin.forecastCalendar.clearMonthRealRevenues.useMutation({
     onSuccess: (r: { deleted: number }) => {
       utils.fin.forecastCalendar.getRealRevenues.invalidate();
@@ -335,6 +338,14 @@ export default function FinRevenueForecast() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline" size="sm"
+              onClick={() => setShowInoveImport(true)}
+              className="gap-2 h-8 text-xs border-blue-500/50 text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950"
+            >
+              <Database className="h-3.5 w-3.5" />
+              Importar INOVE
+            </Button>
             <Button
               variant="outline" size="sm"
               onClick={() => setShowAccuracy(s => !s)}
@@ -960,6 +971,80 @@ export default function FinRevenueForecast() {
                 {clearMonthMut.isPending ? "Apagando..." : "Apagar Tudo"}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Modal Importar INOVE */}
+      <Dialog open={showInoveImport} onOpenChange={setShowInoveImport}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-blue-400" />
+              Importar Faturamento de Ontem — INOVE
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {!vendasOntem ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+                <span className="animate-pulse text-sm">Buscando dados do INOVE...</span>
+              </div>
+            ) : vendasOntem.qtd > 0 ? (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3">
+                  <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                    Vendas de ontem: {fmtBRL(Number(vendasOntem.total))} ({vendasOntem.qtd} transações)
+                  </p>
+
+                </div>
+                <div className="space-y-1">
+                  {(vendasOntem.formas ?? []).map((f: { forma: string; valor: number | string }, i: number) => (
+                    <div key={i} className="flex justify-between text-sm px-1">
+                      <span className="text-muted-foreground">{f.forma}</span>
+                      <span className="font-medium">{fmtBRL(Number(f.valor))}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2">
+                  Isso irá salvar o total de <strong>{fmtBRL(Number(vendasOntem.total))}</strong> como faturamento real do dia anterior no calendário de previsão.
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setShowInoveImport(false)} className="flex-1 h-9 text-sm">
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="flex-1 h-9 text-sm bg-blue-600 hover:bg-blue-700 text-white gap-2"
+                    disabled={inoveImporting}
+                    onClick={async () => {
+                      setInoveImporting(true);
+                      try {
+                        // Calcula a data de ontem no fuso de Brasília
+                        const now = new Date();
+                        const brtOffset = -3 * 60;
+                        const brtNow = new Date(now.getTime() + (brtOffset - now.getTimezoneOffset()) * 60000);
+                        brtNow.setDate(brtNow.getDate() - 1);
+                        const dateStr = brtNow.toISOString().slice(0, 10);
+                        await saveRealMut.mutateAsync({
+                          revenueDate: dateStr,
+                          realAmount: Number(vendasOntem.total),
+                          note: `Importado do INOVE PDV (${vendasOntem.qtd} vendas)`,
+                        });
+                        setShowInoveImport(false);
+                        toast.success(`Faturamento de ${fmtBRL(Number(vendasOntem.total))} importado do INOVE!`);
+                      } catch (e: unknown) {
+                        toast.error(e instanceof Error ? e.message : "Erro ao importar");
+                      } finally {
+                        setInoveImporting(false);
+                      }
+                    }}
+                  >
+                    <Database className="h-4 w-4" />
+                    Importar {fmtBRL(Number(vendasOntem.total))}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-center text-sm text-muted-foreground py-4">Conector INOVE não configurado ou sem vendas ontem.</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>
