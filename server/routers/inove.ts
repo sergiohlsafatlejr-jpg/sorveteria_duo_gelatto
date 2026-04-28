@@ -818,10 +818,25 @@ export const inoveRouter = router({
               unit: "un",
               active: true,
             });
-            const newId = (newProd as unknown as { insertId: number }).insertId;
-            if (saldoInt !== 0) {
+            // Drizzle com MySQL retorna insertId como BigInt — converter para number
+            const rawInsertId = (newProd as unknown as { insertId: bigint | number }).insertId;
+            const newId = rawInsertId ? Number(rawInsertId) : 0;
+
+            // Fallback: se insertId não veio, buscar pelo barcode/externalCode
+            let resolvedId = newId;
+            if (!resolvedId) {
+              const lookupKey = bc ?? String(ip.inove_id);
+              const [found] = await db
+                .select({ id: products.id })
+                .from(products)
+                .where(sql`externalCode = ${lookupKey} OR barcode = ${lookupKey}`)
+                .limit(1);
+              resolvedId = found?.id ?? 0;
+            }
+
+            if (resolvedId && saldoInt !== 0) {
               await db.insert(stockMovements).values({
-                productId: newId,
+                productId: resolvedId,
                 type: "adjustment",
                 quantity: Math.abs(saldoInt),
                 previousStock: 0,
