@@ -12,8 +12,8 @@ import {
   PieChart, Pie, Cell, LineChart, Line,
 } from "recharts";
 import {
-  TrendingUp, TrendingDown, DollarSign, ShoppingCart, Package,
-  CreditCard, BarChart2, Search, Warehouse, AlertTriangle, CheckCircle2, Clock, Download,
+  TrendingUp, DollarSign, ShoppingCart, Package,
+  CreditCard, BarChart2, Search, Warehouse, AlertTriangle, Download, Database, Wifi,
 } from "lucide-react";
 import { exportToExcel } from "@/lib/exportExcel";
 
@@ -41,6 +41,19 @@ function monthLabel(m: string) {
   return `${MONTHS_PT[parseInt(mo) - 1]}/${y}`;
 }
 
+function FonteBadge({ fonte }: { fonte?: string | null }) {
+  if (!fonte) return null;
+  return fonte === "inove" ? (
+    <Badge className="text-[10px] bg-green-500 text-white gap-1 px-2 py-0.5">
+      <Wifi className="w-3 h-3" /> INOVE
+    </Badge>
+  ) : (
+    <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0.5 text-muted-foreground">
+      <Database className="w-3 h-3" /> Local
+    </Badge>
+  );
+}
+
 function KpiCard({ title, value, sub, icon: Icon, color }: {
   title: string; value: string; sub?: string; icon: React.ElementType; color: string;
 }) {
@@ -64,9 +77,23 @@ function KpiCard({ title, value, sub, icon: Icon, color }: {
 
 // ─── Aba: Custo x Venda ───────────────────────────────────────────────────────
 function CostVsSalesTab({ referenceMonth }: { referenceMonth?: string }) {
-  const { data = [], isLoading } = trpc.reports.costVsSales.useQuery({ referenceMonth });
+  const { data: rawData = [], isLoading } = trpc.inove.getCostVsSalesInove.useQuery({ referenceMonth });
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"revenue" | "margin" | "profit">("revenue");
+
+  const fonte = rawData.length > 0 ? (rawData[0] as any).fonte : null;
+  const data = rawData.map((r: any) => ({
+    productId: r.productId ?? r.produtoId ?? 0,
+    productName: r.productName ?? r.nome ?? "",
+    costPrice: Number(r.costPrice ?? 0),
+    avgSalePrice: Number(r.avgSalePrice ?? 0),
+    totalQty: Number(r.totalQty ?? 0),
+    totalRevenue: Number(r.totalRevenue ?? 0),
+    totalCost: Number(r.totalCost ?? 0),
+    grossProfit: Number(r.grossProfit ?? 0),
+    margin: Number(r.margin ?? 0),
+    referenceMonth: r.referenceMonth ?? "",
+  }));
 
   const filtered = useMemo(() => {
     return [...data]
@@ -88,6 +115,9 @@ function CostVsSalesTab({ referenceMonth }: { referenceMonth?: string }) {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <FonteBadge fonte={fonte} />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <KpiCard title="Receita Total" value={fmt(totalRevenue)} icon={TrendingUp} color="bg-green-500" />
         <KpiCard title="CMV Total" value={fmt(totalCMV)} sub={`${fmtPct(totalRevenue > 0 ? (totalCMV / totalRevenue) * 100 : 0)} da receita`} icon={Package} color="bg-orange-500" />
@@ -136,7 +166,7 @@ function CostVsSalesTab({ referenceMonth }: { referenceMonth?: string }) {
               {filtered.length > 0 && (
                 <button
                   onClick={() => {
-                    const rows = filtered.map((r: any) => ({
+                    const rows = filtered.map((r) => ({
                       "Produto": r.productName,
                       "Qtd Vendida": r.totalQty,
                       "Preço Médio (R$)": parseFloat(Number(r.avgSalePrice).toFixed(2)),
@@ -172,8 +202,11 @@ function CostVsSalesTab({ referenceMonth }: { referenceMonth?: string }) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
-                  <tr key={r.productId} className="border-b hover:bg-muted/30">
+                {filtered.length === 0 && (
+                  <tr><td colSpan={8} className="text-center py-8 text-muted-foreground">Nenhum dado encontrado.</td></tr>
+                )}
+                {filtered.map((r, i) => (
+                  <tr key={`${r.productId}-${i}`} className="border-b hover:bg-muted/30">
                     <td className="py-2 px-4 max-w-[200px] truncate">{r.productName}</td>
                     <td className="py-2 px-3 text-right font-mono text-xs">{fmtQty(r.totalQty)}</td>
                     <td className="py-2 px-3 text-right font-mono text-xs">{fmt(r.avgSalePrice)}</td>
@@ -211,7 +244,21 @@ function CostVsSalesTab({ referenceMonth }: { referenceMonth?: string }) {
 
 // ─── Aba: Produtos Mais Vendidos ──────────────────────────────────────────────
 function TopProductsTab({ referenceMonth }: { referenceMonth?: string }) {
-  const { data = [], isLoading } = trpc.reports.topProducts.useQuery({ referenceMonth, limit: 30 });
+  const { data: rawData = [], isLoading } = trpc.inove.getTopProductsInove.useQuery({ referenceMonth, limit: 30 });
+
+  const fonte = rawData.length > 0 ? (rawData[0] as any).fonte : null;
+  const data = rawData.map((r: any, i: number) => ({
+    rank: r.rank ?? i + 1,
+    productId: r.productId ?? r.produtoId ?? 0,
+    productName: r.productName ?? r.nome ?? "",
+    costPrice: Number(r.costPrice ?? r.custo ?? 0),
+    avgSalePrice: Number(r.avgSalePrice ?? 0),
+    totalQty: Number(r.totalQty ?? r.qtd ?? 0),
+    totalRevenue: Number(r.totalRevenue ?? r.faturamento ?? 0),
+    totalCost: Number(r.totalCost ?? 0),
+    grossProfit: Number(r.grossProfit ?? 0),
+    margin: Number(r.margin ?? 0),
+  }));
 
   if (isLoading) return <div className="text-center py-12 text-muted-foreground">Carregando...</div>;
 
@@ -222,6 +269,9 @@ function TopProductsTab({ referenceMonth }: { referenceMonth?: string }) {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <FonteBadge fonte={fonte} />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <KpiCard title="Produtos Analisados" value={String(data.length)} icon={Package} color="bg-blue-500" />
         <KpiCard title="Receita Total" value={fmt(totalRevenue)} icon={TrendingUp} color="bg-green-500" />
@@ -277,14 +327,11 @@ function TopProductsTab({ referenceMonth }: { referenceMonth?: string }) {
           {data.length > 0 && (
             <button
               onClick={() => {
-                const rows = data.map((r: any) => ({
+                const rows = data.map((r) => ({
                   "#": r.rank,
                   "Produto": r.productName,
                   "Qtd Vendida": r.totalQty,
-                  "Preço Médio (R$)": parseFloat(Number(r.avgSalePrice).toFixed(2)),
                   "Receita Total (R$)": parseFloat(Number(r.totalRevenue).toFixed(2)),
-                  "Lucro Bruto (R$)": r.costPrice > 0 ? parseFloat(Number(r.grossProfit).toFixed(2)) : "",
-                  "Margem (%)": r.costPrice > 0 ? parseFloat(Number(r.margin).toFixed(1)) : "",
                 }));
                 exportToExcel(rows, `Ranking_Produtos_${new Date().toISOString().slice(0,10)}`, "Mais Vendidos");
               }}
@@ -302,15 +349,15 @@ function TopProductsTab({ referenceMonth }: { referenceMonth?: string }) {
                   <th className="text-center py-2 px-3 font-medium w-12">#</th>
                   <th className="text-left py-2 px-4 font-medium">Produto</th>
                   <th className="text-right py-2 px-3 font-medium">Qtd Vendida</th>
-                  <th className="text-right py-2 px-3 font-medium">Preço Médio</th>
                   <th className="text-right py-2 px-3 font-medium">Receita Total</th>
-                  <th className="text-right py-2 px-3 font-medium">Lucro Bruto</th>
-                  <th className="text-right py-2 px-3 font-medium">Margem</th>
                 </tr>
               </thead>
               <tbody>
-                {data.map((r) => (
-                  <tr key={r.productId} className="border-b hover:bg-muted/30">
+                {data.length === 0 && (
+                  <tr><td colSpan={4} className="text-center py-8 text-muted-foreground">Nenhum dado encontrado.</td></tr>
+                )}
+                {data.map((r, i) => (
+                  <tr key={`${r.productId}-${i}`} className="border-b hover:bg-muted/30">
                     <td className="py-2 px-3 text-center">
                       <span className={`font-bold text-xs ${r.rank <= 3 ? "text-amber-500" : "text-muted-foreground"}`}>
                         {r.rank === 1 ? "🥇" : r.rank === 2 ? "🥈" : r.rank === 3 ? "🥉" : `#${r.rank}`}
@@ -318,24 +365,7 @@ function TopProductsTab({ referenceMonth }: { referenceMonth?: string }) {
                     </td>
                     <td className="py-2 px-4 max-w-[200px] truncate font-medium">{r.productName}</td>
                     <td className="py-2 px-3 text-right font-mono text-xs">{fmtQty(r.totalQty)}</td>
-                    <td className="py-2 px-3 text-right font-mono text-xs">{fmt(r.avgSalePrice)}</td>
                     <td className="py-2 px-3 text-right font-mono text-xs text-green-600 font-semibold">{fmt(r.totalRevenue)}</td>
-                    <td className="py-2 px-3 text-right font-mono text-xs">
-                      {r.costPrice > 0 ? (
-                        <span className={r.grossProfit >= 0 ? "text-green-600" : "text-red-500"}>{fmt(r.grossProfit)}</span>
-                      ) : "—"}
-                    </td>
-                    <td className="py-2 px-3 text-right">
-                      {r.costPrice > 0 ? (
-                        <Badge variant="outline" className={
-                          r.margin >= 40 ? "border-green-500 text-green-600" :
-                          r.margin >= 20 ? "border-yellow-500 text-yellow-600" :
-                          "border-red-400 text-red-500"
-                        }>
-                          {fmtPct(r.margin)}
-                        </Badge>
-                      ) : <span className="text-muted-foreground text-xs">sem custo</span>}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -349,8 +379,22 @@ function TopProductsTab({ referenceMonth }: { referenceMonth?: string }) {
 
 // ─── Aba: Formas de Pagamento ─────────────────────────────────────────────────
 function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
-  const { data = [], isLoading } = trpc.reports.paymentMethods.useQuery({ referenceMonth });
-  const { data: evolution = [] } = trpc.reports.monthlySalesEvolution.useQuery();
+  const { data: rawPayments = [], isLoading } = trpc.inove.getPaymentMethodsInove.useQuery({ referenceMonth });
+  const { data: rawEvolution = [] } = trpc.inove.getMonthlySalesEvolutionInove.useQuery();
+
+  const fonte = rawPayments.length > 0 ? (rawPayments[0] as any).fonte : null;
+  const data = rawPayments.map((r: any) => ({
+    paymentMethod: r.paymentMethod ?? r.forma ?? "",
+    totalAmount: Number(r.totalAmount ?? r.total ?? 0),
+    transactionCount: Number(r.transactionCount ?? r.qtdVendas ?? 0),
+    percentage: Number(r.percentual ?? r.percentage ?? 0),
+  }));
+  const evolution = rawEvolution.map((r: any) => ({
+    referenceMonth: r.month ?? r.referenceMonth ?? "",
+    totalRevenue: Number(r.totalRevenue ?? 0),
+    transactionCount: Number(r.transactionCount ?? 0),
+    ticketMedio: Number(r.ticketMedio ?? 0),
+  }));
 
   if (isLoading) return <div className="text-center py-12 text-muted-foreground">Carregando...</div>;
 
@@ -359,6 +403,9 @@ function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <FonteBadge fonte={fonte} />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <KpiCard title="Receita Total" value={fmt(totalRevenue)} icon={TrendingUp} color="bg-green-500" />
         <KpiCard title="Total Transações" value={fmtQty(totalTransactions)} icon={ShoppingCart} color="bg-blue-500" />
@@ -378,13 +425,13 @@ function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
           <CardContent>
             {data.length === 0 ? (
               <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
-                Nenhum dado de caixa importado para o período selecionado.
+                Nenhum dado de pagamento encontrado para o período.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
                   <Pie data={data} dataKey="totalAmount" nameKey="paymentMethod" cx="50%" cy="50%" outerRadius={90}
-                    label={({ paymentMethod, percentage }: { paymentMethod: string; percentage: number }) => `${paymentMethod}: ${percentage}%`}>
+                    label={({ paymentMethod, percentage }: { paymentMethod: string; percentage: number }) => `${paymentMethod}: ${Number(percentage).toFixed(1)}%`}>
                     {data.map((entry, i) => (
                       <Cell key={i} fill={PAYMENT_COLORS[entry.paymentMethod] || CHART_COLORS[i % CHART_COLORS.length]} />
                     ))}
@@ -402,7 +449,7 @@ function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
             {data.length > 0 && (
               <button
                 onClick={() => {
-                  const rows = data.map((r: any) => ({
+                  const rows = data.map((r) => ({
                     "Forma de Pagamento": r.paymentMethod,
                     "Valor Total (R$)": parseFloat(Number(r.totalAmount).toFixed(2)),
                     "% do Total": parseFloat(Number(r.percentage).toFixed(1)),
@@ -420,7 +467,7 @@ function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
           <CardContent className="p-0">
             {data.length === 0 ? (
               <div className="h-48 flex items-center justify-center text-muted-foreground text-sm px-4 text-center">
-                Importe o arquivo de caixa junto com as vendas para ver as formas de pagamento.
+                Nenhum dado de pagamento encontrado. Verifique o conector INOVE.
               </div>
             ) : (
               <table className="w-full text-sm">
@@ -434,8 +481,8 @@ function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((r) => (
-                    <tr key={r.paymentMethod} className="border-b hover:bg-muted/30">
+                  {data.map((r, i) => (
+                    <tr key={i} className="border-b hover:bg-muted/30">
                       <td className="py-2 px-4 flex items-center gap-2">
                         <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: PAYMENT_COLORS[r.paymentMethod] || "#6b7280" }} />
                         {r.paymentMethod}
@@ -459,7 +506,7 @@ function PaymentMethodsTab({ referenceMonth }: { referenceMonth?: string }) {
 
       {evolution.length > 1 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Evolução Mensal de Vendas</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Evolução Mensal de Vendas (últimos 12 meses)</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={evolution} margin={{ left: 8, right: 16 }}>
@@ -510,7 +557,6 @@ function StockGerencialTab() {
 
   return (
     <div className="space-y-6">
-      {/* KPIs de estoque */}
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard title="Valor em Estoque (Custo)" value={fmt(summary.totalStockValue)} sub="Custo total dos produtos" icon={Warehouse} color="bg-indigo-500" />
@@ -520,7 +566,6 @@ function StockGerencialTab() {
         </div>
       )}
 
-      {/* Seletor de visão */}
       <div className="flex gap-2">
         <button
           onClick={() => setView("giro")}
@@ -542,7 +587,6 @@ function StockGerencialTab() {
 
       {view === "compras" && (
         <>
-          {/* Gráfico top 10 mais comprados */}
           {purchased.length > 0 && (
             <Card>
               <CardHeader><CardTitle className="text-base">Top 10 Produtos Mais Comprados (Qtd. Entrada)</CardTitle></CardHeader>
@@ -570,9 +614,7 @@ function StockGerencialTab() {
                       <th className="text-left px-4 py-3 font-medium">Produto</th>
                       <th className="text-right px-4 py-3 font-medium">Qtd. Comprada</th>
                       <th className="text-right px-4 py-3 font-medium">Custo Total</th>
-                      <th className="text-right px-4 py-3 font-medium">Custo Unit.</th>
                       <th className="text-right px-4 py-3 font-medium">Estoque Atual</th>
-                      <th className="text-right px-4 py-3 font-medium">Entradas</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -582,9 +624,7 @@ function StockGerencialTab() {
                         <td className="px-4 py-2.5 font-medium">{r.productName}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{fmtQty(r.totalQtyIn)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{fmt(r.totalCostIn)}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmt(r.costPrice)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{fmtQty(r.currentStock)}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{r.movCount}x</td>
                       </tr>
                     ))}
                   </tbody>
@@ -597,7 +637,6 @@ function StockGerencialTab() {
 
       {view === "giro" && (
         <>
-          {/* Filtros */}
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-2 top-2.5 w-4 h-4 text-muted-foreground" />
@@ -617,7 +656,7 @@ function StockGerencialTab() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Giro de Estoque + Cobertura ({filteredTurnover.length} produtos)</CardTitle>
-              <p className="text-xs text-muted-foreground">Cobertura = dias estimados de estoque com base nas vendas. Giro = qtd vendida ÷ estoque atual.</p>
+              <p className="text-xs text-muted-foreground">Cobertura = dias estimados de estoque com base nas vendas.</p>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -627,10 +666,8 @@ function StockGerencialTab() {
                       <th className="text-left px-4 py-3 font-medium">Produto</th>
                       <th className="text-right px-4 py-3 font-medium">Estoque</th>
                       <th className="text-right px-4 py-3 font-medium">Qtd Vendida</th>
-                      <th className="text-right px-4 py-3 font-medium">Qtd Comprada</th>
                       <th className="text-right px-4 py-3 font-medium">Giro</th>
                       <th className="text-right px-4 py-3 font-medium">Cobertura</th>
-                      <th className="text-right px-4 py-3 font-medium">Margem</th>
                       <th className="text-center px-4 py-3 font-medium">Status</th>
                     </tr>
                   </thead>
@@ -640,7 +677,6 @@ function StockGerencialTab() {
                         <td className="px-4 py-2.5 font-medium max-w-[200px] truncate">{r.productName}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{fmtQty(r.currentStock)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{fmtQty(r.totalQtySold)}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtQty(r.totalQtyIn)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">
                           {r.turnover > 0 ? (
                             <span className={r.turnover >= 2 ? "text-green-600 font-medium" : "text-amber-500"}>{r.turnover.toFixed(1)}x</span>
@@ -649,18 +685,11 @@ function StockGerencialTab() {
                         <td className={`px-4 py-2.5 text-right tabular-nums font-medium ${coverageColor(r.coverageDays)}`}>
                           {r.coverageDays >= 999 ? "∞" : `${r.coverageDays}d`}
                         </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">
-                          {r.totalQtySold > 0 ? (
-                            <span className={r.margin >= 30 ? "text-green-600" : r.margin >= 15 ? "text-amber-500" : "text-red-500"}>
-                              {fmtPct(r.margin)}
-                            </span>
-                          ) : <span className="text-muted-foreground">—</span>}
-                        </td>
                         <td className="px-4 py-2.5 text-center">{statusBadge(r.stockStatus)}</td>
                       </tr>
                     ))}
                     {filteredTurnover.length === 0 && (
-                      <tr><td colSpan={8} className="text-center py-8 text-muted-foreground">Nenhum produto encontrado</td></tr>
+                      <tr><td colSpan={6} className="text-center py-8 text-muted-foreground">Nenhum produto encontrado</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -692,7 +721,7 @@ export default function GerencialReports() {
               Relatórios Gerenciais
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Análise de desempenho, custo, margem e formas de pagamento
+              Análise de desempenho, custo, margem e formas de pagamento — dados do PDV INOVE
             </p>
           </div>
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>

@@ -23,6 +23,7 @@ import {
   stockMovements,
   salesImports,
   salesImportItems,
+  salesImportPayments,
 } from "../../drizzle/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 import crypto from "crypto";
@@ -1532,6 +1533,404 @@ export const inoveRouter = router({
         };
       } catch (err) {
         throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+  // ── Relatório: Top Produtos com dados INOVE (com fallback local) ─────────────
+  getTopProductsInove: protectedProcedure
+    .input(z.object({
+      referenceMonth: z.string().optional(),
+      limit: z.number().min(5).max(100).default(20),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      // Fallback local
+      async function localTopProducts() {
+        const rows = await db!
+          .select({
+            productId: products.id,
+            productName: products.name,
+            costPrice: products.costPrice,
+            totalQty: sql<number>`SUM(${salesImportItems.quantity})`,
+            totalRevenue: sql<number>`SUM(${salesImportItems.totalPrice})`,
+            avgUnitPrice: sql<number>`AVG(${salesImportItems.unitPrice})`,
+          })
+          .from(salesImportItems)
+          .innerJoin(products, eq(salesImportItems.productId, products.id))
+          .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+          .where(and(
+            eq(salesImportItems.linkStatus, "linked"),
+            eq(salesImports.status, "confirmed"),
+            input.referenceMonth ? eq(salesImports.referenceMonth, input.referenceMonth) : undefined
+          ))
+          .groupBy(products.id, products.name, products.costPrice)
+          .orderBy(desc(sql`SUM(${salesImportItems.totalPrice})`))
+          .limit(input.limit);
+        return rows.map((r, i) => ({
+          rank: i + 1,
+          produtoId: r.productId,
+          nome: r.productName,
+          codPdv: "",
+          qtd: Number(r.totalQty) || 0,
+          faturamento: Number(r.totalRevenue) || 0,
+          custo: Number(r.costPrice) || 0,
+          fonte: "local" as const,
+        }));
+      }
+      if (!connRows.length || !connRows[0].active) return localTopProducts();
+      const config = connRows[0];
+      try {
+        const pool = await createInovePool(config);
+        const monthFilter = input.referenceMonth
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
+        const res = await pool.request().query(`
+          SELECT TOP ${input.limit}
+            p.PRODUTO as produtoId,
+            p.PRO_DESCRICAO as nome,
+            p.PRO_CODIGO as codPdv,
+            ISNULL(CAST(p.PRO_CUSTO as float), 0) as custo,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamento
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2 ${monthFilter}
+          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_CUSTO
+          ORDER BY faturamento DESC
+        `);
+        await pool.close();
+        return (res.recordset as Array<{produtoId:number;nome:string;codPdv:string;custo:number;qtd:number;faturamento:number}>).map((r, i) => ({
+          rank: i + 1,
+          produtoId: Number(r.produtoId),
+          nome: r.nome,
+          codPdv: r.codPdv,
+          qtd: Number(r.qtd),
+          faturamento: Number(r.faturamento),
+          custo: Number(r.custo),
+          fonte: "inove" as const,
+        }));
+      } catch {
+        return localTopProducts();
+      }
+    }),
+
+  // ── Relatório: Formas de Pagamento INOVE (com fallback local) ────────────────
+  getPaymentMethodsInove: protectedProcedure
+    .input(z.object({ referenceMonth: z.string().optional() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      async function localPayments() {
+        const rows = await db!
+          .select({
+            paymentMethod: salesImportPayments.paymentMethod,
+            totalAmount: sql<number>`SUM(${salesImportPayments.totalAmount})`,
+            transactionCount: sql<number>`SUM(${salesImportPayments.transactionCount})`,
+          })
+          .from(salesImportPayments)
+          .innerJoin(salesImports, eq(salesImportPayments.importId, salesImports.id))
+          .where(and(
+            eq(salesImports.status, "confirmed"),
+            input.referenceMonth ? eq(salesImports.referenceMonth, input.referenceMonth) : undefined
+          ))
+          .groupBy(salesImportPayments.paymentMethod)
+          .orderBy(desc(sql`SUM(${salesImportPayments.totalAmount})`));
+        const total = rows.reduce((s, r) => s + (Number(r.totalAmount) || 0), 0);
+        return rows.map(r => ({
+          forma: r.paymentMethod,
+          total: Number(r.totalAmount) || 0,
+          qtdVendas: Number(r.transactionCount) || 0,
+          percentual: total > 0 ? ((Number(r.totalAmount) || 0) / total) * 100 : 0,
+          fonte: "local" as const,
+        }));
+      }
+      if (!connRows.length || !connRows[0].active) return localPayments();
+      const config = connRows[0];
+      try {
+        const pool = await createInovePool(config);
+        const monthFilter = input.referenceMonth
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
+        const res = await pool.request().query(`
+          SELECT
+            fp.FOR_DESCRICAO as forma,
+            CAST(SUM(pv.PAG_VALOR) as float) as total,
+            COUNT(DISTINCT pv.VENDA) as qtdVendas
+          FROM PAGAMENTOS_VENDAS pv
+          JOIN VENDAS v ON v.VENDA = pv.VENDA
+          JOIN FORMAS_PAGAMENTO fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+          WHERE v.VEN_SITUACAO = 2 ${monthFilter}
+          GROUP BY fp.FOR_DESCRICAO
+          ORDER BY total DESC
+        `);
+        await pool.close();
+        const data = res.recordset as Array<{forma:string;total:number;qtdVendas:number}>;
+        const totalGeral = data.reduce((s, r) => s + Number(r.total), 0);
+        return data.map(r => ({
+          forma: r.forma,
+          total: Number(r.total),
+          qtdVendas: Number(r.qtdVendas),
+          percentual: totalGeral > 0 ? (Number(r.total) / totalGeral) * 100 : 0,
+          fonte: "inove" as const,
+        }));
+      } catch {
+        return localPayments();
+      }
+    }),
+
+  // ── Relatório: Evolução Mensal de Vendas INOVE (com fallback local) ──────────
+  getMonthlySalesEvolutionInove: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+    async function localEvolution() {
+      const rows = await db!
+        .select({
+          month: salesImports.referenceMonth,
+          totalRevenue: sql<number>`SUM(${salesImportItems.totalPrice})`,
+          totalQty: sql<number>`SUM(${salesImportItems.quantity})`,
+          transactionCount: salesImports.totalTransactions,
+        })
+        .from(salesImportItems)
+        .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+        .where(and(
+          eq(salesImportItems.linkStatus, "linked"),
+          eq(salesImports.status, "confirmed")
+        ))
+        .groupBy(salesImports.referenceMonth, salesImports.totalTransactions)
+        .orderBy(salesImports.referenceMonth);
+      return rows.map(r => ({
+        month: r.month,
+        totalRevenue: Number(r.totalRevenue) || 0,
+        totalQty: Number(r.totalQty) || 0,
+        transactionCount: Number(r.transactionCount) || 0,
+        ticketMedio: Number(r.transactionCount) > 0 ? (Number(r.totalRevenue) || 0) / Number(r.transactionCount) : 0,
+        fonte: "local" as const,
+      }));
+    }
+    if (!connRows.length || !connRows[0].active) return localEvolution();
+    const config = connRows[0];
+    try {
+      const pool = await createInovePool(config);
+      const res = await pool.request().query(`
+        SELECT
+          FORMAT(v.VEN_DATA_FIM, 'yyyy-MM') as month,
+          CAST(SUM(v.VEN_TOTAL) as float) as totalRevenue,
+          COUNT(DISTINCT v.VENDA) as transactionCount
+        FROM VENDAS v
+        WHERE v.VEN_SITUACAO = 2
+          AND v.VEN_DATA_FIM >= DATEADD(month, -12, GETDATE())
+        GROUP BY FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
+        ORDER BY month ASC
+      `);
+      await pool.close();
+      return (res.recordset as Array<{month:string;totalRevenue:number;transactionCount:number}>).map(r => ({
+        month: r.month,
+        totalRevenue: Number(r.totalRevenue),
+        totalQty: 0,
+        transactionCount: Number(r.transactionCount),
+        ticketMedio: Number(r.transactionCount) > 0 ? Number(r.totalRevenue) / Number(r.transactionCount) : 0,
+        fonte: "inove" as const,
+      }));
+    } catch {
+      return localEvolution();
+    }
+  }),
+
+  // ── Relatório: Custo x Vendas por produto INOVE (com fallback local) ─────────
+  getCostVsSalesInove: protectedProcedure
+    .input(z.object({ referenceMonth: z.string().optional() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      async function localCostVsSales() {
+        const rows = await db!
+          .select({
+            productId: products.id,
+            productName: products.name,
+            costPrice: products.costPrice,
+            salePrice: products.salePrice,
+            totalQty: sql<number>`SUM(${salesImportItems.quantity})`,
+            totalRevenue: sql<number>`SUM(${salesImportItems.totalPrice})`,
+            avgUnitPrice: sql<number>`AVG(${salesImportItems.unitPrice})`,
+            referenceMonth: salesImports.referenceMonth,
+          })
+          .from(salesImportItems)
+          .innerJoin(products, eq(salesImportItems.productId, products.id))
+          .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+          .where(and(
+            eq(salesImportItems.linkStatus, "linked"),
+            eq(salesImports.status, "confirmed"),
+            input.referenceMonth ? eq(salesImports.referenceMonth, input.referenceMonth) : undefined
+          ))
+          .groupBy(products.id, products.name, products.costPrice, products.salePrice, salesImports.referenceMonth)
+          .orderBy(desc(sql`SUM(${salesImportItems.totalPrice})`));
+        return rows.map(r => {
+          const costPrice = Number(r.costPrice) || 0;
+          const totalRevenue = Number(r.totalRevenue) || 0;
+          const totalQty = Number(r.totalQty) || 0;
+          const totalCost = costPrice * totalQty;
+          const grossProfit = totalRevenue - totalCost;
+          const margin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+          return { productId: r.productId, productName: r.productName, costPrice, avgSalePrice: Number(r.avgUnitPrice)||0, totalQty, totalRevenue, totalCost, grossProfit, margin: parseFloat(margin.toFixed(2)), referenceMonth: r.referenceMonth, fonte: "local" as const };
+        });
+      }
+      if (!connRows.length || !connRows[0].active) return localCostVsSales();
+      const config = connRows[0];
+      try {
+        const pool = await createInovePool(config);
+        const monthFilter = input.referenceMonth
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
+        const res = await pool.request().query(`
+          SELECT
+            p.PRODUTO as productId,
+            p.PRO_DESCRICAO as productName,
+            ISNULL(CAST(p.PRO_CUSTO as float), 0) as costPrice,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as totalQty,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as totalRevenue,
+            CAST(AVG(iv.ITE_VALOR) as float) as avgSalePrice,
+            FORMAT(v.VEN_DATA_FIM, 'yyyy-MM') as referenceMonth
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2 ${monthFilter}
+          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CUSTO, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
+          ORDER BY totalRevenue DESC
+        `);
+        await pool.close();
+        return (res.recordset as Array<{productId:number;productName:string;costPrice:number;totalQty:number;totalRevenue:number;avgSalePrice:number;referenceMonth:string}>).map(r => {
+          const costPrice = Number(r.costPrice);
+          const totalRevenue = Number(r.totalRevenue);
+          const totalQty = Number(r.totalQty);
+          const totalCost = costPrice * totalQty;
+          const grossProfit = totalRevenue - totalCost;
+          const margin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+          return { productId: Number(r.productId), productName: r.productName, costPrice, avgSalePrice: Number(r.avgSalePrice), totalQty, totalRevenue, totalCost, grossProfit, margin: parseFloat(margin.toFixed(2)), referenceMonth: r.referenceMonth, fonte: "inove" as const };
+        });
+      } catch {
+        return localCostVsSales();
+      }
+    }),
+
+  // ── Relatório: Giro de Estoque Semanal INOVE (com fallback local) ────────────
+  getWeeklyStockTurnoverInove: protectedProcedure
+    .input(z.object({ weeksBack: z.number().min(2).max(12).default(6) }).optional())
+    .query(async ({ input }) => {
+      const weeksBack = input?.weeksBack ?? 6;
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      // Se conector inativo, usa dados locais via função existente
+      if (!connRows.length || !connRows[0].active) {
+        const { getWeeklyStockTurnoverReport } = await import("../db.reports");
+        const result = await getWeeklyStockTurnoverReport(weeksBack);
+        return { ...result, fonte: "local" as const };
+      }
+      const config = connRows[0];
+      try {
+        const pool = await createInovePool(config);
+        // Buscar semanas de vendas por produto do INOVE
+        const res = await pool.request().query(`
+          SELECT
+            p.PRODUTO as produtoId,
+            p.PRO_DESCRICAO as nome,
+            p.PRO_CODIGO as codPdv,
+            ISNULL(p.PRO_ESTOQUE, 0) as estoqueAtual,
+            ISNULL(p.PRO_ESTOQUE_MINIMO, 0) as estoqueMinimo,
+            FORMAT(DATEADD(day, -(DATEPART(weekday, v.VEN_DATA_FIM) - 2 + 7) % 7, CAST(v.VEN_DATA_FIM as date)), 'yyyy-MM-dd') as semanaInicio,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtdVendida
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= DATEADD(week, -${weeksBack}, GETDATE())
+          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_ESTOQUE, p.PRO_ESTOQUE_MINIMO,
+            FORMAT(DATEADD(day, -(DATEPART(weekday, v.VEN_DATA_FIM) - 2 + 7) % 7, CAST(v.VEN_DATA_FIM as date)), 'yyyy-MM-dd')
+          ORDER BY p.PRO_DESCRICAO, semanaInicio
+        `);
+        await pool.close();
+        type WRow = { produtoId: number; nome: string; codPdv: string; estoqueAtual: number; estoqueMinimo: number; semanaInicio: string; qtdVendida: number };
+        const rows = res.recordset as WRow[];
+        // Agrupar por produto
+        const prodMap = new Map<number, { produtoId: number; nome: string; codPdv: string; estoqueAtual: number; estoqueMinimo: number; semanas: Map<string, number> }>();
+        for (const r of rows) {
+          const id = Number(r.produtoId);
+          if (!prodMap.has(id)) prodMap.set(id, { produtoId: id, nome: r.nome, codPdv: r.codPdv, estoqueAtual: Number(r.estoqueAtual), estoqueMinimo: Number(r.estoqueMinimo), semanas: new Map() });
+          const prod = prodMap.get(id)!;
+          prod.semanas.set(r.semanaInicio, (prod.semanas.get(r.semanaInicio) || 0) + Number(r.qtdVendida));
+        }
+        // Calcular semanas disponíveis
+        const allWeeks = Array.from(new Set(rows.map(r => r.semanaInicio))).sort();
+        const products2 = Array.from(prodMap.values()).map(p => {
+          const weekSales = allWeeks.map(w => p.semanas.get(w) || 0);
+          const avgPerWeek = weekSales.length > 0 ? weekSales.reduce((s, v) => s + v, 0) / weekSales.length : 0;
+          const estoque = Math.max(0, p.estoqueAtual);
+          const cobertura = avgPerWeek > 0 ? estoque / avgPerWeek : 99;
+          const sugestao = Math.max(0, Math.ceil(avgPerWeek * 2) - estoque);
+          const status = estoque <= 0 ? "zerado" : cobertura < 1 ? "critico" : cobertura < 2 ? "baixo" : "ok";
+          return { ...p, weekSales, avgPerWeek: parseFloat(avgPerWeek.toFixed(1)), cobertura: parseFloat(cobertura.toFixed(1)), sugestao, status };
+        }).sort((a, b) => a.cobertura - b.cobertura);
+        return { products: products2, weeks: allWeeks, fonte: "inove" as const };
+      } catch {
+        const { getWeeklyStockTurnoverReport } = await import("../db.reports");
+        const result = await getWeeklyStockTurnoverReport(weeksBack);
+        return { ...result, fonte: "local" as const };
+      }
+    }),
+
+  // ── Relatório: Vendas por Período INOVE (com fallback local) ─────────────────
+  getSalesReportInove: protectedProcedure
+    .input(z.object({ referenceMonth: z.string().optional() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      async function localSalesReport() {
+        const rows = await db!
+          .select({
+            referenceMonth: salesImports.referenceMonth,
+            totalRevenue: sql<number>`SUM(${salesImportItems.totalPrice})`,
+            totalQty: sql<number>`SUM(${salesImportItems.quantity})`,
+            transactionCount: salesImports.totalTransactions,
+            linkedItems: salesImports.linkedItems,
+          })
+          .from(salesImportItems)
+          .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+          .where(and(
+            eq(salesImports.status, "confirmed"),
+            input.referenceMonth ? eq(salesImports.referenceMonth, input.referenceMonth) : undefined
+          ))
+          .groupBy(salesImports.referenceMonth, salesImports.totalTransactions, salesImports.linkedItems)
+          .orderBy(desc(salesImports.referenceMonth));
+        return { rows: rows.map(r => ({ referenceMonth: r.referenceMonth, totalRevenue: Number(r.totalRevenue)||0, totalQty: Number(r.totalQty)||0, transactionCount: Number(r.transactionCount)||0, linkedItems: Number(r.linkedItems)||0 })), fonte: "local" as const };
+      }
+      if (!connRows.length || !connRows[0].active) return localSalesReport();
+      const config = connRows[0];
+      try {
+        const pool = await createInovePool(config);
+        const monthFilter = input.referenceMonth
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          : `AND v.VEN_DATA_FIM >= DATEADD(month, -6, GETDATE())`;
+        const res = await pool.request().query(`
+          SELECT
+            FORMAT(v.VEN_DATA_FIM, 'yyyy-MM') as referenceMonth,
+            CAST(SUM(v.VEN_TOTAL) as float) as totalRevenue,
+            COUNT(DISTINCT v.VENDA) as transactionCount
+          FROM VENDAS v
+          WHERE v.VEN_SITUACAO = 2 ${monthFilter}
+          GROUP BY FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
+          ORDER BY referenceMonth DESC
+        `);
+        await pool.close();
+        return { rows: (res.recordset as Array<{referenceMonth:string;totalRevenue:number;transactionCount:number}>).map(r => ({ referenceMonth: r.referenceMonth, totalRevenue: Number(r.totalRevenue), totalQty: 0, transactionCount: Number(r.transactionCount), linkedItems: 0 })), fonte: "inove" as const };
+      } catch {
+        return localSalesReport();
       }
     }),
 
