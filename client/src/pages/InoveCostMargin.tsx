@@ -94,7 +94,15 @@ export default function InoveCostMargin() {
         {error && (
           <Card className="border-red-200 bg-red-50">
             <CardContent className="p-4 text-red-700 text-sm">
-              ⚠️ {error.message}. Verifique se o conector INOVE está ativo.
+              ⚠️ {error.message.includes("Failed to fetch") ? "Não foi possível conectar ao servidor. Tente novamente." : error.message}
+            </CardContent>
+          </Card>
+        )}
+        {data && (data as any).fonte === "local" && (
+          <Card className="border-blue-200 bg-blue-50">
+            <CardContent className="p-3 text-blue-700 text-sm flex items-start gap-2">
+              <span className="mt-0.5">ℹ️</span>
+              <span>Exibindo dados das <strong>importações confirmadas</strong> no sistema local. O conector INOVE SQL Server está inativo ou inacessível. Os custos unitários vêm do cadastro de produtos.</span>
             </CardContent>
           </Card>
         )}

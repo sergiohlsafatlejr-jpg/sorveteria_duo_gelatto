@@ -557,7 +557,11 @@ export async function getWeeklyStockTurnoverReport(weeksBack = 6) {
   // Montar resultado por produto
   const result = productData.map(p => {
     const weekSales = salesMap.get(p.id) ?? new Map<string, WeekSales>();
-    const currentStock = Number(p.currentStock) || 0;
+    const rawStock = Number(p.currentStock) || 0;
+    // Estoque negativo indica divergência de dados (vendas importadas > estoque cadastrado)
+    // Para cálculos de cobertura/sugestão usamos 0; mas exibimos o valor real
+    const isNegativeStock = rawStock < 0;
+    const currentStock = Math.max(0, rawStock);
     const costPrice = Number(p.costPrice) || 0;
     const salePrice = Number(p.salePrice) || 0;
     const minStock = Number(p.minStock) || 0;
@@ -616,6 +620,7 @@ export async function getWeeklyStockTurnoverReport(weeksBack = 6) {
 
     // Status de estoque
     const stockStatus =
+      isNegativeStock ? "negativo" :
       currentStock <= 0 ? "sem_estoque" :
       currentStock <= minStock ? "critico" :
       coverageWeeks < 1 ? "critico" :
@@ -625,7 +630,9 @@ export async function getWeeklyStockTurnoverReport(weeksBack = 6) {
     return {
       productId: p.id,
       productName: p.name,
-      currentStock,
+      currentStock: rawStock,        // valor real (pode ser negativo)
+      currentStockCalc: currentStock, // valor para cálculos (nunca negativo)
+      isNegativeStock,
       minStock,
       costPrice,
       salePrice,
@@ -640,9 +647,9 @@ export async function getWeeklyStockTurnoverReport(weeksBack = 6) {
     };
   });
 
-  // Ordenar por urgência: crítico primeiro, depois por menor cobertura
+  // Ordenar por urgência: negativo > crítico > baixo > ok
   result.sort((a, b) => {
-    const statusOrder = { sem_estoque: 0, critico: 1, baixo: 2, ok: 3 };
+    const statusOrder = { negativo: 0, sem_estoque: 1, critico: 2, baixo: 3, ok: 4 };
     const sa = statusOrder[a.stockStatus as keyof typeof statusOrder] ?? 3;
     const sb = statusOrder[b.stockStatus as keyof typeof statusOrder] ?? 3;
     if (sa !== sb) return sa - sb;

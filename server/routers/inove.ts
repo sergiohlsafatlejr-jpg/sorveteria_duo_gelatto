@@ -21,8 +21,10 @@ import {
   customerLoyaltyTokens,
   products,
   stockMovements,
+  salesImports,
+  salesImportItems,
 } from "../../drizzle/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and } from "drizzle-orm";
 import crypto from "crypto";
 import * as mssqlLib from "mssql";
 import { notifyOwner } from "../_core/notification";
@@ -1344,9 +1346,59 @@ export const inoveRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
-      const rows = await db.select().from(inoveConnectorConfig).limit(1);
-      if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE inativo");
-      const config = rows[0];
+
+      // Helper: buscar dados do banco MySQL local (sales_import_items + products)
+      async function getLocalCostMargin() {
+        const whereConditions = [
+          eq(salesImportItems.linkStatus, "linked"),
+          eq(salesImports.status, "confirmed"),
+        ];
+        const localRows = await db!
+          .select({
+            produtoId: products.id,
+            nome: products.name,
+            codPdv: products.externalCode,
+            custo: products.costPrice,
+            qtd: sql<number>`SUM(${salesImportItems.quantity})`,
+            receita: sql<number>`SUM(${salesImportItems.totalPrice})`,
+            precoMedio: sql<number>`AVG(${salesImportItems.unitPrice})`,
+          })
+          .from(salesImportItems)
+          .innerJoin(products, eq(salesImportItems.productId, products.id))
+          .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+          .where(and(...whereConditions))
+          .groupBy(products.id, products.name, products.externalCode, products.costPrice)
+          .orderBy(desc(sql`SUM(${salesImportItems.totalPrice})`));
+        const data = localRows
+          .filter(r => !input.search || r.nome.toLowerCase().includes(input.search!.toLowerCase()))
+          .map(r => {
+          const custo = Number(r.custo) || 0;
+          const qtd = Number(r.qtd) || 0;
+          const receita = Number(r.receita) || 0;
+          const precoMedio = Number(r.precoMedio) || 0;
+          const cmv = custo * qtd;
+          const lucroBruto = receita - cmv;
+          const margem = receita > 0 ? (lucroBruto / receita) * 100 : 0;
+          return { produtoId: r.produtoId, nome: r.nome, codPdv: r.codPdv ?? "", custo, qtd, receita, precoMedio, cmv, lucroBruto, margem, semCusto: custo === 0 };
+        });
+        data.sort((a, b) => {
+          if (input.sortBy === "margin") return b.margem - a.margem;
+          if (input.sortBy === "profit") return b.lucroBruto - a.lucroBruto;
+          if (input.sortBy === "qty") return b.qtd - a.qtd;
+          return b.receita - a.receita;
+        });
+        const totalReceita = data.reduce((s, r) => s + r.receita, 0);
+        const totalCmv = data.filter(r => !r.semCusto).reduce((s, r) => s + r.cmv, 0);
+        const totalLucro = data.filter(r => !r.semCusto).reduce((s, r) => s + r.lucroBruto, 0);
+        return { items: data, totalReceita, totalCmv, totalLucro, margemGeral: totalReceita > 0 ? (totalLucro / totalReceita) * 100 : 0, semCustoCount: data.filter(r => r.semCusto).length, fonte: "local" as const };
+      }
+
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      // Se conector inativo ou não configurado, usa dados locais importados
+      if (connRows.length === 0 || !connRows[0].active) {
+        return getLocalCostMargin();
+      }
+      const config = connRows[0];
       try {
         const pool = await createInovePool(config);
         const sf = input.search

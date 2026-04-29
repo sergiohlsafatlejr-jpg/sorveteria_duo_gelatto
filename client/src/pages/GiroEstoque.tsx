@@ -19,6 +19,8 @@ type ProductRow = {
   productId: number;
   productName: string;
   currentStock: number;
+  currentStockCalc?: number;
+  isNegativeStock?: boolean;
   minStock: number;
   costPrice: number;
   salePrice: number;
@@ -34,6 +36,7 @@ type ProductRow = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
+  if (status === "negativo") return <Badge className="bg-purple-600 text-white text-xs px-1.5 py-0" title="Estoque negativo: vendas importadas superam o estoque cadastrado">Negativo</Badge>;
   if (status === "critico") return <Badge className="bg-red-500 text-white text-xs px-1.5 py-0">Crítico</Badge>;
   if (status === "sem_estoque") return <Badge className="bg-gray-800 text-white text-xs px-1.5 py-0">Zerado</Badge>;
   if (status === "baixo") return <Badge className="bg-yellow-500 text-white text-xs px-1.5 py-0">Baixo</Badge>;
@@ -60,7 +63,7 @@ type SortKey = "productName" | "currentStock" | "avgQtyPerWeek" | "coverageWeeks
 export default function GiroEstoque() {
   const [weeksBack, setWeeksBack] = useState(6);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "critico" | "baixo" | "ok" | "sem_estoque">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "critico" | "baixo" | "ok" | "sem_estoque" | "negativo">("all");
   const [sortKey, setSortKey] = useState<SortKey>("coverageWeeks");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [showOnlySuggested, setShowOnlySuggested] = useState(false);
@@ -101,6 +104,7 @@ export default function GiroEstoque() {
 
   // ── Totais do resumo ──────────────────────────────────────────────────────
   const totalSuggested = filtered.filter(p => p.suggestedPurchase > 0).length;
+  const totalNegativo = allProducts.filter(p => p.stockStatus === "negativo").length;
   const totalCritico = allProducts.filter(p => p.stockStatus === "critico" || p.stockStatus === "sem_estoque").length;
   const totalBaixo = allProducts.filter(p => p.stockStatus === "baixo").length;
   const totalOk = allProducts.filter(p => p.stockStatus === "ok").length;
@@ -179,7 +183,21 @@ export default function GiroEstoque() {
       </div>
 
       {/* ── KPIs ──────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {totalNegativo > 0 && (
+          <Card className="cursor-pointer hover:border-purple-300" onClick={() => setStatusFilter(statusFilter === "negativo" ? "all" : "negativo")}>
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-purple-600 shrink-0" />
+                <div>
+                  <p className="text-2xl font-bold text-purple-600">{totalNegativo}</p>
+                  <p className="text-xs text-muted-foreground">Estoque Negativo</p>
+                  <p className="text-xs text-purple-500">Corrija o cadastro</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <Card className="cursor-pointer hover:border-red-300" onClick={() => setStatusFilter(statusFilter === "critico" ? "all" : "critico")}>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-2">
@@ -248,6 +266,7 @@ export default function GiroEstoque() {
           <SelectContent>
             <SelectItem value="all">Todos os status</SelectItem>
             <SelectItem value="critico">Crítico / Zerado</SelectItem>
+            <SelectItem value="negativo">Estoque Negativo</SelectItem>
             <SelectItem value="baixo">Estoque Baixo</SelectItem>
             <SelectItem value="ok">Estoque OK</SelectItem>
           </SelectContent>
@@ -329,7 +348,9 @@ export default function GiroEstoque() {
                     <tr
                       key={p.productId}
                       className={`border-b last:border-0 hover:bg-muted/20 ${
-                        p.stockStatus === "critico" || p.stockStatus === "sem_estoque"
+                        p.stockStatus === "negativo"
+                          ? "bg-purple-50/40 dark:bg-purple-950/10"
+                          : p.stockStatus === "critico" || p.stockStatus === "sem_estoque"
                           ? "bg-red-50/30 dark:bg-red-950/10"
                           : p.stockStatus === "baixo"
                           ? "bg-yellow-50/30 dark:bg-yellow-950/10"
@@ -343,11 +364,15 @@ export default function GiroEstoque() {
                         )}
                       </td>
                       <td className="py-2.5 px-2 text-right font-semibold">
-                        <span className={
-                          p.currentStock <= 0 ? "text-gray-400" :
-                          p.currentStock <= p.minStock ? "text-red-500" :
-                          "text-foreground"
-                        }>{p.currentStock}</span>
+                        <span
+                          className={
+                            p.isNegativeStock ? "text-purple-600 font-bold" :
+                            p.currentStock <= 0 ? "text-gray-400" :
+                            p.currentStock <= p.minStock ? "text-red-500" :
+                            "text-foreground"
+                          }
+                          title={p.isNegativeStock ? `Estoque negativo (${p.currentStock}): vendas importadas superam o estoque cadastrado. Corrija o saldo no cadastro de produtos.` : undefined}
+                        >{p.currentStock}</span>
                       </td>
                       <td className="py-2.5 px-2 text-right text-muted-foreground">
                         {p.avgQtyPerWeek > 0 ? p.avgQtyPerWeek : "—"}
@@ -412,6 +437,7 @@ export default function GiroEstoque() {
       <div className="text-xs text-muted-foreground space-y-1 pb-4">
         <p><strong>Cobertura:</strong> semanas de estoque restante com base na média de vendas · <strong>Giro:</strong> qtd vendida ÷ estoque atual</p>
         <p><strong>Sugestão de Compra:</strong> quantidade para garantir 2 semanas de estoque + estoque mínimo · <strong>Verde</strong> = acima da média · <strong>Laranja</strong> = abaixo da média</p>
+        <p><strong className="text-purple-600">Estoque Negativo:</strong> ocorre quando as vendas importadas superam o saldo cadastrado. Corrija o saldo atual no módulo de Estoque.</p>
         <p>Clique nos cards de KPI para filtrar por status · Clique nos cabeçalhos para ordenar</p>
       </div>
     </div>
