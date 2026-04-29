@@ -84,8 +84,8 @@ export default function SalesReport() {
     if (usingInove && inoveData) {
       return inoveData.top10.map(item => ({
         id: String(item.produtoId),
-        name: item.nome,
-        codPdv: item.codPdv,
+        name: item.nome ?? `Produto ${item.produtoId}`,
+        codPdv: item.codPdv ?? String(item.produtoId),
         qty: item.qtd,
         revenue: item.faturamento,
         prevRevenue: item.faturamentoPrev,
@@ -125,7 +125,7 @@ export default function SalesReport() {
   const totalProdutos = usingInove ? (inoveData?.totalProdutos ?? 0) : (localReport?.current?.length ?? 0);
 
   const chartData = top10.map((item, idx) => ({
-    name: item.name.substring(0, 20),
+    name: (item.name ?? "").substring(0, 20),
     fullName: item.name,
     atual: item.revenue,
     anterior: item.prevRevenue ?? 0,

@@ -47,8 +47,8 @@ export default function InoveProductSales() {
   const chartData = useMemo(() => {
     if (!data?.top10) return [];
     return data.top10.map((item) => ({
-      nome: item.nome.length > 14 ? item.nome.substring(0, 14) + "…" : item.nome,
-      nomeCompleto: item.nome,
+      nome: (item.nome ?? "").length > 14 ? (item.nome ?? "").substring(0, 14) + "…" : (item.nome ?? `Produto ${item.produtoId}`),
+      nomeCompleto: item.nome ?? `Produto ${item.produtoId}`,
       atual: item.faturamento,
       anterior: item.faturamentoPrev ?? 0,
     }));
@@ -249,8 +249,8 @@ export default function InoveProductSales() {
                             {idx + 1}
                           </span>
                         </td>
-                        <td className="p-3 font-medium">{item.nome}</td>
-                        <td className="p-3 font-mono text-xs text-muted-foreground">{item.codPdv}</td>
+                        <td className="p-3 font-medium">{item.nome ?? `Produto ${item.produtoId}`}</td>
+                        <td className="p-3 font-mono text-xs text-muted-foreground">{item.codPdv ?? "—"}</td>
                         <td className="p-3 text-right tabular-nums">{fmtQty(item.qtd)}</td>
                         <td className="p-3 text-right tabular-nums font-semibold">{fmt(item.faturamento)}</td>
                         <td className="p-3 text-right tabular-nums text-muted-foreground">

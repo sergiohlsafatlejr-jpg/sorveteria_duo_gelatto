@@ -89,8 +89,8 @@ export default function InoveManagerial() {
   const topReceitaChart = useMemo(() => {
     if (!data?.topReceita) return [];
     return data.topReceita.map(r => ({
-      nome: r.nome.length > 18 ? r.nome.substring(0, 18) + "…" : r.nome,
-      nomeCompleto: r.nome,
+      nome: (r.nome ?? "").length > 18 ? (r.nome ?? "").substring(0, 18) + "…" : (r.nome ?? "Produto s/nome"),
+      nomeCompleto: r.nome ?? "Produto s/nome",
       receita: r.receita,
     }));
   }, [data]);
@@ -98,8 +98,8 @@ export default function InoveManagerial() {
   const topQtdChart = useMemo(() => {
     if (!data?.topQtd) return [];
     return data.topQtd.map(r => ({
-      nome: r.nome.length > 18 ? r.nome.substring(0, 18) + "…" : r.nome,
-      nomeCompleto: r.nome,
+      nome: (r.nome ?? "").length > 18 ? (r.nome ?? "").substring(0, 18) + "…" : (r.nome ?? "Produto s/nome"),
+      nomeCompleto: r.nome ?? "Produto s/nome",
       qtd: r.qtd,
     }));
   }, [data]);

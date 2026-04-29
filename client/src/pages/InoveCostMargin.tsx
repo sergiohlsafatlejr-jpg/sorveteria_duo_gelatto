@@ -50,8 +50,8 @@ export default function InoveCostMargin() {
       .filter(i => !i.semCusto)
       .slice(0, 10)
       .map(i => ({
-        nome: i.nome.length > 14 ? i.nome.substring(0, 14) + "…" : i.nome,
-        nomeCompleto: i.nome,
+        nome: (i.nome ?? "").length > 14 ? (i.nome ?? "").substring(0, 14) + "…" : (i.nome ?? `Produto ${i.produtoId}`),
+        nomeCompleto: i.nome ?? `Produto ${i.produtoId}`,
         margem: parseFloat(i.margem.toFixed(1)),
       }));
   }, [data]);
