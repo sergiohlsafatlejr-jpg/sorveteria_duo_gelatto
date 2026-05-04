@@ -68,14 +68,52 @@ export default function GiroEstoque() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [showOnlySuggested, setShowOnlySuggested] = useState(false);
 
-  const query = trpc.reports.weeklyStockTurnover.useQuery(
+  const query = trpc.inove.getWeeklyStockTurnoverInove.useQuery(
     { weeksBack },
     { staleTime: 5 * 60 * 1000 }
   );
 
-  const data = query.data as { weeks: string[]; products: ProductRow[]; generatedAt: string } | undefined;
-  const weekLabels = data?.weeks ?? [];
-  const allProducts = data?.products ?? [];
+  const rawData = query.data;
+  const fonte = (rawData as any)?.fonte ?? "local";
+  const weekLabels: string[] = rawData?.weeks ?? [];
+
+  // Normalizar dados: INOVE retorna formato diferente do local
+  const allProducts: ProductRow[] = useMemo(() => {
+    if (!rawData?.products) return [];
+    if (fonte === "inove") {
+      return (rawData.products as any[]).map(p => {
+        const ws: number[] = p.weekSales ?? [];
+        const totalSold = ws.reduce((s: number, v: number) => s + v, 0);
+        const estoque = p.estoqueAtual ?? 0;
+        return {
+          productId: p.produtoId ?? 0,
+          productName: p.nome ?? "Produto s/nome",
+          currentStock: estoque,
+          currentStockCalc: Math.max(0, estoque),
+          isNegativeStock: estoque < 0,
+          minStock: p.estoqueMinimo ?? 0,
+          costPrice: p.costPrice ?? 0,
+          salePrice: p.salePrice ?? 0,
+          avgQtyPerWeek: p.avgPerWeek ?? 0,
+          coverageWeeks: p.cobertura ?? 0,
+          suggestedPurchase: p.sugestao ?? 0,
+          turnover: p.turnover ?? (totalSold > 0 && estoque > 0 ? parseFloat((totalSold / estoque).toFixed(1)) : totalSold > 0 ? 99 : 0),
+          margin: p.margin ?? 0,
+          stockStatus: p.status === "zerado" ? "sem_estoque" : (p.status ?? "ok"),
+          totalQtySold: totalSold,
+          weekData: ws.map((qty: number, i: number) => ({
+            weekLabel: weekLabels[i] ?? `Sem ${i + 1}`,
+            qty,
+            revenue: 0,
+          })),
+        } as ProductRow;
+      });
+    }
+    // Fonte local: já no formato ProductRow
+    return rawData.products as ProductRow[];
+  }, [rawData, fonte, weekLabels]);
+
+  const data = rawData ? { weeks: weekLabels, products: allProducts, generatedAt: (rawData as any).generatedAt ?? new Date().toISOString() } : undefined;
 
   // ── Filtros e ordenação ───────────────────────────────────────────────────
   const filtered = useMemo(() => {
