@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   RefreshCw, Search, ShoppingCart, TrendingUp, AlertCircle,
   Package, Download, ChevronUp, ChevronDown, ChevronsUpDown,
-  Filter
+  Filter, Wifi, WifiOff, Database
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -195,9 +195,22 @@ export default function GiroEstoque() {
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <TrendingUp className="w-6 h-6 text-pink-500" /> Giro de Estoque Semanal
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Velocidade de saída por produto · Sugestão de compra para a próxima semana
-          </p>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <p className="text-sm text-muted-foreground">
+              Velocidade de saída por produto · Sugestão de compra para a próxima semana
+            </p>
+            {rawData && (
+              fonte === "inove" ? (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full border border-green-300 dark:border-green-700">
+                  <Wifi className="w-3 h-3" /> Dados em tempo real · PDV INOVE
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-yellow-700 bg-yellow-100 dark:bg-yellow-900/30 dark:text-yellow-400 px-2 py-0.5 rounded-full border border-yellow-300 dark:border-yellow-700">
+                  <Database className="w-3 h-3" /> Dados locais · Conector INOVE inativo
+                </span>
+              )
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Select value={String(weeksBack)} onValueChange={v => setWeeksBack(Number(v))}>
