@@ -1948,5 +1948,146 @@ export const inoveRouter = router({
       }
     }),
 
-});
+  // ── Relatório: Painel Financeiro INOVE (faturamento, descontos, ticket médio, vendas diárias, formas de pagamento) ──
+  getFinancialSummaryInove: protectedProcedure
+    .input(z.object({
+      from: z.string(), // 'YYYY-MM-DD'
+      to: z.string(),   // 'YYYY-MM-DD'
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
 
+      // Fallback local: busca nas importações MySQL
+      async function localFallback() {
+        const { from, to } = input;
+        const rows = await db!
+          .select({
+            totalRevenue: sql<number>`COALESCE(SUM(${salesImportItems.totalPrice}), 0)`,
+            totalQty: sql<number>`COALESCE(SUM(${salesImportItems.quantity}), 0)`,
+            count: sql<number>`COUNT(DISTINCT ${salesImports.id})`,
+          })
+          .from(salesImportItems)
+          .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+          .where(and(
+            eq(salesImports.status, "confirmed"),
+            sql`${salesImports.referenceMonth} >= ${from.substring(0, 7)}`,
+            sql`${salesImports.referenceMonth} <= ${to.substring(0, 7)}`
+          ));
+        const totalRevenue = Number(rows[0]?.totalRevenue) || 0;
+        const count = Number(rows[0]?.count) || 0;
+        return {
+          totalRevenue,
+          totalDiscount: 0,
+          count,
+          ticketMedio: count > 0 ? totalRevenue / count : 0,
+          dailySales: [] as { date: string; total: number; count: number }[],
+          byPayment: {} as Record<string, number>,
+          topProducts: [] as { name: string; qty: number; revenue: number }[],
+          fonte: "local" as const,
+        };
+      }
+
+      if (!connRows.length || !connRows[0].active) return localFallback();
+      const config = connRows[0];
+
+      try {
+        const pool = await createInovePool(config);
+        const fromDate = input.from;
+        const toDate = input.to;
+
+        // 1. Resumo geral
+        const summaryRes = await pool.request().query(`
+          SELECT
+            CAST(COALESCE(SUM(v.VEN_TOTAL), 0) as float) as totalRevenue,
+            CAST(COALESCE(SUM(v.VEN_DESCONTO), 0) as float) as totalDiscount,
+            COUNT(DISTINCT v.VENDA) as totalCount
+          FROM VENDAS v
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
+            AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
+        `);
+        const s = summaryRes.recordset[0] as { totalRevenue: number; totalDiscount: number; totalCount: number };
+        const totalRevenue = Number(s?.totalRevenue) || 0;
+        const totalDiscount = Number(s?.totalDiscount) || 0;
+        const count = Number(s?.totalCount) || 0;
+
+        // 2. Vendas diárias
+        const dailyRes = await pool.request().query(`
+          SELECT
+            FORMAT(CAST(v.VEN_DATA_FIM as date), 'yyyy-MM-dd') as dia,
+            CAST(SUM(v.VEN_TOTAL) as float) as total,
+            COUNT(DISTINCT v.VENDA) as qtd
+          FROM VENDAS v
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
+            AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
+          GROUP BY FORMAT(CAST(v.VEN_DATA_FIM as date), 'yyyy-MM-dd')
+          ORDER BY dia
+        `);
+        type DRow = { dia: string; total: number; qtd: number };
+        const dailySales = (dailyRes.recordset as DRow[]).map(r => ({
+          date: r.dia,
+          total: Number(r.total) || 0,
+          count: Number(r.qtd) || 0,
+        }));
+
+        // 3. Por forma de pagamento
+        const payRes = await pool.request().query(`
+          SELECT
+            ISNULL(fp.FOR_DESCRICAO, 'Outros') as formaPagamento,
+            CAST(SUM(pv.PAG_VALOR) as float) as total
+          FROM PAGAMENTOS_VENDAS pv
+          JOIN VENDAS v ON v.VENDA = pv.VENDA
+          LEFT JOIN FORMAS_PAGAMENTO fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
+            AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
+          GROUP BY fp.FOR_DESCRICAO
+          ORDER BY total DESC
+        `);
+        type PRow = { formaPagamento: string; total: number };
+        const byPayment: Record<string, number> = {};
+        for (const r of payRes.recordset as PRow[]) {
+          byPayment[r.formaPagamento ?? "Outros"] = Number(r.total) || 0;
+        }
+
+        // 4. Top produtos
+        const topRes = await pool.request().query(`
+          SELECT TOP 10
+            ISNULL(iv.ITE_NOME, 'Produto s/nome') as nome,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qty,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as revenue
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
+            AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
+          GROUP BY iv.ITE_NOME
+          ORDER BY revenue DESC
+        `);
+        type TRow = { nome: string; qty: number; revenue: number };
+        const topProducts = (topRes.recordset as TRow[]).map(r => ({
+          name: r.nome ?? "Produto s/nome",
+          qty: Number(r.qty) || 0,
+          revenue: Number(r.revenue) || 0,
+        }));
+
+        await pool.close();
+
+        return {
+          totalRevenue,
+          totalDiscount,
+          count,
+          ticketMedio: count > 0 ? totalRevenue / count : 0,
+          dailySales,
+          byPayment,
+          topProducts,
+          fonte: "inove" as const,
+        };
+      } catch {
+        return localFallback();
+      }
+    }),
+});
