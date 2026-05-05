@@ -1839,19 +1839,33 @@ export const inoveRouter = router({
         const res = await pool.request().query(`
           SELECT
             p.PRODUTO as produtoId,
-            p.PRO_DESCRICAO as nome,
-            p.PRO_CODIGO as codPdv,
+            ISNULL(p.PRO_DESCRICAO, 'Produto s/nome') as nome,
+            ISNULL(CAST(p.PRO_CODIGO as nvarchar(50)), '') as codPdv,
             ISNULL(p.PRO_ESTOQUE, 0) as estoqueAtual,
             ISNULL(p.PRO_ESTOQUE_MINIMO, 0) as estoqueMinimo,
-            FORMAT(DATEADD(day, -(DATEPART(weekday, v.VEN_DATA_FIM) - 2 + 7) % 7, CAST(v.VEN_DATA_FIM as date)), 'yyyy-MM-dd') as semanaInicio,
+            FORMAT(
+              DATEADD(day,
+                1 - CASE
+                  WHEN DATEPART(dw, CAST(v.VEN_DATA_FIM as date)) = 1 THEN 7
+                  ELSE DATEPART(dw, CAST(v.VEN_DATA_FIM as date)) - 1
+                END,
+                CAST(v.VEN_DATA_FIM as date)
+              ), 'yyyy-MM-dd'
+            ) as semanaInicio,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtdVendida
           FROM ITENS_VENDAS iv
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2
-            AND v.VEN_DATA_FIM >= DATEADD(week, -${weeksBack}, GETDATE())
+            AND CAST(v.VEN_DATA_FIM as date) >= CAST(DATEADD(week, -${weeksBack}, GETDATE()) as date)
           GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_ESTOQUE, p.PRO_ESTOQUE_MINIMO,
-            FORMAT(DATEADD(day, -(DATEPART(weekday, v.VEN_DATA_FIM) - 2 + 7) % 7, CAST(v.VEN_DATA_FIM as date)), 'yyyy-MM-dd')
+            DATEADD(day,
+              1 - CASE
+                WHEN DATEPART(dw, CAST(v.VEN_DATA_FIM as date)) = 1 THEN 7
+                ELSE DATEPART(dw, CAST(v.VEN_DATA_FIM as date)) - 1
+              END,
+              CAST(v.VEN_DATA_FIM as date)
+            )
           ORDER BY p.PRO_DESCRICAO, semanaInicio
         `);
         await pool.close();

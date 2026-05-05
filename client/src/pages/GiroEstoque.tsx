@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   RefreshCw, Search, ShoppingCart, TrendingUp, AlertCircle,
   Package, Download, ChevronUp, ChevronDown, ChevronsUpDown,
-  Filter, Wifi, WifiOff, Database
+  Filter, Wifi, WifiOff, Database, BarChart2, Activity, Zap
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,26 +34,101 @@ type ProductRow = {
   weekData: WeekData[];
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string }) {
-  if (status === "negativo") return <Badge className="bg-purple-600 text-white text-xs px-1.5 py-0" title="Estoque negativo: vendas importadas superam o estoque cadastrado">Negativo</Badge>;
-  if (status === "critico") return <Badge className="bg-red-500 text-white text-xs px-1.5 py-0">Crítico</Badge>;
-  if (status === "sem_estoque") return <Badge className="bg-gray-800 text-white text-xs px-1.5 py-0">Zerado</Badge>;
-  if (status === "baixo") return <Badge className="bg-yellow-500 text-white text-xs px-1.5 py-0">Baixo</Badge>;
-  return <Badge className="bg-green-500 text-white text-xs px-1.5 py-0">OK</Badge>;
-}
+// ── Sparkline mini-gráfico ────────────────────────────────────────────────────
+function Sparkline({ values, avgPerWeek }: { values: number[]; avgPerWeek: number }) {
+  if (!values || values.length === 0) return <span className="text-muted-foreground/30 text-xs">—</span>;
+  const max = Math.max(...values, 1);
+  const w = 56;
+  const h = 24;
+  const pts = values.map((v, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * w;
+    const y = h - (v / max) * (h - 2) - 1;
+    return `${x},${y}`;
+  });
+  const polyline = pts.join(" ");
+  // Linha da média
+  const avgY = h - (avgPerWeek / max) * (h - 2) - 1;
+  const lastVal = values[values.length - 1];
+  const trend = values.length >= 2 ? lastVal - values[values.length - 2] : 0;
+  const color = trend > 0 ? "#22c55e" : trend < 0 ? "#f97316" : "#94a3b8";
 
-function CoverageBar({ weeks }: { weeks: number }) {
-  const pct = Math.min((weeks / 4) * 100, 100);
-  const color = weeks < 1 ? "bg-red-500" : weeks < 2 ? "bg-yellow-500" : "bg-green-500";
   return (
     <div className="flex items-center gap-1.5">
-      <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className={`text-xs font-semibold ${weeks < 1 ? "text-red-500" : weeks < 2 ? "text-yellow-600" : "text-green-600"}`}>
-        {weeks >= 99 ? "∞" : `${weeks}sem`}
+      <svg width={w} height={h} className="shrink-0">
+        {/* Linha da média */}
+        <line x1={0} y1={avgY} x2={w} y2={avgY} stroke="#94a3b8" strokeWidth={0.8} strokeDasharray="2,2" />
+        {/* Linha do sparkline */}
+        <polyline
+          points={polyline}
+          fill="none"
+          stroke={color}
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {/* Ponto final */}
+        <circle
+          cx={parseFloat(pts[pts.length - 1].split(",")[0])}
+          cy={parseFloat(pts[pts.length - 1].split(",")[1])}
+          r={2.5}
+          fill={color}
+        />
+      </svg>
+      <span className={`text-xs font-semibold ${trend > 0 ? "text-green-600" : trend < 0 ? "text-orange-500" : "text-muted-foreground"}`}>
+        {trend > 0 ? "↑" : trend < 0 ? "↓" : "→"}
       </span>
+    </div>
+  );
+}
+
+// ── Badge de status ───────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  if (status === "negativo") return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-700">
+      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block" />Negativo
+    </span>
+  );
+  if (status === "critico") return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 border border-red-200 dark:border-red-700">
+      <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />Crítico
+    </span>
+  );
+  if (status === "sem_estoque") return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />Zerado
+    </span>
+  );
+  if (status === "baixo") return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />Baixo
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700">
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />OK
+    </span>
+  );
+}
+
+// ── Barra de cobertura ────────────────────────────────────────────────────────
+function CoverageBar({ weeks }: { weeks: number }) {
+  if (weeks >= 99) return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-20 h-2 bg-emerald-100 dark:bg-emerald-900/30 rounded-full overflow-hidden">
+        <div className="h-full w-full bg-emerald-500 rounded-full" />
+      </div>
+      <span className="text-xs font-bold text-emerald-600">∞</span>
+    </div>
+  );
+  const pct = Math.min((weeks / 4) * 100, 100);
+  const color = weeks < 1 ? "bg-red-500" : weeks < 2 ? "bg-amber-500" : "bg-emerald-500";
+  const textColor = weeks < 1 ? "text-red-600" : weeks < 2 ? "text-amber-600" : "text-emerald-600";
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className={`text-xs font-bold tabular-nums ${textColor}`}>{weeks}s</span>
     </div>
   );
 }
@@ -109,7 +184,6 @@ export default function GiroEstoque() {
         } as ProductRow;
       });
     }
-    // Fonte local: já no formato ProductRow
     return rawData.products as ProductRow[];
   }, [rawData, fonte, weekLabels]);
 
@@ -128,7 +202,6 @@ export default function GiroEstoque() {
     if (showOnlySuggested) {
       rows = rows.filter(p => p.suggestedPurchase > 0);
     }
-    // Ordenação
     rows = [...rows].sort((a, b) => {
       const va = a[sortKey] as number | string;
       const vb = b[sortKey] as number | string;
@@ -140,29 +213,22 @@ export default function GiroEstoque() {
     return rows;
   }, [allProducts, search, statusFilter, showOnlySuggested, sortKey, sortDir]);
 
-  // ── Totais do resumo ──────────────────────────────────────────────────────
+  // ── Totais ────────────────────────────────────────────────────────────────
   const totalSuggested = filtered.filter(p => p.suggestedPurchase > 0).length;
   const totalNegativo = allProducts.filter(p => p.stockStatus === "negativo").length;
   const totalCritico = allProducts.filter(p => p.stockStatus === "critico" || p.stockStatus === "sem_estoque").length;
   const totalBaixo = allProducts.filter(p => p.stockStatus === "baixo").length;
   const totalOk = allProducts.filter(p => p.stockStatus === "ok").length;
-
-  // ── Custo estimado da sugestão de compra ─────────────────────────────────
-  const estimatedCost = filtered
-    .filter(p => p.suggestedPurchase > 0)
-    .reduce((s, p) => s + p.suggestedPurchase * p.costPrice, 0);
+  const estimatedCost = filtered.filter(p => p.suggestedPurchase > 0).reduce((s, p) => s + p.suggestedPurchase * p.costPrice, 0);
+  const totalVendidoSemana = allProducts.reduce((s, p) => s + (p.weekData[p.weekData.length - 1]?.qty ?? 0), 0);
 
   function handleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDir(d => d === "asc" ? "desc" : "asc");
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
   }
 
   function SortIcon({ col }: { col: SortKey }) {
-    if (sortKey !== col) return <ChevronsUpDown className="w-3 h-3 opacity-40" />;
+    if (sortKey !== col) return <ChevronsUpDown className="w-3 h-3 opacity-30" />;
     return sortDir === "asc"
       ? <ChevronUp className="w-3 h-3 text-pink-500" />
       : <ChevronDown className="w-3 h-3 text-pink-500" />;
@@ -189,32 +255,35 @@ export default function GiroEstoque() {
 
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-full">
+
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <TrendingUp className="w-6 h-6 text-pink-500" /> Giro de Estoque Semanal
-          </h1>
-            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <p className="text-sm text-muted-foreground">
-              Velocidade de saída por produto · Sugestão de compra para a próxima semana
-            </p>
-            {rawData && (
-              fonte === "inove" ? (
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full border border-green-300 dark:border-green-700">
-                  <Wifi className="w-3 h-3" /> Dados em tempo real · PDV INOVE
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-yellow-700 bg-yellow-100 dark:bg-yellow-900/30 dark:text-yellow-400 px-2 py-0.5 rounded-full border border-yellow-300 dark:border-yellow-700">
-                  <Database className="w-3 h-3" /> Dados locais · Conector INOVE inativo
-                </span>
-              )
-            )}
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-pink-100 dark:bg-pink-900/30 flex items-center justify-center shrink-0">
+              <Activity className="w-5 h-5 text-pink-600 dark:text-pink-400" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">Giro de Estoque Semanal</h1>
+              <p className="text-sm text-muted-foreground">Velocidade de saída · Cobertura · Sugestão de compra</p>
+            </div>
           </div>
+          {/* Badge de fonte */}
+          {rawData && (
+            fonte === "inove" ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-400 px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-700">
+                <Wifi className="w-3 h-3" /> Dados em tempo real · PDV INOVE
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 px-2.5 py-1 rounded-full border border-amber-200 dark:border-amber-700">
+                <Database className="w-3 h-3" /> Dados locais · Conector INOVE inativo
+              </span>
+            )
+          )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Select value={String(weeksBack)} onValueChange={v => setWeeksBack(Number(v))}>
-            <SelectTrigger className="w-36 h-8 text-xs">
+            <SelectTrigger className="w-40 h-9 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -224,94 +293,158 @@ export default function GiroEstoque() {
               <SelectItem value="12">Últimas 12 semanas</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={() => query.refetch()} disabled={query.isFetching}>
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => query.refetch()} disabled={query.isFetching}>
             <RefreshCw className={`w-4 h-4 ${query.isFetching ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline text-xs">Atualizar</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={exportCSV} disabled={!data}>
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={exportCSV} disabled={!data}>
             <Download className="w-4 h-4" />
+            <span className="hidden sm:inline text-xs">CSV</span>
           </Button>
         </div>
       </div>
 
       {/* ── KPIs ──────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {totalNegativo > 0 && (
-          <Card className="cursor-pointer hover:border-purple-300" onClick={() => setStatusFilter(statusFilter === "negativo" ? "all" : "negativo")}>
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-purple-600 shrink-0" />
-                <div>
-                  <p className="text-2xl font-bold text-purple-600">{totalNegativo}</p>
-                  <p className="text-xs text-muted-foreground">Estoque Negativo</p>
-                  <p className="text-xs text-purple-500">Corrija o cadastro</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-        <Card className="cursor-pointer hover:border-red-300" onClick={() => setStatusFilter(statusFilter === "critico" ? "all" : "critico")}>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-              <div>
-                <p className="text-2xl font-bold text-red-500">{totalCritico}</p>
-                <p className="text-xs text-muted-foreground">Críticos / Zerados</p>
-              </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {/* Críticos / Zerados */}
+        <button
+          onClick={() => setStatusFilter(statusFilter === "critico" ? "all" : "critico")}
+          className={`text-left rounded-xl border p-4 transition-all hover:shadow-md ${
+            statusFilter === "critico"
+              ? "border-red-400 bg-red-50 dark:bg-red-950/20"
+              : "border-border bg-card hover:border-red-300"
+          }`}
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-2xl font-bold text-red-500 tabular-nums">{totalCritico}</p>
+              <p className="text-xs font-medium text-muted-foreground mt-0.5">Críticos / Zerados</p>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-yellow-300" onClick={() => setStatusFilter(statusFilter === "baixo" ? "all" : "baixo")}>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-2">
-              <Package className="w-5 h-5 text-yellow-500 shrink-0" />
-              <div>
-                <p className="text-2xl font-bold text-yellow-600">{totalBaixo}</p>
-                <p className="text-xs text-muted-foreground">Estoque Baixo</p>
-              </div>
+            <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+              <AlertCircle className="w-4 h-4 text-red-500" />
             </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-green-300" onClick={() => setStatusFilter(statusFilter === "ok" ? "all" : "ok")}>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-green-500 shrink-0" />
-              <div>
-                <p className="text-2xl font-bold text-green-600">{totalOk}</p>
-                <p className="text-xs text-muted-foreground">Estoque OK</p>
-              </div>
+          </div>
+          <p className="text-xs text-red-500 mt-1.5 font-medium">Reposição urgente</p>
+        </button>
+
+        {/* Estoque Baixo */}
+        <button
+          onClick={() => setStatusFilter(statusFilter === "baixo" ? "all" : "baixo")}
+          className={`text-left rounded-xl border p-4 transition-all hover:shadow-md ${
+            statusFilter === "baixo"
+              ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20"
+              : "border-border bg-card hover:border-amber-300"
+          }`}
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-2xl font-bold text-amber-600 tabular-nums">{totalBaixo}</p>
+              <p className="text-xs font-medium text-muted-foreground mt-0.5">Estoque Baixo</p>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-blue-300" onClick={() => setShowOnlySuggested(s => !s)}>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5 text-blue-500 shrink-0" />
-              <div>
-                <p className="text-2xl font-bold text-blue-600">{totalSuggested}</p>
-                <p className="text-xs text-muted-foreground">Sugestões de Compra</p>
-                {estimatedCost > 0 && (
-                  <p className="text-xs font-semibold text-blue-700 mt-0.5">≈ R${estimatedCost.toFixed(0)}</p>
-                )}
-              </div>
+            <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+              <Package className="w-4 h-4 text-amber-500" />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+          <p className="text-xs text-amber-600 mt-1.5 font-medium">Atenção necessária</p>
+        </button>
+
+        {/* Estoque OK */}
+        <button
+          onClick={() => setStatusFilter(statusFilter === "ok" ? "all" : "ok")}
+          className={`text-left rounded-xl border p-4 transition-all hover:shadow-md ${
+            statusFilter === "ok"
+              ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/20"
+              : "border-border bg-card hover:border-emerald-300"
+          }`}
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-2xl font-bold text-emerald-600 tabular-nums">{totalOk}</p>
+              <p className="text-xs font-medium text-muted-foreground mt-0.5">Estoque OK</p>
+            </div>
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+              <TrendingUp className="w-4 h-4 text-emerald-500" />
+            </div>
+          </div>
+          <p className="text-xs text-emerald-600 mt-1.5 font-medium">Abastecido</p>
+        </button>
+
+        {/* Sugestões de Compra */}
+        <button
+          onClick={() => setShowOnlySuggested(s => !s)}
+          className={`text-left rounded-xl border p-4 transition-all hover:shadow-md ${
+            showOnlySuggested
+              ? "border-blue-400 bg-blue-50 dark:bg-blue-950/20"
+              : "border-border bg-card hover:border-blue-300"
+          }`}
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-2xl font-bold text-blue-600 tabular-nums">{totalSuggested}</p>
+              <p className="text-xs font-medium text-muted-foreground mt-0.5">Sugestões de Compra</p>
+            </div>
+            <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+              <ShoppingCart className="w-4 h-4 text-blue-500" />
+            </div>
+          </div>
+          {estimatedCost > 0 ? (
+            <p className="text-xs text-blue-600 mt-1.5 font-semibold">≈ R$ {estimatedCost.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-1.5">Clique para filtrar</p>
+          )}
+        </button>
+
+        {/* Vendas última semana */}
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-2xl font-bold text-pink-600 tabular-nums">{totalVendidoSemana}</p>
+              <p className="text-xs font-medium text-muted-foreground mt-0.5">Vendas Última Sem.</p>
+            </div>
+            <div className="w-8 h-8 rounded-lg bg-pink-100 dark:bg-pink-900/30 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-pink-500" />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1.5">{allProducts.length} produtos monitorados</p>
+        </div>
       </div>
+
+      {/* Negativo (condicional) */}
+      {totalNegativo > 0 && (
+        <button
+          onClick={() => setStatusFilter(statusFilter === "negativo" ? "all" : "negativo")}
+          className={`w-full text-left rounded-xl border p-3 transition-all flex items-center gap-3 ${
+            statusFilter === "negativo"
+              ? "border-purple-400 bg-purple-50 dark:bg-purple-950/20"
+              : "border-purple-200 bg-purple-50/50 dark:bg-purple-950/10 hover:border-purple-400"
+          }`}
+        >
+          <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center shrink-0">
+            <AlertCircle className="w-4 h-4 text-purple-600" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-purple-700 dark:text-purple-300">
+              <span className="text-lg font-bold tabular-nums">{totalNegativo}</span> produto(s) com estoque negativo
+            </p>
+            <p className="text-xs text-purple-600 dark:text-purple-400">Vendas importadas superam o saldo cadastrado — corrija no módulo de Estoque</p>
+          </div>
+        </button>
+      )}
 
       {/* ── Filtros ───────────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
           <Input
             placeholder="Buscar produto..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-8 h-9 text-sm"
+            className="pl-9 h-9 text-sm"
           />
         </div>
         <Select value={statusFilter} onValueChange={v => setStatusFilter(v as any)}>
-          <SelectTrigger className="w-44 h-9 text-sm">
-            <Filter className="w-3.5 h-3.5 mr-1" />
+          <SelectTrigger className="w-48 h-9 text-sm">
+            <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -325,156 +458,162 @@ export default function GiroEstoque() {
         <Button
           variant={showOnlySuggested ? "default" : "outline"}
           size="sm"
-          className="h-9 text-sm"
+          className="h-9 text-sm gap-1.5"
           onClick={() => setShowOnlySuggested(s => !s)}
         >
-          <ShoppingCart className="w-4 h-4 mr-1" />
-          {showOnlySuggested ? "Mostrar todos" : "Só com sugestão"}
+          <ShoppingCart className="w-3.5 h-3.5" />
+          {showOnlySuggested ? "Mostrar todos" : "Com sugestão"}
         </Button>
       </div>
 
       {/* ── Tabela ────────────────────────────────────────────────────────── */}
       {query.isLoading ? (
-        <Card>
-          <CardContent className="pt-4 space-y-3">
-            {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
-          </CardContent>
-        </Card>
+        <div className="space-y-2">
+          {[...Array(8)].map((_, i) => (
+            <Skeleton key={i} className="h-14 w-full rounded-xl" />
+          ))}
+        </div>
       ) : filtered.length === 0 ? (
-        <Card>
-          <CardContent className="pt-12 pb-12 text-center text-muted-foreground">
-            <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            <p>Nenhum produto encontrado com os filtros aplicados.</p>
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border border-dashed border-border p-16 text-center">
+          <Package className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
+          <p className="text-muted-foreground font-medium">Nenhum produto encontrado</p>
+          <p className="text-sm text-muted-foreground/60 mt-1">Tente ajustar os filtros aplicados</p>
+        </div>
       ) : (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground font-normal">
-              {filtered.length} produto(s) · {weekLabels.length} semanas
+        <Card className="overflow-hidden">
+          <CardHeader className="py-3 px-4 border-b bg-muted/20">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                <span className="font-semibold text-foreground">{filtered.length}</span> produto(s) ·{" "}
+                <span className="font-semibold text-foreground">{weekLabels.length}</span> semanas analisadas
+              </CardTitle>
               {data?.generatedAt && (
-                <span className="ml-2 text-xs">· Atualizado {new Date(data.generatedAt).toLocaleString("pt-BR")}</span>
+                <span className="text-xs text-muted-foreground">
+                  Atualizado {new Date(data.generatedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
               )}
-            </CardTitle>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b bg-muted/30">
-                    <th className="text-left py-2.5 px-3 font-semibold cursor-pointer whitespace-nowrap" onClick={() => handleSort("productName")}>
+                  <tr className="border-b bg-muted/10">
+                    <th className="text-left py-3 px-4 font-semibold text-muted-foreground cursor-pointer whitespace-nowrap hover:text-foreground" onClick={() => handleSort("productName")}>
                       <span className="flex items-center gap-1">Produto <SortIcon col="productName" /></span>
                     </th>
-                    <th className="text-right py-2.5 px-2 font-semibold cursor-pointer whitespace-nowrap" onClick={() => handleSort("currentStock")}>
+                    <th className="text-right py-3 px-3 font-semibold text-muted-foreground cursor-pointer whitespace-nowrap hover:text-foreground" onClick={() => handleSort("currentStock")}>
                       <span className="flex items-center justify-end gap-1">Estoque <SortIcon col="currentStock" /></span>
                     </th>
-                    <th className="text-right py-2.5 px-2 font-semibold cursor-pointer whitespace-nowrap" onClick={() => handleSort("avgQtyPerWeek")}>
+                    <th className="text-right py-3 px-3 font-semibold text-muted-foreground cursor-pointer whitespace-nowrap hover:text-foreground" onClick={() => handleSort("avgQtyPerWeek")}>
                       <span className="flex items-center justify-end gap-1">Média/Sem <SortIcon col="avgQtyPerWeek" /></span>
                     </th>
-                    {/* Semanas dinâmicas */}
+                    <th className="text-center py-3 px-3 font-semibold text-muted-foreground whitespace-nowrap">
+                      Tendência
+                    </th>
+                    <th className="text-right py-3 px-3 font-semibold text-muted-foreground cursor-pointer whitespace-nowrap hover:text-foreground" onClick={() => handleSort("coverageWeeks")}>
+                      <span className="flex items-center justify-end gap-1">Cobertura <SortIcon col="coverageWeeks" /></span>
+                    </th>
+                    <th className="text-right py-3 px-3 font-semibold text-muted-foreground cursor-pointer whitespace-nowrap hover:text-foreground" onClick={() => handleSort("suggestedPurchase")}>
+                      <span className="flex items-center justify-end gap-1">
+                        <ShoppingCart className="w-3 h-3 text-blue-400" /> Sugestão <SortIcon col="suggestedPurchase" />
+                      </span>
+                    </th>
+                    <th className="text-center py-3 px-3 font-semibold text-muted-foreground whitespace-nowrap">Status</th>
+                    {/* Semanas dinâmicas (compactas) */}
                     {weekLabels.map((w, i) => (
-                      <th key={i} className="text-right py-2.5 px-2 font-medium text-muted-foreground whitespace-nowrap min-w-[70px]">
+                      <th key={i} className="text-right py-3 px-2 font-medium text-muted-foreground/60 whitespace-nowrap min-w-[60px] text-[11px]">
                         {w}
                       </th>
                     ))}
-                    <th className="text-right py-2.5 px-2 font-semibold cursor-pointer whitespace-nowrap" onClick={() => handleSort("coverageWeeks")}>
-                      <span className="flex items-center justify-end gap-1">Cobertura <SortIcon col="coverageWeeks" /></span>
-                    </th>
-                    <th className="text-right py-2.5 px-2 font-semibold cursor-pointer whitespace-nowrap" onClick={() => handleSort("turnover")}>
-                      <span className="flex items-center justify-end gap-1">Giro <SortIcon col="turnover" /></span>
-                    </th>
-                    <th className="text-right py-2.5 px-2 font-semibold cursor-pointer whitespace-nowrap" onClick={() => handleSort("margin")}>
-                      <span className="flex items-center justify-end gap-1">Margem <SortIcon col="margin" /></span>
-                    </th>
-                    <th className="text-right py-2.5 px-2 font-semibold cursor-pointer whitespace-nowrap" onClick={() => handleSort("suggestedPurchase")}>
-                      <span className="flex items-center justify-end gap-1">
-                        <ShoppingCart className="w-3 h-3 text-blue-500" /> Sugestão <SortIcon col="suggestedPurchase" />
-                      </span>
-                    </th>
-                    <th className="text-center py-2.5 px-2 font-semibold whitespace-nowrap">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((p, idx) => (
+                  {filtered.map((p) => (
                     <tr
                       key={p.productId}
-                      className={`border-b last:border-0 hover:bg-muted/20 ${
+                      className={`border-b last:border-0 transition-colors hover:bg-muted/30 ${
                         p.stockStatus === "negativo"
-                          ? "bg-purple-50/40 dark:bg-purple-950/10"
+                          ? "bg-purple-50/30 dark:bg-purple-950/10"
                           : p.stockStatus === "critico" || p.stockStatus === "sem_estoque"
-                          ? "bg-red-50/30 dark:bg-red-950/10"
+                          ? "bg-red-50/20 dark:bg-red-950/10"
                           : p.stockStatus === "baixo"
-                          ? "bg-yellow-50/30 dark:bg-yellow-950/10"
+                          ? "bg-amber-50/20 dark:bg-amber-950/10"
                           : ""
                       }`}
                     >
-                      <td className="py-2.5 px-3 font-medium max-w-[200px]">
-                        <p className="truncate" title={p.productName}>{p.productName}</p>
-                        {p.minStock > 0 && (
-                          <p className="text-muted-foreground text-xs">mín: {p.minStock}</p>
-                        )}
+                      {/* Nome do produto */}
+                      <td className="py-3 px-4 font-medium">
+                        <div className="max-w-[200px]">
+                          <p className="truncate font-semibold text-foreground" title={p.productName}>{p.productName}</p>
+                          {p.minStock > 0 && (
+                            <p className="text-muted-foreground/60 text-[10px] mt-0.5">mín: {p.minStock} un</p>
+                          )}
+                        </div>
                       </td>
-                      <td className="py-2.5 px-2 text-right font-semibold">
+
+                      {/* Estoque atual */}
+                      <td className="py-3 px-3 text-right">
                         <span
-                          className={
-                            p.isNegativeStock ? "text-purple-600 font-bold" :
+                          className={`font-bold tabular-nums text-sm ${
+                            p.isNegativeStock ? "text-purple-600" :
                             p.currentStock <= 0 ? "text-gray-400" :
                             p.currentStock <= p.minStock ? "text-red-500" :
                             "text-foreground"
-                          }
-                          title={p.isNegativeStock ? `Estoque negativo (${p.currentStock}): vendas importadas superam o estoque cadastrado. Corrija o saldo no cadastro de produtos.` : undefined}
-                        >{p.currentStock}</span>
+                          }`}
+                          title={p.isNegativeStock ? `Estoque negativo (${p.currentStock}): corrija o saldo no cadastro de produtos.` : undefined}
+                        >
+                          {p.currentStock}
+                        </span>
                       </td>
-                      <td className="py-2.5 px-2 text-right text-muted-foreground">
-                        {p.avgQtyPerWeek > 0 ? p.avgQtyPerWeek : "—"}
+
+                      {/* Média por semana */}
+                      <td className="py-3 px-3 text-right">
+                        <span className="font-medium text-muted-foreground tabular-nums">
+                          {p.avgQtyPerWeek > 0 ? p.avgQtyPerWeek : "—"}
+                        </span>
                       </td>
-                      {/* Células de vendas por semana */}
-                      {p.weekData.map((w, wi) => (
-                        <td key={wi} className="py-2.5 px-2 text-right">
-                          {w.qty > 0 ? (
-                            <span className={`font-semibold ${
-                              w.qty >= (p.avgQtyPerWeek * 1.2) ? "text-green-600" :
-                              w.qty <= (p.avgQtyPerWeek * 0.5) && p.avgQtyPerWeek > 0 ? "text-orange-500" :
-                              "text-foreground"
-                            }`}>{w.qty}</span>
-                          ) : (
-                            <span className="text-muted-foreground/40">—</span>
-                          )}
-                        </td>
-                      ))}
-                      <td className="py-2.5 px-2 text-right">
+
+                      {/* Sparkline */}
+                      <td className="py-3 px-3">
+                        <Sparkline values={p.weekData.map(w => w.qty)} avgPerWeek={p.avgQtyPerWeek} />
+                      </td>
+
+                      {/* Cobertura */}
+                      <td className="py-3 px-3 text-right">
                         <CoverageBar weeks={p.coverageWeeks >= 99 ? 99 : p.coverageWeeks} />
                       </td>
-                      <td className="py-2.5 px-2 text-right">
-                        <span className={`font-semibold ${
-                          p.turnover >= 10 ? "text-green-600" :
-                          p.turnover >= 3 ? "text-blue-600" :
-                          p.turnover > 0 ? "text-muted-foreground" : "text-gray-400"
-                        }`}>
-                          {p.turnover >= 99 ? "99+" : p.turnover > 0 ? `${p.turnover}x` : "—"}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-2 text-right">
-                        <span className={`font-semibold ${
-                          p.margin >= 40 ? "text-green-600" :
-                          p.margin >= 25 ? "text-yellow-600" :
-                          p.margin > 0 ? "text-orange-500" : "text-gray-400"
-                        }`}>
-                          {p.margin > 0 ? `${p.margin}%` : "—"}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-2 text-right">
+
+                      {/* Sugestão de compra */}
+                      <td className="py-3 px-3 text-right">
                         {p.suggestedPurchase > 0 ? (
-                          <span className="font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/30 px-1.5 py-0.5 rounded">
+                          <span className="inline-flex items-center justify-center font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 px-2 py-0.5 rounded-lg tabular-nums text-sm">
                             {p.suggestedPurchase}
                           </span>
                         ) : (
-                          <span className="text-muted-foreground/40">—</span>
+                          <span className="text-muted-foreground/30">—</span>
                         )}
                       </td>
-                      <td className="py-2.5 px-2 text-center">
+
+                      {/* Status */}
+                      <td className="py-3 px-3 text-center">
                         <StatusBadge status={p.stockStatus} />
                       </td>
+
+                      {/* Vendas por semana (compactas) */}
+                      {p.weekData.map((w, wi) => (
+                        <td key={wi} className="py-3 px-2 text-right">
+                          {w.qty > 0 ? (
+                            <span className={`tabular-nums font-medium ${
+                              w.qty >= (p.avgQtyPerWeek * 1.2) ? "text-emerald-600" :
+                              w.qty <= (p.avgQtyPerWeek * 0.5) && p.avgQtyPerWeek > 0 ? "text-orange-500" :
+                              "text-foreground/70"
+                            }`}>{w.qty}</span>
+                          ) : (
+                            <span className="text-muted-foreground/25">—</span>
+                          )}
+                        </td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>
@@ -485,11 +624,15 @@ export default function GiroEstoque() {
       )}
 
       {/* ── Legenda ───────────────────────────────────────────────────────── */}
-      <div className="text-xs text-muted-foreground space-y-1 pb-4">
-        <p><strong>Cobertura:</strong> semanas de estoque restante com base na média de vendas · <strong>Giro:</strong> qtd vendida ÷ estoque atual</p>
-        <p><strong>Sugestão de Compra:</strong> quantidade para garantir 2 semanas de estoque + estoque mínimo · <strong>Verde</strong> = acima da média · <strong>Laranja</strong> = abaixo da média</p>
-        <p><strong className="text-purple-600">Estoque Negativo:</strong> ocorre quando as vendas importadas superam o saldo cadastrado. Corrija o saldo atual no módulo de Estoque.</p>
-        <p>Clique nos cards de KPI para filtrar por status · Clique nos cabeçalhos para ordenar</p>
+      <div className="rounded-xl border border-border/50 bg-muted/20 p-4 space-y-1.5">
+        <p className="text-xs font-semibold text-muted-foreground mb-2">Legenda</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-muted-foreground">
+          <p><strong className="text-foreground">Cobertura:</strong> semanas de estoque restante com base na média de vendas</p>
+          <p><strong className="text-foreground">Sugestão:</strong> quantidade para garantir 2 semanas de estoque + estoque mínimo</p>
+          <p><strong className="text-emerald-600">Verde</strong> = acima da média semanal · <strong className="text-orange-500">Laranja</strong> = abaixo da média</p>
+          <p><strong className="text-purple-600">Estoque Negativo:</strong> vendas importadas superam o saldo cadastrado</p>
+        </div>
+        <p className="text-xs text-muted-foreground/60 pt-1">Clique nos cards de KPI para filtrar · Clique nos cabeçalhos para ordenar</p>
       </div>
     </div>
   );
