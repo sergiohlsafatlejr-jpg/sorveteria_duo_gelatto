@@ -18,7 +18,8 @@ import {
   Heart, Eye, MessageCircle, Users, ExternalLink, CheckCircle,
   AlertCircle, Clock, Sparkles, Calendar, Wand2, TrendingUp,
   DollarSign, MousePointer, Megaphone, Share2, Bookmark,
-  Activity, Target, ChevronRight, Play, Grid3X3
+  Activity, Target, ChevronRight, Play, Grid3X3,
+  BarChart3, Loader2, Repeat2, BookmarkIcon, ThumbsUp
 } from "lucide-react";
 
 type PostType = "post" | "story" | "reels";
@@ -103,6 +104,7 @@ export default function InstagramPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
   const [adsDatePreset, setAdsDatePreset] = useState<"last_7d" | "last_14d" | "last_30d" | "last_90d" | "this_month" | "last_month">("last_30d");
+  const [selectedPost, setSelectedPost] = useState<any | null>(null);
   const [newPost, setNewPost] = useState({
     type: "post" as PostType,
     caption: "",
@@ -112,6 +114,10 @@ export default function InstagramPage() {
 
   // ── Queries ──────────────────────────────────────────────────────────────
   const utils = trpc.useUtils();
+  const insightsQuery = trpc.instagram.getPostInsightsLive.useQuery(
+    { postId: selectedPost?.id ?? "" },
+    { enabled: !!selectedPost?.id, staleTime: 2 * 60 * 1000 }
+  );
   const accountQuery = trpc.instagram.getAccountInfo.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const postsQuery = trpc.instagram.getPosts.useQuery();
   const recentQuery = trpc.instagram.getRecentPosts.useQuery({ limit: 10 }, { staleTime: 5 * 60 * 1000 });
@@ -689,23 +695,29 @@ export default function InstagramPage() {
             )}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {(recentPosts as any[]).map((post: any) => (
-                <div key={post.id} className="group relative aspect-square rounded-xl overflow-hidden bg-muted cursor-pointer">
-                  {(post.thumbnail_url || post.media_url) && (
+                <div
+                  key={post.id}
+                  className="group relative aspect-square rounded-xl overflow-hidden bg-muted cursor-pointer"
+                  onClick={() => setSelectedPost(post)}
+                >
+                  {(post.thumbnail_url || post.media_url) ? (
                     <img src={post.thumbnail_url ?? post.media_url} alt="Post" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" />
-                  )}
-                  <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 text-white">
-                    <div className="flex items-center gap-3 text-sm font-semibold">
-                      <span className="flex items-center gap-1"><Heart className="w-4 h-4" /> {post.like_count ?? 0}</span>
-                      <span className="flex items-center gap-1"><MessageCircle className="w-4 h-4" /> {post.comments_count ?? 0}</span>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-pink-100 to-purple-100 dark:from-pink-900/30 dark:to-purple-900/30">
+                      <Instagram className="w-10 h-10 text-pink-400 opacity-40" />
                     </div>
-                    {post.permalink && (
-                      <a href={post.permalink} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs underline">
-                        <ExternalLink className="w-3 h-3" /> Ver no Instagram
-                      </a>
-                    )}
+                  )}
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 text-white">
+                    <div className="flex items-center gap-4 text-sm font-semibold">
+                      <span className="flex items-center gap-1"><Heart className="w-4 h-4" /> {post.like_count ?? post.likes ?? 0}</span>
+                      <span className="flex items-center gap-1"><MessageCircle className="w-4 h-4" /> {post.comments_count ?? post.comments ?? 0}</span>
+                    </div>
+                    <span className="flex items-center gap-1 text-xs bg-white/20 px-2 py-1 rounded-full">
+                      <BarChart3 className="w-3 h-3" /> Ver Insights
+                    </span>
                   </div>
                   <div className="absolute top-2 right-2">
-                    <Badge className="bg-black/60 text-white text-xs border-0">{post.media_type ?? "POST"}</Badge>
+                    <Badge className="bg-black/60 text-white text-xs border-0">{post.media_type ?? post.type ?? "POST"}</Badge>
                   </div>
                 </div>
               ))}
@@ -787,6 +799,141 @@ export default function InstagramPage() {
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* ── Modal: Insights do Post ──────────────────────────────────────────── */}
+        <Dialog open={!!selectedPost} onOpenChange={(open) => { if (!open) setSelectedPost(null); }}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-pink-500" /> Insights do Post
+              </DialogTitle>
+            </DialogHeader>
+            {selectedPost && (
+              <div className="space-y-5">
+                <div className="flex gap-4">
+                  {(selectedPost.thumbnail_url || selectedPost.media_url) && (
+                    <img src={selectedPost.thumbnail_url ?? selectedPost.media_url} alt="Post" className="w-28 h-28 rounded-xl object-cover flex-shrink-0 border" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge className="bg-gradient-to-r from-pink-500 to-purple-600 text-white border-0 text-xs">
+                        {selectedPost.media_type ?? selectedPost.type ?? 'POST'}
+                      </Badge>
+                      {selectedPost.timestamp && (
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(selectedPost.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </span>
+                      )}
+                    </div>
+                    {selectedPost.caption && (
+                      <p className="text-sm text-muted-foreground line-clamp-3">{selectedPost.caption}</p>
+                    )}
+                    {selectedPost.permalink && (
+                      <a href={selectedPost.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-pink-500 hover:underline mt-2">
+                        <ExternalLink className="w-3 h-3" /> Ver no Instagram
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {insightsQuery.isLoading && (
+                  <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+                    <Loader2 className="w-8 h-8 animate-spin text-pink-500" />
+                    <p className="text-sm">Buscando insights em tempo real...</p>
+                    <p className="text-xs">Isso pode levar alguns segundos</p>
+                  </div>
+                )}
+
+                {insightsQuery.data && (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        { label: 'Curtidas', value: insightsQuery.data.likes, icon: <Heart className="w-4 h-4 text-red-500" />, color: 'text-red-600' },
+                        { label: 'Comentários', value: insightsQuery.data.comments, icon: <MessageCircle className="w-4 h-4 text-blue-500" />, color: 'text-blue-600' },
+                        { label: 'Compartilhamentos', value: insightsQuery.data.shares, icon: <Repeat2 className="w-4 h-4 text-green-500" />, color: 'text-green-600' },
+                        { label: 'Salvamentos', value: insightsQuery.data.saved, icon: <BookmarkIcon className="w-4 h-4 text-yellow-500" />, color: 'text-yellow-600' },
+                      ].map(({ label, value, icon, color }) => (
+                        <div key={label} className="rounded-xl bg-muted/40 p-3 flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">{icon} {label}</div>
+                          <p className={`text-2xl font-bold ${color}`}>{value.toLocaleString('pt-BR')}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {[
+                        { label: 'Alcance', value: insightsQuery.data.reach, icon: <Users className="w-4 h-4 text-purple-500" />, color: 'text-purple-600', desc: 'Contas únicas que viram' },
+                        { label: 'Visualizações', value: insightsQuery.data.views, icon: <Eye className="w-4 h-4 text-cyan-500" />, color: 'text-cyan-600', desc: 'Total de exibições' },
+                        { label: 'Interações Totais', value: insightsQuery.data.totalInteractions, icon: <Activity className="w-4 h-4 text-orange-500" />, color: 'text-orange-600', desc: 'Curtidas + comentários + etc.' },
+                      ].map(({ label, value, icon, color, desc }) => (
+                        <div key={label} className="rounded-xl bg-muted/40 p-3 flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">{icon} {label}</div>
+                          <p className={`text-2xl font-bold ${color}`}>{value.toLocaleString('pt-BR')}</p>
+                          <p className="text-xs text-muted-foreground">{desc}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {insightsQuery.data.reach > 0 && (
+                      <div className="rounded-xl bg-gradient-to-r from-pink-50 to-purple-50 dark:from-pink-950/30 dark:to-purple-950/30 p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-semibold">Taxa de Engajamento</p>
+                            <p className="text-xs text-muted-foreground">Interações ÷ Alcance</p>
+                          </div>
+                          <p className="text-3xl font-bold text-pink-600">
+                            {((insightsQuery.data.totalInteractions / insightsQuery.data.reach) * 100).toFixed(2)}%
+                          </p>
+                        </div>
+                        <Progress value={Math.min(((insightsQuery.data.totalInteractions / insightsQuery.data.reach) * 100), 20) * 5} className="mt-3 h-2" />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {((insightsQuery.data.totalInteractions / insightsQuery.data.reach) * 100) >= 3
+                            ? '✅ Excelente engajamento (acima de 3%)'
+                            : ((insightsQuery.data.totalInteractions / insightsQuery.data.reach) * 100) >= 1
+                            ? '🟡 Engajamento médio (1–3%)'
+                            : '🔴 Engajamento baixo (abaixo de 1%)'}
+                        </p>
+                      </div>
+                    )}
+
+                    {(insightsQuery.data.profileVisits !== null || insightsQuery.data.follows !== null) && (
+                      <div className="grid grid-cols-2 gap-3">
+                        {insightsQuery.data.profileVisits !== null && (
+                          <div className="rounded-xl bg-muted/40 p-3">
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1"><Users className="w-4 h-4 text-indigo-500" /> Visitas ao Perfil</div>
+                            <p className="text-2xl font-bold text-indigo-600">{insightsQuery.data.profileVisits?.toLocaleString('pt-BR')}</p>
+                          </div>
+                        )}
+                        {insightsQuery.data.follows !== null && (
+                          <div className="rounded-xl bg-muted/40 p-3">
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1"><ThumbsUp className="w-4 h-4 text-teal-500" /> Novos Seguidores</div>
+                            <p className="text-2xl font-bold text-teal-600">{insightsQuery.data.follows?.toLocaleString('pt-BR')}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {!insightsQuery.isLoading && !insightsQuery.data && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">Não foi possível carregar os insights deste post.</p>
+                    <p className="text-xs mt-1">O post pode ser muito antigo ou os dados não estão disponíveis.</p>
+                  </div>
+                )}
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSelectedPost(null)}>Fechar</Button>
+              {selectedPost?.permalink && (
+                <Button className="bg-gradient-to-r from-pink-500 to-purple-600 text-white" onClick={() => window.open(selectedPost.permalink, '_blank')}>
+                  <ExternalLink className="w-4 h-4 mr-1" /> Ver no Instagram
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* ── Modal: Criar Post ─────────────────────────────────────────────── */}
         <Dialog open={showCreateModal} onOpenChange={(open) => { if (!open) { setShowCreateModal(false); resetModal(); } }}>

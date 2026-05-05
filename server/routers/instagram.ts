@@ -77,6 +77,44 @@ export const instagramRouter = router({
       return cached[input.instagramPostId] ?? null;
     }),
 
+  // ── Insights em tempo real de um post via MCP ─────────────────────────────
+  getPostInsightsLive: protectedProcedure
+    .input(z.object({ postId: z.string() }))
+    .query(async ({ input }) => {
+      try {
+        const raw = callMcp('instagram', 'get_post_insights', { post_id: input.postId }) as any;
+        if (!raw) return null;
+        // Estrutura: { data: [{ name, values: [{ value }], title, description }] }
+        const items: any[] = raw.data ?? (Array.isArray(raw) ? raw : []);
+        const metrics: Record<string, { value: number; title: string; description: string }> = {};
+        for (const item of items) {
+          const val = item.values?.[0]?.value ?? item.value ?? 0;
+          metrics[item.name] = {
+            value: typeof val === 'number' ? val : parseInt(String(val)) || 0,
+            title: item.title ?? item.name,
+            description: item.description ?? '',
+          };
+        }
+        return {
+          postId: input.postId,
+          likes: metrics['likes']?.value ?? 0,
+          comments: metrics['comments']?.value ?? 0,
+          shares: metrics['shares']?.value ?? 0,
+          saved: metrics['saved']?.value ?? 0,
+          reach: metrics['reach']?.value ?? 0,
+          views: metrics['views']?.value ?? metrics['impressions']?.value ?? 0,
+          totalInteractions: metrics['total_interactions']?.value ?? 0,
+          // Campos extras se disponíveis
+          profileVisits: metrics['profile_visits']?.value ?? null,
+          follows: metrics['follows']?.value ?? null,
+          allMetrics: metrics,
+        };
+      } catch (e) {
+        console.error('[getPostInsightsLive] Erro:', e);
+        return null;
+      }
+    }),
+
   // ── Resumo de performance (do cache no banco MySQL) ──────────────────────────
   getPerformanceSummary: protectedProcedure
     .input(z.object({ limit: z.number().min(5).max(20).default(10) }).optional())
