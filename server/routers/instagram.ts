@@ -3,8 +3,40 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { instagramPosts, instagramCache, metaAdsCache } from "../../drizzle/schema";
-import { eq, desc, and, lte, isNotNull } from "drizzle-orm";
+import { eq, desc, and, lte, isNotNull, sql } from "drizzle-orm";
 import { generateImage } from "../_core/imageGeneration";
+import { execSync } from "child_process";
+import * as fs from "fs";
+
+// ─── MCP Helper: chama o MCP via CLI ─────────────────────────────────────────
+function callMcp(server: string, toolName: string, input: Record<string, unknown>): unknown {
+  const inputJson = JSON.stringify(input).replace(/'/g, "'\\''")
+  const cmd = `manus-mcp-cli tool call ${toolName} --server ${server} --input '${inputJson}' 2>/dev/null`;
+  try {
+    execSync(cmd, { timeout: 30000 });
+    const listOut = execSync("ls -t /tmp/manus-mcp/mcp_result_*.json 2>/dev/null | head -1").toString().trim();
+    if (!listOut) return null;
+    const content = fs.readFileSync(listOut, "utf-8");
+    const parsed = JSON.parse(content);
+    return parsed?.result ?? parsed;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Upsert Cache Helper ──────────────────────────────────────────────────────
+async function upsertCache(table: 'instagram_cache' | 'meta_ads_cache', key: string, data: unknown): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const tableRef = table === 'instagram_cache' ? instagramCache : metaAdsCache;
+    const now = new Date();
+    await db.insert(tableRef as any).values({ cacheKey: key, data, syncedAt: now, updatedAt: now })
+      .onDuplicateKeyUpdate({ set: { data: sql`VALUES(data)`, syncedAt: sql`VALUES(syncedAt)`, updatedAt: sql`VALUES(updatedAt)` } });
+  } catch (e) {
+    console.error('[upsertCache] Erro:', e);
+  }
+}
 
 // ─── Cache Helper: lê dados do banco MySQL ────────────────────────────────────
 async function getCacheData(table: 'instagram_cache' | 'meta_ads_cache', key: string): Promise<any> {
@@ -262,18 +294,117 @@ export const instagramRouter = router({
     return alerts;
   }),
 
-  // ── Solicitar sincronização manual (envia notificação ao owner) ─────────────
-  requestSync: protectedProcedure.mutation(async ({ ctx }) => {
+  // ── Sincronização real: busca dados do Instagram e Meta Ads via MCP ──────────
+  requestSync: protectedProcedure.mutation(async () => {
+    const errors: string[] = [];
+    let igSynced = false;
+    let metaSynced = false;
+
+    // ── 1. Conta do Instagram ────────────────────────────────────────────────
     try {
-      const { notifyOwner } = await import('../_core/notification');
-      const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-      await notifyOwner({
-        title: 'Solicitação de Sincronização Instagram/Meta Ads',
-        content: `O usuário ${ctx.user.name} solicitou uma sincronização manual dos dados do Instagram e Meta Ads em ${now}.`,
-      });
-      return { success: true, message: 'Solicitação enviada! Os dados serão atualizados em breve.' };
-    } catch {
-      return { success: false, message: 'Não foi possível enviar a solicitação.' };
-    }
+      const accountRaw = callMcp('instagram', 'get_account_info', {}) as any;
+      if (accountRaw) {
+        // Normalizar estrutura
+        const accountData = accountRaw.data ?? accountRaw;
+        const account = {
+          username: accountData.username ?? accountData.Username ?? '',
+          name: accountData.name ?? accountData.Name ?? '',
+          bio: accountData.bio ?? accountData.Bio ?? '',
+          followers: accountData.followers_count ?? accountData.Followers ?? accountData.followers ?? 0,
+          following: accountData.follows_count ?? accountData.Following ?? accountData.following ?? 0,
+          posts: accountData.media_count ?? accountData.Posts ?? accountData.posts ?? 0,
+          website: accountData.website ?? accountData.Website ?? '',
+          profile_picture: accountData.profile_picture_url ?? accountData['Profile Picture'] ?? '',
+        };
+        await upsertCache('instagram_cache', 'account_info', account);
+        igSynced = true;
+      }
+    } catch (e) { errors.push(`Conta IG: ${String(e)}`); }
+
+    // ── 2. Posts recentes do Instagram ──────────────────────────────────────
+    try {
+      const postsRaw = callMcp('instagram', 'get_post_list', { limit: 20 }) as any;
+      if (postsRaw) {
+        const postsList = postsRaw.data ?? (Array.isArray(postsRaw) ? postsRaw : []);
+        const posts = postsList.map((p: any) => ({
+          id: p.id,
+          type: (p.media_type ?? p.Type ?? 'IMAGE').toUpperCase(),
+          caption: p.caption ?? p.Caption ?? '',
+          permalink: p.permalink ?? p.Link ?? '',
+          likes: p.like_count ?? p.Likes ?? 0,
+          comments: p.comments_count ?? p.Comments ?? 0,
+          timestamp: p.timestamp ?? p.Posted ?? '',
+          thumbnail: p.thumbnail_url ?? p.media_url ?? '',
+        }));
+        const nextCursor = postsRaw.paging?.cursors?.after ?? null;
+        await upsertCache('instagram_cache', 'recent_posts', { data: posts, nextCursor });
+
+        // Calcular performance summary
+        if (posts.length > 0) {
+          const avgLikes = Math.round(posts.reduce((s: number, p: any) => s + (p.likes ?? 0), 0) / posts.length);
+          const avgComments = Math.round(posts.reduce((s: number, p: any) => s + (p.comments ?? 0), 0) / posts.length);
+          const totalLikes = posts.reduce((s: number, p: any) => s + (p.likes ?? 0), 0);
+          const topPost = [...posts].sort((a: any, b: any) => (b.likes + b.comments) - (a.likes + a.comments))[0];
+          const typeCounts: Record<string, number> = {};
+          for (const p of posts) typeCounts[p.type] = (typeCounts[p.type] ?? 0) + 1;
+          const topFormat = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'IMAGE';
+          const formatLabel: Record<string, string> = { VIDEO: 'REELS', IMAGE: 'FOTO', CAROUSEL_ALBUM: 'CARROSSEL' };
+          await upsertCache('instagram_cache', 'performance_summary', {
+            avgLikes, avgComments, totalLikes, topPost, topFormat: formatLabel[topFormat] ?? topFormat,
+          });
+        }
+      }
+    } catch (e) { errors.push(`Posts IG: ${String(e)}`); }
+
+    // ── 3. Campanhas Meta Ads ────────────────────────────────────────────────
+    try {
+      const DUO_ACCOUNT_ID = 'act_1821396852023766';
+      const insightsRaw = callMcp('meta-marketing', 'meta_marketing_get_insights', {
+        object_type: 'ad_account',
+        object_id: DUO_ACCOUNT_ID,
+        level: 'campaign',
+        date_preset: 'last_30d',
+        fields: ['campaign_name', 'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpm', 'inline_link_clicks', 'inline_link_click_ctr'],
+      }) as any;
+
+      const rows: any[] = Array.isArray(insightsRaw?.insights) ? insightsRaw.insights
+        : Array.isArray(insightsRaw?.data) ? insightsRaw.data
+        : Array.isArray(insightsRaw) ? insightsRaw : [];
+
+      if (rows.length > 0) {
+        const campaigns = rows.map((r: any) => ({
+          campaignId: r.campaign_id ?? null,
+          campaignName: r.campaign_name ?? '—',
+          impressions: parseInt(r.impressions ?? '0'),
+          reach: parseInt(r.reach ?? '0'),
+          spend: parseFloat(r.spend ?? '0'),
+          ctr: parseFloat(r.ctr ?? '0'),
+          cpm: parseFloat(r.cpm ?? '0'),
+          linkClicks: parseInt(r.inline_link_clicks ?? '0'),
+          linkCtr: parseFloat(r.inline_link_click_ctr ?? '0'),
+          dateStart: r.date_start ?? null,
+          dateStop: r.date_stop ?? null,
+        }));
+        const totalSpend = campaigns.reduce((s: number, c: any) => s + c.spend, 0);
+        const totalImpressions = campaigns.reduce((s: number, c: any) => s + c.impressions, 0);
+        const totalReach = campaigns.reduce((s: number, c: any) => s + c.reach, 0);
+        const totalLinkClicks = campaigns.reduce((s: number, c: any) => s + c.linkClicks, 0);
+        const avgCtr = totalImpressions > 0 ? (totalLinkClicks / totalImpressions) * 100 : 0;
+        const avgCpm = campaigns.length > 0 ? campaigns.reduce((s: number, c: any) => s + c.cpm, 0) / campaigns.length : 0;
+        const summary = { totalSpend, totalImpressions, totalReach, totalLinkClicks, avgCtr, avgCpm, campaignCount: campaigns.length };
+        await upsertCache('meta_ads_cache', 'campaigns_last_30d', { campaigns, summary });
+        metaSynced = true;
+      }
+    } catch (e) { errors.push(`Meta Ads: ${String(e)}`); }
+
+    const success = igSynced || metaSynced;
+    const parts = [];
+    if (igSynced) parts.push('Instagram');
+    if (metaSynced) parts.push('Meta Ads');
+    const message = success
+      ? `✅ ${parts.join(' e ')} sincronizados com sucesso!`
+      : `⚠️ Não foi possível sincronizar: ${errors.join('; ')}`;
+
+    return { success, message, igSynced, metaSynced, errors };
   }),
 });

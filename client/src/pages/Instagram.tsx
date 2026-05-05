@@ -111,6 +111,7 @@ export default function InstagramPage() {
   });
 
   // ── Queries ──────────────────────────────────────────────────────────────
+  const utils = trpc.useUtils();
   const accountQuery = trpc.instagram.getAccountInfo.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const postsQuery = trpc.instagram.getPosts.useQuery();
   const recentQuery = trpc.instagram.getRecentPosts.useQuery({ limit: 10 }, { staleTime: 5 * 60 * 1000 });
@@ -130,10 +131,22 @@ export default function InstagramPage() {
   const ctrAlertsQuery = trpc.instagram.getCtrAlerts.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const requestSyncMut = trpc.instagram.requestSync.useMutation({
     onSuccess: (data) => {
-      if (data.success) toast.success(data.message);
-      else toast.error(data.message);
+      if (data.success) {
+        toast.success(data.message);
+        // Invalidar todas as queries para forçar recarregamento dos dados atualizados
+        utils.instagram.getAccountInfo.invalidate();
+        utils.instagram.getRecentPosts.invalidate();
+        utils.instagram.getPerformanceSummary.invalidate();
+        utils.instagram.getMetaAdsCampaigns.invalidate();
+        utils.instagram.getMetaAdsInsightsByAd.invalidate();
+        utils.instagram.getCacheStatus.invalidate();
+        utils.instagram.getWeeklyTrend.invalidate();
+        utils.instagram.getCtrAlerts.invalidate();
+      } else {
+        toast.error(data.message);
+      }
     },
-    onError: (e) => toast.error(`Erro ao solicitar sincronização: ${e.message}`),
+    onError: (e) => toast.error(`Erro ao sincronizar: ${e.message}`),
   });
 
   // ── Mutations ─────────────────────────────────────────────────────────────
