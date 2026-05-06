@@ -233,8 +233,17 @@ export default function InstagramPage() {
                 <div className={`w-2 h-2 rounded-full ${cacheStatusQuery.data.isConnected ? 'bg-green-500' : 'bg-yellow-500'}`} />
                 <span className="hidden sm:inline">
                   {cacheStatusQuery.data.lastSync
-                    ? `Sincronizado ${new Date(cacheStatusQuery.data.lastSync).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
-                    : 'Aguardando sync'}
+                    ? (() => {
+                        const d = new Date(cacheStatusQuery.data.lastSync!);
+                        const now = new Date();
+                        const isToday = d.toDateString() === now.toDateString();
+                        const isYesterday = new Date(now.getTime() - 86400000).toDateString() === d.toDateString();
+                        const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        if (isToday) return `Sincronizado hoje às ${time}`;
+                        if (isYesterday) return `Sincronizado ontem às ${time}`;
+                        return `Sincronizado ${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${time}`;
+                      })()
+                    : 'Aguardando sincronização'}
                 </span>
               </div>
             )}
