@@ -10,6 +10,8 @@ import {
   products,
   stockMovements,
   finDailyRevenue,
+  instagramCache,
+  metaAdsCache,
 } from "../../drizzle/schema";
 import { eq, sql, and } from "drizzle-orm";
 import * as mssqlLib from "mssql";
@@ -562,6 +564,70 @@ ${topProdutos.map((p, i) => `${i + 1}. ${p.produto} — ${fmtMoney(p.total)}`).j
       title: "❌ Falha no Relatório Semanal",
       content: `Erro ao gerar relatório semanal: ${message}`,
     }).catch(() => {});
+    res.status(500).json({ error: message });
+  }
+});
+
+// ── Rota: Sincronizar Instagram + Meta Ads (recebe dados do agente Manus) ──
+scheduledRouter.post("/api/scheduled/sync-instagram", async (req, res) => {
+  try {
+    const user = await sdk.authenticateRequest(req).catch(() => null);
+    if (!user) {
+      res.status(401).json({ error: "Não autorizado" });
+      return;
+    }
+
+    const db = await getDb();
+    if (!db) throw new Error("DB indisponível");
+
+    const { accountInfo, recentPosts, performanceSummary, metaAdsCampaigns } = req.body as {
+      accountInfo?: unknown;
+      recentPosts?: unknown;
+      performanceSummary?: unknown;
+      metaAdsCampaigns?: unknown;
+    };
+
+    const now = new Date();
+    let igSynced = false;
+    let metaSynced = false;
+
+    // Salvar dados do Instagram no cache
+    if (accountInfo) {
+      await db.insert(instagramCache as any).values({ cacheKey: 'account_info', data: JSON.stringify(accountInfo), syncedAt: now, updatedAt: now })
+        .onDuplicateKeyUpdate({ set: { data: sql`VALUES(data)`, syncedAt: sql`VALUES(syncedAt)`, updatedAt: sql`VALUES(updatedAt)` } });
+      igSynced = true;
+    }
+    if (recentPosts) {
+      await db.insert(instagramCache as any).values({ cacheKey: 'recent_posts', data: JSON.stringify(recentPosts), syncedAt: now, updatedAt: now })
+        .onDuplicateKeyUpdate({ set: { data: sql`VALUES(data)`, syncedAt: sql`VALUES(syncedAt)`, updatedAt: sql`VALUES(updatedAt)` } });
+      igSynced = true;
+    }
+    if (performanceSummary) {
+      await db.insert(instagramCache as any).values({ cacheKey: 'performance_summary', data: JSON.stringify(performanceSummary), syncedAt: now, updatedAt: now })
+        .onDuplicateKeyUpdate({ set: { data: sql`VALUES(data)`, syncedAt: sql`VALUES(syncedAt)`, updatedAt: sql`VALUES(updatedAt)` } });
+      igSynced = true;
+    }
+
+    // Salvar dados do Meta Ads no cache
+    if (metaAdsCampaigns) {
+      await db.insert(metaAdsCache as any).values({ cacheKey: 'campaigns_last_30d', data: JSON.stringify(metaAdsCampaigns), syncedAt: now, updatedAt: now })
+        .onDuplicateKeyUpdate({ set: { data: sql`VALUES(data)`, syncedAt: sql`VALUES(syncedAt)`, updatedAt: sql`VALUES(updatedAt)` } });
+      metaSynced = true;
+    }
+
+    const parts = [];
+    if (igSynced) parts.push('Instagram');
+    if (metaSynced) parts.push('Meta Ads');
+
+    await notifyOwner({
+      title: '📱 Instagram + Meta Ads Sincronizados',
+      content: `Dados atualizados: ${parts.join(' e ')} — ${now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
+    }).catch(() => {});
+
+    res.json({ ok: true, synced: parts, timestamp: now.toISOString() });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[scheduled/sync-instagram] Erro:', message);
     res.status(500).json({ error: message });
   }
 });
