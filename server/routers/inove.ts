@@ -2090,4 +2090,123 @@ export const inoveRouter = router({
         return localFallback();
       }
     }),
+
+  // ── Comparativo de Vendas: Mês Atual vs Mês Anterior (INOVE) ────────────────────────────────────
+  getCashflowComparativo: protectedProcedure.query(async () => {
+    const now = new Date();
+    // Mês atual
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth() + 1;
+    const curFrom = `${curYear}-${String(curMonth).padStart(2, '0')}-01`;
+    const curDays = new Date(curYear, curMonth, 0).getDate();
+    const curTo = `${curYear}-${String(curMonth).padStart(2, '0')}-${String(curDays).padStart(2, '0')}`;
+    // Mês anterior
+    const prevDate = new Date(curYear, curMonth - 2, 1);
+    const prevYear = prevDate.getFullYear();
+    const prevMonth = prevDate.getMonth() + 1;
+    const prevFrom = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`;
+    const prevDays = new Date(prevYear, prevMonth, 0).getDate();
+    const prevTo = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(prevDays).padStart(2, '0')}`;
+
+    const db = await getDb();
+    if (!db) throw new Error('DB unavailable');
+    const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+
+    // Helper: busca resumo mensal de vendas no INOVE
+    async function fetchMonthSummary(pool: any, fromDate: string, toDate: string) {
+      const res = await pool.request().query(`
+        SELECT
+          CAST(COALESCE(SUM(v.VEN_TOTAL), 0) as float) as totalRevenue,
+          CAST(COALESCE(SUM(v.VEN_DESCONTO), 0) as float) as totalDiscount,
+          COUNT(DISTINCT v.VENDA) as totalCount,
+          CAST(COALESCE(AVG(v.VEN_TOTAL), 0) as float) as ticketMedio
+        FROM VENDAS v
+        WHERE v.VEN_SITUACAO = 2
+          AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
+          AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
+      `);
+      const r = res.recordset[0] as any;
+      return {
+        totalRevenue: Number(r?.totalRevenue) || 0,
+        totalDiscount: Number(r?.totalDiscount) || 0,
+        totalCount: Number(r?.totalCount) || 0,
+        ticketMedio: Number(r?.ticketMedio) || 0,
+      };
+    }
+
+    // Helper: busca vendas diárias no INOVE
+    async function fetchDailySales(pool: any, fromDate: string, toDate: string) {
+      const res = await pool.request().query(`
+        SELECT
+          FORMAT(CAST(v.VEN_DATA_FIM as date), 'yyyy-MM-dd') as dia,
+          CAST(SUM(v.VEN_TOTAL) as float) as total,
+          COUNT(DISTINCT v.VENDA) as qtd
+        FROM VENDAS v
+        WHERE v.VEN_SITUACAO = 2
+          AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
+          AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
+        GROUP BY FORMAT(CAST(v.VEN_DATA_FIM as date), 'yyyy-MM-dd')
+        ORDER BY dia
+      `);
+      return (res.recordset as any[]).map((r: any) => ({
+        date: r.dia as string,
+        total: Number(r.total) || 0,
+        count: Number(r.qtd) || 0,
+      }));
+    }
+
+    // Fallback local (MySQL)
+    async function localMonthSummary(fromYM: string, toYM: string) {
+      const rows = await db!.select({
+        totalRevenue: sql<number>`COALESCE(SUM(${salesImportItems.totalPrice}), 0)`,
+        totalCount: sql<number>`COUNT(DISTINCT ${salesImports.id})`,
+      })
+        .from(salesImportItems)
+        .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+        .where(and(
+          eq(salesImports.status, 'confirmed'),
+          sql`${salesImports.referenceMonth} >= ${fromYM}`,
+          sql`${salesImports.referenceMonth} <= ${toYM}`,
+        ));
+      const totalRevenue = Number(rows[0]?.totalRevenue) || 0;
+      const totalCount = Number(rows[0]?.totalCount) || 0;
+      return { totalRevenue, totalDiscount: 0, totalCount, ticketMedio: totalCount > 0 ? totalRevenue / totalCount : 0 };
+    }
+
+    const curMonthLabel = new Date(curYear, curMonth - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    const prevMonthLabel = new Date(prevYear, prevMonth - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
+    if (!connRows.length || !connRows[0].active) {
+      const [cur, prev] = await Promise.all([
+        localMonthSummary(curFrom.substring(0, 7), curTo.substring(0, 7)),
+        localMonthSummary(prevFrom.substring(0, 7), prevTo.substring(0, 7)),
+      ]);
+      const varPct = prev.totalRevenue > 0 ? ((cur.totalRevenue - prev.totalRevenue) / prev.totalRevenue) * 100 : null;
+      return { current: { ...cur, label: curMonthLabel, from: curFrom, to: curTo }, previous: { ...prev, label: prevMonthLabel, from: prevFrom, to: prevTo }, variationPct: varPct, dailyCurrent: [], fonte: 'local' as const };
+    }
+
+    try {
+      const pool = await createInovePool(connRows[0]);
+      const [cur, prev, dailyCurrent] = await Promise.all([
+        fetchMonthSummary(pool, curFrom, curTo),
+        fetchMonthSummary(pool, prevFrom, prevTo),
+        fetchDailySales(pool, curFrom, curTo),
+      ]);
+      const varPct = prev.totalRevenue > 0 ? ((cur.totalRevenue - prev.totalRevenue) / prev.totalRevenue) * 100 : null;
+      return {
+        current: { ...cur, label: curMonthLabel, from: curFrom, to: curTo },
+        previous: { ...prev, label: prevMonthLabel, from: prevFrom, to: prevTo },
+        variationPct: varPct,
+        dailyCurrent,
+        fonte: 'inove' as const,
+      };
+    } catch {
+      const [cur, prev] = await Promise.all([
+        localMonthSummary(curFrom.substring(0, 7), curTo.substring(0, 7)),
+        localMonthSummary(prevFrom.substring(0, 7), prevTo.substring(0, 7)),
+      ]);
+      const varPct = prev.totalRevenue > 0 ? ((cur.totalRevenue - prev.totalRevenue) / prev.totalRevenue) * 100 : null;
+      return { current: { ...cur, label: curMonthLabel, from: curFrom, to: curTo }, previous: { ...prev, label: prevMonthLabel, from: prevFrom, to: prevTo }, variationPct: varPct, dailyCurrent: [], fonte: 'local' as const };
+    }
+  }),
 });

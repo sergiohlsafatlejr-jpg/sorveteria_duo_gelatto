@@ -5,12 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer, ReferenceLine,
+  BarChart, Bar, LineChart, Line, AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import {
   TrendingUp, TrendingDown, DollarSign, ArrowUpCircle,
-  ArrowDownCircle, Activity, Download,
+  ArrowDownCircle, Activity, Download, ShoppingCart,
+  Receipt, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +40,20 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
+function VariationBadge({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="text-xs text-muted-foreground">—</span>;
+  const isPos = pct >= 0;
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-full",
+      isPos ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+    )}>
+      {isPos ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+      {isPos ? "+" : ""}{pct.toFixed(1)}%
+    </span>
+  );
+}
+
 export default function FinCashflow() {
   const [monthsBack, setMonthsBack] = useState(3);
   const [monthsAhead, setMonthsAhead] = useState(6);
@@ -47,23 +63,20 @@ export default function FinCashflow() {
     monthsAhead,
   });
 
+  const { data: comp, isLoading: compLoading } = trpc.inove.getCashflowComparativo.useQuery();
+
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
   const summary = useMemo(() => {
-    const past = months.filter(m => m.month < currentMonthKey);
-    const future = months.filter(m => m.month > currentMonthKey);
-    const current = months.find(m => m.month === currentMonthKey);
-
     const totalPayable = months.reduce((s, m) => s + m.totalPayable, 0);
     const totalReceivable = months.reduce((s, m) => s + m.totalReceivable, 0);
     const totalPaid = months.reduce((s, m) => s + m.totalPaid, 0);
     const totalReceived = months.reduce((s, m) => s + m.totalReceived, 0);
     const projectedNet = totalReceivable - totalPayable;
     const realizedNet = totalReceived - totalPaid;
-
-    return { past, future, current, totalPayable, totalReceivable, totalPaid, totalReceived, projectedNet, realizedNet };
-  }, [months, currentMonthKey]);
+    return { totalPayable, totalReceivable, totalPaid, totalReceived, projectedNet, realizedNet };
+  }, [months]);
 
   const chartData = months.map(m => ({
     ...m,
@@ -116,7 +129,6 @@ export default function FinCashflow() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {/* Controles de período */}
           <div className="flex items-center gap-1 text-xs text-muted-foreground bg-card border border-border rounded-lg px-3 py-1.5">
             <span>Meses atrás:</span>
             {[1, 3, 6, 12].map(n => (
@@ -149,7 +161,207 @@ export default function FinCashflow() {
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* ── PAINEL COMPARATIVO INOVE ─────────────────────────────────────────── */}
+      <div className="rounded-xl border border-border/60 bg-gradient-to-br from-primary/5 to-transparent overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border/40">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold text-foreground">Vendas PDV — Comparativo Mensal</span>
+            {comp && (
+              <Badge variant="outline" className={cn(
+                "text-[10px] h-4 px-1.5",
+                comp.fonte === "inove"
+                  ? "border-emerald-500/50 text-emerald-400"
+                  : "border-yellow-500/50 text-yellow-400"
+              )}>
+                {comp.fonte === "inove" ? "● INOVE" : "⚠ Local"}
+              </Badge>
+            )}
+          </div>
+          {comp && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span>{comp.previous.label}</span>
+              <span className="text-border">→</span>
+              <span className="font-medium text-foreground">{comp.current.label}</span>
+            </div>
+          )}
+        </div>
+
+        {compLoading ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-5">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />)}
+          </div>
+        ) : comp ? (
+          <div className="p-5 space-y-4">
+            {/* KPIs comparativos */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {/* Faturamento */}
+              <div className="bg-card/60 rounded-xl p-4 space-y-2 border border-border/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <DollarSign className="h-3 w-3" /> Faturamento
+                  </span>
+                  <VariationBadge pct={comp.variationPct} />
+                </div>
+                <p className="text-xl font-bold text-emerald-400">{fmtBRL(comp.current.totalRevenue)}</p>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Mês anterior</span>
+                  <span>{fmtBRL(comp.previous.totalRevenue)}</span>
+                </div>
+                {/* Mini barra de progresso */}
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 rounded-full transition-all"
+                    style={{
+                      width: comp.previous.totalRevenue > 0
+                        ? `${Math.min(100, (comp.current.totalRevenue / comp.previous.totalRevenue) * 100)}%`
+                        : "0%"
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Qtd de Vendas */}
+              <div className="bg-card/60 rounded-xl p-4 space-y-2 border border-border/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <ShoppingCart className="h-3 w-3" /> Qtd Vendas
+                  </span>
+                  <VariationBadge pct={
+                    comp.previous.totalCount > 0
+                      ? ((comp.current.totalCount - comp.previous.totalCount) / comp.previous.totalCount) * 100
+                      : null
+                  } />
+                </div>
+                <p className="text-xl font-bold text-blue-400">{comp.current.totalCount.toLocaleString("pt-BR")}</p>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Mês anterior</span>
+                  <span>{comp.previous.totalCount.toLocaleString("pt-BR")}</span>
+                </div>
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 rounded-full transition-all"
+                    style={{
+                      width: comp.previous.totalCount > 0
+                        ? `${Math.min(100, (comp.current.totalCount / comp.previous.totalCount) * 100)}%`
+                        : "0%"
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Ticket Médio */}
+              <div className="bg-card/60 rounded-xl p-4 space-y-2 border border-border/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Receipt className="h-3 w-3" /> Ticket Médio
+                  </span>
+                  <VariationBadge pct={
+                    comp.previous.ticketMedio > 0
+                      ? ((comp.current.ticketMedio - comp.previous.ticketMedio) / comp.previous.ticketMedio) * 100
+                      : null
+                  } />
+                </div>
+                <p className="text-xl font-bold text-purple-400">{fmtBRL(comp.current.ticketMedio)}</p>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Mês anterior</span>
+                  <span>{fmtBRL(comp.previous.ticketMedio)}</span>
+                </div>
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-purple-500 rounded-full transition-all"
+                    style={{
+                      width: comp.previous.ticketMedio > 0
+                        ? `${Math.min(100, (comp.current.ticketMedio / comp.previous.ticketMedio) * 100)}%`
+                        : "0%"
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Descontos */}
+              <div className="bg-card/60 rounded-xl p-4 space-y-2 border border-border/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <ArrowDownCircle className="h-3 w-3" /> Descontos
+                  </span>
+                  <VariationBadge pct={
+                    comp.previous.totalDiscount > 0
+                      ? ((comp.current.totalDiscount - comp.previous.totalDiscount) / comp.previous.totalDiscount) * 100
+                      : null
+                  } />
+                </div>
+                <p className="text-xl font-bold text-orange-400">{fmtBRL(comp.current.totalDiscount)}</p>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Mês anterior</span>
+                  <span>{fmtBRL(comp.previous.totalDiscount)}</span>
+                </div>
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-orange-500 rounded-full transition-all"
+                    style={{
+                      width: comp.previous.totalDiscount > 0
+                        ? `${Math.min(100, (comp.current.totalDiscount / comp.previous.totalDiscount) * 100)}%`
+                        : "0%"
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Gráfico de vendas diárias do mês atual */}
+            {comp.dailyCurrent.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">
+                  Vendas Diárias — {comp.current.label}
+                </p>
+                <ResponsiveContainer width="100%" height={140}>
+                  <AreaChart data={comp.dailyCurrent} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+                      axisLine={false} tickLine={false}
+                      tickFormatter={(v: string) => v.substring(8)}
+                    />
+                    <YAxis
+                      tickFormatter={fmtBRLShort}
+                      tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+                      axisLine={false} tickLine={false} width={60}
+                    />
+                    <Tooltip
+                      formatter={(v: number) => [fmtBRL(v), "Vendas"]}
+                      labelFormatter={(l: string) => {
+                        const d = new Date(l + "T12:00:00");
+                        return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+                      }}
+                      contentStyle={{ fontSize: 11, background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                    />
+                    <Area
+                      type="monotone" dataKey="total" name="Vendas"
+                      stroke="#10b981" strokeWidth={2}
+                      fill="url(#salesGrad)"
+                      dot={false} activeDot={{ r: 4 }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-8 text-center text-sm text-muted-foreground">
+            Sem dados disponíveis. Verifique a conexão com o INOVE em Administração.
+          </div>
+        )}
+      </div>
+
+      {/* KPI Cards — Fluxo Geral */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="border-border/50">
           <CardContent className="p-4">
