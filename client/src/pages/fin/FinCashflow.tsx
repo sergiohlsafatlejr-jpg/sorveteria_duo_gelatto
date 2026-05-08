@@ -64,6 +64,8 @@ export default function FinCashflow() {
   });
 
   const { data: comp, isLoading: compLoading } = trpc.inove.getCashflowComparativo.useQuery();
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const { data: anual, isLoading: anualLoading } = trpc.inove.getComparativoAnual.useQuery({ year: selectedYear });
 
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -555,6 +557,166 @@ export default function FinCashflow() {
               </tfoot>
             </table>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ── TABELA COMPARATIVA ANUAL ─────────────────────────────────────────── */}
+      <Card className="border-border/50">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-sm font-semibold">Comparativo Anual de Vendas</CardTitle>
+              {anual && (
+                <Badge variant="outline" className={cn(
+                  "text-[10px] h-4 px-1.5",
+                  anual.fonte === 'inove' ? "border-emerald-500/50 text-emerald-400" : "border-yellow-500/50 text-yellow-400"
+                )}>
+                  {anual.fonte === 'inove' ? '● INOVE' : '⚠ Local'}
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {[new Date().getFullYear(), new Date().getFullYear() - 1].map(y => (
+                <button
+                  key={y}
+                  onClick={() => setSelectedYear(y)}
+                  className={cn(
+                    "px-3 py-1 text-xs rounded-md font-medium transition-colors border",
+                    selectedYear === y
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  )}
+                >{y}</button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {anualLoading ? (
+            <div className="p-6 space-y-2">
+              {[...Array(6)].map((_, i) => <div key={i} className="h-8 bg-muted animate-pulse rounded" />)}
+            </div>
+          ) : anual ? (
+            <>
+              {/* Gráfico de barras agrupadas */}
+              <div className="px-4 pt-4 pb-2">
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart
+                    data={anual.meses.map(m => ({
+                      label: m.label.substring(0, 3),
+                      [String(anual.anoAnterior)]: m.anterior.totalRevenue,
+                      [String(anual.anoAtual)]: m.isFuture ? null : m.atual.totalRevenue,
+                    }))}
+                    margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+                    <YAxis tickFormatter={fmtBRLShort} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      formatter={(v: number) => [fmtBRL(v), '']}
+                      contentStyle={{ fontSize: 11, background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8 }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey={String(anual.anoAnterior)} fill="#818cf8" radius={[3, 3, 0, 0]} opacity={0.7} />
+                    <Bar dataKey={String(anual.anoAtual)} fill="#10b981" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Tabela detalhada */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border/50 bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Mês</th>
+                      <th className="text-right px-3 py-3 font-medium text-muted-foreground">Vendas {anual.anoAnterior}</th>
+                      <th className="text-right px-3 py-3 font-medium text-muted-foreground">Qtd {anual.anoAnterior}</th>
+                      <th className="text-right px-3 py-3 font-medium text-muted-foreground">Ticket Méd. {anual.anoAnterior}</th>
+                      <th className="text-right px-3 py-3 font-medium text-muted-foreground">Vendas {anual.anoAtual}</th>
+                      <th className="text-right px-3 py-3 font-medium text-muted-foreground">Qtd {anual.anoAtual}</th>
+                      <th className="text-right px-3 py-3 font-medium text-muted-foreground">Ticket Méd. {anual.anoAtual}</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Variação %</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Diferença R$</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {anual.meses.map((m, idx) => {
+                      const diff = m.atual.totalRevenue - m.anterior.totalRevenue;
+                      const isCurMonth = m.mes === new Date().getMonth() + 1 && selectedYear === new Date().getFullYear();
+                      return (
+                        <tr
+                          key={m.mes}
+                          className={cn(
+                            "border-b border-border/30 transition-colors hover:bg-muted/20",
+                            isCurMonth && "bg-primary/5 font-medium",
+                            m.isFuture && "opacity-40",
+                            !isCurMonth && idx % 2 === 0 && "bg-muted/10",
+                          )}
+                        >
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <span>{m.label}</span>
+                              {isCurMonth && <Badge variant="outline" className="text-[10px] h-4 px-1 border-primary/50 text-primary">Atual</Badge>}
+                              {m.isFuture && <span className="text-[10px] text-muted-foreground italic">futuro</span>}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-right text-muted-foreground">{fmtBRL(m.anterior.totalRevenue)}</td>
+                          <td className="px-3 py-2.5 text-right text-muted-foreground">{m.anterior.totalCount.toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-2.5 text-right text-muted-foreground">{fmtBRL(m.anterior.ticketMedio)}</td>
+                          <td className={cn("px-3 py-2.5 text-right font-medium", m.isFuture ? "text-muted-foreground" : "text-emerald-400")}>
+                            {m.isFuture ? '—' : fmtBRL(m.atual.totalRevenue)}
+                          </td>
+                          <td className={cn("px-3 py-2.5 text-right", m.isFuture ? "text-muted-foreground" : "text-foreground")}>
+                            {m.isFuture ? '—' : m.atual.totalCount.toLocaleString('pt-BR')}
+                          </td>
+                          <td className={cn("px-3 py-2.5 text-right", m.isFuture ? "text-muted-foreground" : "text-foreground")}>
+                            {m.isFuture ? '—' : fmtBRL(m.atual.ticketMedio)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            {m.isFuture
+                              ? <span className="text-muted-foreground">—</span>
+                              : <VariationBadge pct={m.variationPct} />}
+                          </td>
+                          <td className={cn("px-4 py-2.5 text-right font-medium",
+                            m.isFuture ? "text-muted-foreground" : diff >= 0 ? "text-emerald-400" : "text-red-400"
+                          )}>
+                            {m.isFuture ? '—' : (diff >= 0 ? '+' : '') + fmtBRL(diff)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border bg-muted/20 font-semibold">
+                      <td className="px-4 py-3 text-xs font-bold">Total Acumulado</td>
+                      <td className="px-3 py-3 text-right text-xs text-muted-foreground">{fmtBRL(anual.totalAnterior)}</td>
+                      <td className="px-3 py-3 text-right text-xs text-muted-foreground">
+                        {anual.meses.reduce((s, m) => s + m.anterior.totalCount, 0).toLocaleString('pt-BR')}
+                      </td>
+                      <td className="px-3 py-3 text-right text-xs text-muted-foreground">—</td>
+                      <td className="px-3 py-3 text-right text-xs text-emerald-400 font-bold">{fmtBRL(anual.totalAtual)}</td>
+                      <td className="px-3 py-3 text-right text-xs">
+                        {anual.meses.filter(m => !m.isFuture).reduce((s, m) => s + m.atual.totalCount, 0).toLocaleString('pt-BR')}
+                      </td>
+                      <td className="px-3 py-3 text-right text-xs">—</td>
+                      <td className="px-4 py-3 text-right text-xs">
+                        <VariationBadge pct={anual.totalVarPct} />
+                      </td>
+                      <td className={cn("px-4 py-3 text-right text-xs font-bold",
+                        (anual.totalAtual - anual.totalAnterior) >= 0 ? "text-emerald-400" : "text-red-400"
+                      )}>
+                        {((anual.totalAtual - anual.totalAnterior) >= 0 ? '+' : '') + fmtBRL(anual.totalAtual - anual.totalAnterior)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              Sem dados disponíveis. Verifique a conexão com o INOVE.
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

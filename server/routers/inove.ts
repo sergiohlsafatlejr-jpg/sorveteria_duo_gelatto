@@ -2209,4 +2209,127 @@ export const inoveRouter = router({
       return { current: { ...cur, label: curMonthLabel, from: curFrom, to: curTo }, previous: { ...prev, label: prevMonthLabel, from: prevFrom, to: prevTo }, variationPct: varPct, dailyCurrent: [], fonte: 'local' as const };
     }
   }),
+
+  // ── Comparativo Anual: todos os meses de anoAtual vs anoAnterior ──────────
+  getComparativoAnual: protectedProcedure
+    .input(z.object({ year: z.number().optional() }))
+    .query(async ({ input }) => {
+      const now = new Date();
+      const anoAtual = input.year ?? now.getFullYear();
+      const anoAnterior = anoAtual - 1;
+
+      const db = await getDb();
+      if (!db) throw new Error('DB unavailable');
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+
+      const MESES = [
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+      ];
+
+      // Helper: busca resumo mensal de vendas no INOVE para um mês específico
+      async function fetchMes(pool: any, year: number, month: number) {
+        const from = `${year}-${String(month).padStart(2, '0')}-01`;
+        const days = new Date(year, month, 0).getDate();
+        const to = `${year}-${String(month).padStart(2, '0')}-${String(days).padStart(2, '0')}`;
+        const res = await pool.request().query(`
+          SELECT
+            CAST(COALESCE(SUM(v.VEN_TOTAL), 0) as float) as totalRevenue,
+            CAST(COALESCE(SUM(v.VEN_DESCONTO), 0) as float) as totalDiscount,
+            COUNT(DISTINCT v.VENDA) as totalCount,
+            CAST(COALESCE(AVG(v.VEN_TOTAL), 0) as float) as ticketMedio
+          FROM VENDAS v
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= '${from}'
+            AND CAST(v.VEN_DATA_FIM as date) <= '${to}'
+        `);
+        const r = res.recordset[0] as any;
+        return {
+          totalRevenue: Number(r?.totalRevenue) || 0,
+          totalDiscount: Number(r?.totalDiscount) || 0,
+          totalCount: Number(r?.totalCount) || 0,
+          ticketMedio: Number(r?.ticketMedio) || 0,
+        };
+      }
+
+      // Fallback local (MySQL) para um mês específico
+      async function localMes(year: number, month: number) {
+        const ym = `${year}-${String(month).padStart(2, '0')}`;
+        const rows = await db!.select({
+          totalRevenue: sql<number>`COALESCE(SUM(${salesImportItems.totalPrice}), 0)`,
+          totalCount: sql<number>`COUNT(DISTINCT ${salesImports.id})`,
+        })
+          .from(salesImportItems)
+          .innerJoin(salesImports, eq(salesImportItems.importId, salesImports.id))
+          .where(and(
+            eq(salesImports.status, 'confirmed'),
+            sql`${salesImports.referenceMonth} = ${ym}`,
+          ));
+        const totalRevenue = Number(rows[0]?.totalRevenue) || 0;
+        const totalCount = Number(rows[0]?.totalCount) || 0;
+        return { totalRevenue, totalDiscount: 0, totalCount, ticketMedio: totalCount > 0 ? totalRevenue / totalCount : 0 };
+      }
+
+      // Determina até qual mês buscar (não buscar meses futuros do ano atual)
+      const maxMonth = anoAtual === now.getFullYear() ? now.getMonth() + 1 : 12;
+
+      if (!connRows.length || !connRows[0].active) {
+        // Fallback local
+        const meses = await Promise.all(
+          Array.from({ length: 12 }, async (_, i) => {
+            const m = i + 1;
+            const [atual, anterior] = await Promise.all([localMes(anoAtual, m), localMes(anoAnterior, m)]);
+            const varPct = anterior.totalRevenue > 0 ? ((atual.totalRevenue - anterior.totalRevenue) / anterior.totalRevenue) * 100 : null;
+            return {
+              mes: m,
+              label: MESES[i],
+              atual,
+              anterior,
+              variationPct: varPct,
+              isFuture: m > maxMonth,
+            };
+          })
+        );
+        const totalAtual = meses.reduce((s, m) => s + (m.isFuture ? 0 : m.atual.totalRevenue), 0);
+        const totalAnterior = meses.reduce((s, m) => s + m.anterior.totalRevenue, 0);
+        const totalVarPct = totalAnterior > 0 ? ((totalAtual - totalAnterior) / totalAnterior) * 100 : null;
+        return { meses, anoAtual, anoAnterior, totalAtual, totalAnterior, totalVarPct, fonte: 'local' as const };
+      }
+
+      try {
+        const pool = await createInovePool(connRows[0]);
+        const meses = await Promise.all(
+          Array.from({ length: 12 }, async (_, i) => {
+            const m = i + 1;
+            const [atual, anterior] = await Promise.all([fetchMes(pool, anoAtual, m), fetchMes(pool, anoAnterior, m)]);
+            const varPct = anterior.totalRevenue > 0 ? ((atual.totalRevenue - anterior.totalRevenue) / anterior.totalRevenue) * 100 : null;
+            return {
+              mes: m,
+              label: MESES[i],
+              atual,
+              anterior,
+              variationPct: varPct,
+              isFuture: m > maxMonth,
+            };
+          })
+        );
+        const totalAtual = meses.reduce((s, m) => s + (m.isFuture ? 0 : m.atual.totalRevenue), 0);
+        const totalAnterior = meses.reduce((s, m) => s + m.anterior.totalRevenue, 0);
+        const totalVarPct = totalAnterior > 0 ? ((totalAtual - totalAnterior) / totalAnterior) * 100 : null;
+        return { meses, anoAtual, anoAnterior, totalAtual, totalAnterior, totalVarPct, fonte: 'inove' as const };
+      } catch {
+        const meses = await Promise.all(
+          Array.from({ length: 12 }, async (_, i) => {
+            const m = i + 1;
+            const [atual, anterior] = await Promise.all([localMes(anoAtual, m), localMes(anoAnterior, m)]);
+            const varPct = anterior.totalRevenue > 0 ? ((atual.totalRevenue - anterior.totalRevenue) / anterior.totalRevenue) * 100 : null;
+            return { mes: m, label: MESES[i], atual, anterior, variationPct: varPct, isFuture: m > maxMonth };
+          })
+        );
+        const totalAtual = meses.reduce((s, m) => s + (m.isFuture ? 0 : m.atual.totalRevenue), 0);
+        const totalAnterior = meses.reduce((s, m) => s + m.anterior.totalRevenue, 0);
+        const totalVarPct = totalAnterior > 0 ? ((totalAtual - totalAnterior) / totalAnterior) * 100 : null;
+        return { meses, anoAtual, anoAnterior, totalAtual, totalAnterior, totalVarPct, fonte: 'local' as const };
+      }
+    }),
 });
