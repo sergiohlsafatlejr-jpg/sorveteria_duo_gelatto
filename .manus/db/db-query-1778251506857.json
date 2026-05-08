@@ -1,0 +1,22 @@
+{
+  "query": "SELECT cacheKey, syncedAt FROM instagram_cache ORDER BY syncedAt DESC;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT cacheKey, syncedAt FROM instagram_cache ORDER BY syncedAt DESC;",
+  "rows": [
+    {
+      "cacheKey": "account_info",
+      "syncedAt": "2026-05-08 11:04:27"
+    },
+    {
+      "cacheKey": "recent_posts",
+      "syncedAt": "2026-05-08 11:04:27"
+    },
+    {
+      "cacheKey": "performance_summary",
+      "syncedAt": "2026-05-08 11:04:27"
+    }
+  ],
+  "messages": [],
+  "stdout": "cacheKey\tsyncedAt\naccount_info\t2026-05-08 11:04:27\nrecent_posts\t2026-05-08 11:04:27\nperformance_summary\t2026-05-08 11:04:27\n",
+  "stderr": "",
+  "execution_time_ms": 578
+}

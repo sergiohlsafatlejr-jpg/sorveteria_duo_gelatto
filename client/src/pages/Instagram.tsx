@@ -114,9 +114,9 @@ export default function InstagramPage() {
 
   // ── Queries ──────────────────────────────────────────────────────────────
   const utils = trpc.useUtils();
-  const insightsQuery = trpc.instagram.getPostInsightsLive.useQuery(
-    { postId: selectedPost?.id ?? "" },
-    { enabled: !!selectedPost?.id, staleTime: 2 * 60 * 1000 }
+  const insightsQuery = trpc.instagram.getPostInsights.useQuery(
+    { instagramPostId: selectedPost?.id ?? "" },
+    { enabled: !!selectedPost?.id, staleTime: 5 * 60 * 1000 }
   );
   const accountQuery = trpc.instagram.getAccountInfo.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
   const postsQuery = trpc.instagram.getPosts.useQuery();

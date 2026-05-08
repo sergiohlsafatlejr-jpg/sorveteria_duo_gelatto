@@ -406,6 +406,38 @@ export const instagramRouter = router({
         const nextCursor = postsRaw.paging?.cursors?.after ?? null;
         await upsertCache('instagram_cache', 'recent_posts', { data: posts, nextCursor });
 
+        // ── Buscar insights de cada post e salvar no cache ──────────────────
+        try {
+          const postInsightsMap: Record<string, any> = {};
+          for (const post of posts.slice(0, 20)) {
+            try {
+              const insightRaw = callMcp('instagram', 'get_post_insights', { post_id: post.id }) as any;
+              if (insightRaw) {
+                const items: any[] = insightRaw.data ?? (Array.isArray(insightRaw) ? insightRaw : []);
+                const metrics: Record<string, number> = {};
+                for (const item of items) {
+                  const val = item.values?.[0]?.value ?? item.value ?? 0;
+                  metrics[item.name] = typeof val === 'number' ? val : parseInt(String(val)) || 0;
+                }
+                postInsightsMap[post.id] = {
+                  likes: metrics['likes'] ?? post.likes ?? 0,
+                  comments: metrics['comments'] ?? post.comments ?? 0,
+                  shares: metrics['shares'] ?? 0,
+                  saved: metrics['saved'] ?? 0,
+                  reach: metrics['reach'] ?? 0,
+                  views: metrics['views'] ?? metrics['impressions'] ?? 0,
+                  totalInteractions: metrics['total_interactions'] ?? 0,
+                  profileVisits: metrics['profile_visits'] ?? null,
+                  follows: metrics['follows'] ?? null,
+                };
+              }
+            } catch { /* ignorar erro individual de post */ }
+          }
+          if (Object.keys(postInsightsMap).length > 0) {
+            await upsertCache('instagram_cache', 'post_insights', postInsightsMap);
+          }
+        } catch { /* ignorar erro do bloco de insights */ }
+
         // Calcular performance summary
         if (posts.length > 0) {
           const avgLikes = Math.round(posts.reduce((s: number, p: any) => s + (p.likes ?? 0), 0) / posts.length);

@@ -1,0 +1,8 @@
+{
+  "query": "SELECT cache_key, LEFT(data, 200) as data_preview, synced_at FROM instagram_cache WHERE cache_key = 'post_insights' LIMIT 1;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT cache_key, LEFT(data, 200) as data_preview, synced_at FROM instagram_cache WHERE cache_key = 'post_insights' LIMIT 1;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'cache_key' in 'where clause'"
+  ]
+}

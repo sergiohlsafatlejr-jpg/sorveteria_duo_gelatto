@@ -580,11 +580,12 @@ scheduledRouter.post("/api/scheduled/sync-instagram", async (req, res) => {
     const db = await getDb();
     if (!db) throw new Error("DB indisponível");
 
-    const { accountInfo, recentPosts, performanceSummary, metaAdsCampaigns } = req.body as {
+    const { accountInfo, recentPosts, performanceSummary, metaAdsCampaigns, postInsights } = req.body as {
       accountInfo?: unknown;
       recentPosts?: unknown;
       performanceSummary?: unknown;
       metaAdsCampaigns?: unknown;
+      postInsights?: unknown;
     };
 
     const now = new Date();
@@ -604,6 +605,13 @@ scheduledRouter.post("/api/scheduled/sync-instagram", async (req, res) => {
     }
     if (performanceSummary) {
       await db.insert(instagramCache as any).values({ cacheKey: 'performance_summary', data: JSON.stringify(performanceSummary), syncedAt: now, updatedAt: now })
+        .onDuplicateKeyUpdate({ set: { data: sql`VALUES(data)`, syncedAt: sql`VALUES(syncedAt)`, updatedAt: sql`VALUES(updatedAt)` } });
+      igSynced = true;
+    }
+
+    // Salvar insights de posts no cache
+    if (postInsights) {
+      await db.insert(instagramCache as any).values({ cacheKey: 'post_insights', data: JSON.stringify(postInsights), syncedAt: now, updatedAt: now })
         .onDuplicateKeyUpdate({ set: { data: sql`VALUES(data)`, syncedAt: sql`VALUES(syncedAt)`, updatedAt: sql`VALUES(updatedAt)` } });
       igSynced = true;
     }
