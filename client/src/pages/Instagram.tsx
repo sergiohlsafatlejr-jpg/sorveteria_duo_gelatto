@@ -74,19 +74,19 @@ function CampaignRow({ campaign }: { campaign: any }) {
         <p className="text-sm font-medium truncate">{campaign.campaignName}</p>
         <div className="flex items-center gap-3 mt-1 flex-wrap">
           <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Eye className="w-3 h-3" /> {campaign.impressions.toLocaleString("pt-BR")}
+            <Eye className="w-3 h-3" /> {(campaign.impressions ?? 0).toLocaleString("pt-BR")}
           </span>
           <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Users className="w-3 h-3" /> {campaign.reach.toLocaleString("pt-BR")}
+            <Users className="w-3 h-3" /> {(campaign.reach ?? 0).toLocaleString("pt-BR")}
           </span>
           <span className={`text-xs font-semibold flex items-center gap-1 ${ctrColor}`}>
-            <MousePointer className="w-3 h-3" /> CTR {campaign.ctr.toFixed(2)}%
+            <MousePointer className="w-3 h-3" /> CTR {(campaign.ctr ?? 0).toFixed(2)}%
           </span>
         </div>
       </div>
       <div className="text-right shrink-0">
-        <p className="text-sm font-bold text-pink-600">R${campaign.spend.toFixed(2)}</p>
-        <p className="text-xs text-muted-foreground">CPM R${campaign.cpm.toFixed(2)}</p>
+        <p className="text-sm font-bold text-pink-600">R${(campaign.spend ?? 0).toFixed(2)}</p>
+        <p className="text-xs text-muted-foreground">CPM R${(campaign.cpm ?? 0).toFixed(2)}</p>
       </div>
     </div>
   );
@@ -395,10 +395,10 @@ export default function InstagramPage() {
                 </div>
               ) : adsSummary ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <KpiCard icon={<DollarSign className="w-5 h-5" />} label="Gasto Total" value={`R$${adsSummary.totalSpend.toFixed(2)}`} sub={`${adsSummary.activeCampaigns} campanhas`} color="text-green-600" />
-                  <KpiCard icon={<Eye className="w-5 h-5" />} label="Impressões" value={adsSummary.totalImpressions.toLocaleString("pt-BR")} sub={`Alcance: ${adsSummary.totalReach.toLocaleString("pt-BR")}`} color="text-blue-500" />
-                  <KpiCard icon={<MousePointer className="w-5 h-5" />} label="Cliques no Link" value={adsSummary.totalLinkClicks.toLocaleString("pt-BR")} sub={`CTR médio: ${adsSummary.avgCtr.toFixed(2)}%`} color="text-orange-500" />
-                  <KpiCard icon={<Target className="w-5 h-5" />} label="CPM Médio" value={`R$${adsSummary.avgCpm.toFixed(2)}`} sub="custo por mil impressões" color="text-purple-500" />
+                  <KpiCard icon={<DollarSign className="w-5 h-5" />} label="Gasto Total" value={`R$${(adsSummary?.totalSpend ?? 0).toFixed(2)}`} sub={`${adsSummary?.activeCampaigns ?? 0} campanhas`} color="text-green-600" />
+                  <KpiCard icon={<Eye className="w-5 h-5" />} label="Impressões" value={(adsSummary?.totalImpressions ?? 0).toLocaleString("pt-BR")} sub={`Alcance: ${(adsSummary?.totalReach ?? 0).toLocaleString("pt-BR")}`} color="text-blue-500" />
+                  <KpiCard icon={<MousePointer className="w-5 h-5" />} label="Cliques no Link" value={(adsSummary?.totalLinkClicks ?? 0).toLocaleString("pt-BR")} sub={`CTR médio: ${(adsSummary?.avgCtr ?? 0).toFixed(2)}%`} color="text-orange-500" />
+                  <KpiCard icon={<Target className="w-5 h-5" />} label="CPM Médio" value={`R$${(adsSummary?.avgCpm ?? 0).toFixed(2)}`} sub="custo por mil impressões" color="text-purple-500" />
                 </div>
               ) : (
                 <Card>
@@ -493,10 +493,10 @@ export default function InstagramPage() {
             {/* Resumo */}
             {adsSummary && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <KpiCard icon={<DollarSign className="w-5 h-5" />} label="Gasto Total" value={`R$${adsSummary.totalSpend.toFixed(2)}`} color="text-green-600" />
-                <KpiCard icon={<Eye className="w-5 h-5" />} label="Impressões" value={adsSummary.totalImpressions.toLocaleString("pt-BR")} color="text-blue-500" />
-                <KpiCard icon={<Users className="w-5 h-5" />} label="Alcance" value={adsSummary.totalReach.toLocaleString("pt-BR")} color="text-purple-500" />
-                <KpiCard icon={<MousePointer className="w-5 h-5" />} label="Cliques" value={adsSummary.totalLinkClicks.toLocaleString("pt-BR")} sub={`CTR ${adsSummary.avgCtr.toFixed(2)}%`} color="text-orange-500" />
+                <KpiCard icon={<DollarSign className="w-5 h-5" />} label="Gasto Total" value={`R$${(adsSummary?.totalSpend ?? 0).toFixed(2)}`} color="text-green-600" />
+                <KpiCard icon={<Eye className="w-5 h-5" />} label="Impressões" value={(adsSummary?.totalImpressions ?? 0).toLocaleString("pt-BR")} color="text-blue-500" />
+                <KpiCard icon={<Users className="w-5 h-5" />} label="Alcance" value={(adsSummary?.totalReach ?? 0).toLocaleString("pt-BR")} color="text-purple-500" />
+                <KpiCard icon={<MousePointer className="w-5 h-5" />} label="Cliques" value={(adsSummary?.totalLinkClicks ?? 0).toLocaleString("pt-BR")} sub={`CTR ${(adsSummary?.avgCtr ?? 0).toFixed(2)}%`} color="text-orange-500" />
               </div>
             )}
 
@@ -515,15 +515,15 @@ export default function InstagramPage() {
                     <div key={c.campaignId ?? c.campaignName} className="p-3 rounded-lg bg-muted/30 space-y-2">
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-sm font-semibold truncate flex-1">{c.campaignName}</p>
-                        <span className="text-sm font-bold text-green-600 shrink-0">R${c.spend.toFixed(2)}</span>
+                        <span className="text-sm font-bold text-green-600 shrink-0">R${(c.spend ?? 0).toFixed(2)}</span>
                       </div>
                       <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs text-muted-foreground">
-                        <div><p className="font-semibold text-foreground">{c.impressions.toLocaleString("pt-BR")}</p><p>Impressões</p></div>
-                        <div><p className="font-semibold text-foreground">{c.reach.toLocaleString("pt-BR")}</p><p>Alcance</p></div>
-                        <div><p className={`font-semibold ${c.ctr >= 2 ? "text-green-600" : c.ctr >= 1 ? "text-yellow-600" : "text-red-500"}`}>{c.ctr.toFixed(2)}%</p><p>CTR</p></div>
-                        <div><p className="font-semibold text-foreground">R${c.cpc.toFixed(2)}</p><p>CPC</p></div>
-                        <div><p className="font-semibold text-foreground">R${c.cpm.toFixed(2)}</p><p>CPM</p></div>
-                        <div><p className="font-semibold text-foreground">{c.linkClicks.toLocaleString("pt-BR")}</p><p>Cliques</p></div>
+                        <div><p className="font-semibold text-foreground">{(c.impressions ?? 0).toLocaleString("pt-BR")}</p><p>Impressões</p></div>
+                        <div><p className="font-semibold text-foreground">{(c.reach ?? 0).toLocaleString("pt-BR")}</p><p>Alcance</p></div>
+                        <div><p className={`font-semibold ${(c.ctr ?? 0) >= 2 ? "text-green-600" : (c.ctr ?? 0) >= 1 ? "text-yellow-600" : "text-red-500"}`}>{(c.ctr ?? 0).toFixed(2)}%</p><p>CTR</p></div>
+                        <div><p className="font-semibold text-foreground">R${(c.cpc ?? 0).toFixed(2)}</p><p>CPC</p></div>
+                        <div><p className="font-semibold text-foreground">R${(c.cpm ?? 0).toFixed(2)}</p><p>CPM</p></div>
+                        <div><p className="font-semibold text-foreground">{(c.linkClicks ?? 0).toLocaleString("pt-BR")}</p><p>Cliques</p></div>
                       </div>
                       {c.dateStart && (
                         <p className="text-xs text-muted-foreground">
@@ -666,9 +666,9 @@ export default function InstagramPage() {
                         <p className="text-xs text-muted-foreground truncate">{ad.campaignName}</p>
                       </div>
                       <div className="flex items-center gap-3 text-xs shrink-0">
-                        <span className="text-muted-foreground">{ad.impressions.toLocaleString("pt-BR")} imp.</span>
-                        <span className={`font-semibold ${ad.ctr >= 2 ? "text-green-600" : ad.ctr >= 1 ? "text-yellow-600" : "text-red-500"}`}>{ad.ctr.toFixed(2)}%</span>
-                        <span className="font-semibold text-green-600">R${ad.spend.toFixed(2)}</span>
+                        <span className="text-muted-foreground">{(ad.impressions ?? 0).toLocaleString("pt-BR")} imp.</span>
+                        <span className={`font-semibold ${(ad.ctr ?? 0) >= 2 ? "text-green-600" : (ad.ctr ?? 0) >= 1 ? "text-yellow-600" : "text-red-500"}`}>{(ad.ctr ?? 0).toFixed(2)}%</span>
+                        <span className="font-semibold text-green-600">R${(ad.spend ?? 0).toFixed(2)}</span>
                         {ad.qualityRanking && (
                           <Badge variant="outline" className="text-xs py-0">{ad.qualityRanking.replace("_", " ").toLowerCase()}</Badge>
                         )}

@@ -1,0 +1,15 @@
+{
+  "query": "SELECT cacheKey, JSON_TYPE(data) as data_type, LEFT(CAST(data AS CHAR), 300) as raw_data FROM instagram_cache WHERE cacheKey = 'account_info';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT cacheKey, JSON_TYPE(data) as data_type, LEFT(CAST(data AS CHAR), 300) as raw_data FROM instagram_cache WHERE cacheKey = 'account_info';",
+  "rows": [
+    {
+      "cacheKey": "account_info",
+      "data_type": "STRING",
+      "raw_data": "\"{\\\"username\\\":\\\"duogelattouriasmagalhaes\\\",\\\"name\\\":\\\"Sorveteria Duo Gelatto - Urias Magalhães\\\",\\\"bio\\\":\\\"💚 Sabor que conquista em DOBRO\\\\n✨️ Momentos doces e felizes\\\\n📍 Unidade Urias Magalhães | Goiânia- GO\\\\n🗺️ Av Marechal Rondon, Qd E Lote 9\\\",\\\"followers\\\":2917,\\\"following\\\":22,\\\"posts\\\":486,"
+    }
+  ],
+  "messages": [],
+  "stdout": "cacheKey\tdata_type\traw_data\naccount_info\tSTRING\t\"{\\\"username\\\":\\\"duogelattouriasmagalhaes\\\",\\\"name\\\":\\\"Sorveteria Duo Gelatto - Urias Magalhães\\\",\\\"bio\\\":\\\"💚 Sabor que conquista em DOBRO\\\\n✨️ Momentos doces e felizes\\\\n📍 Unidade Urias Magalhães | Goiânia- GO\\\\n🗺️ Av Marechal Rondon, Qd E Lote 9\\\",\\\"followers\\\":2917,\\\"following\\\":22,\\\"posts\\\":486,\n",
+  "stderr": "",
+  "execution_time_ms": 583
+}

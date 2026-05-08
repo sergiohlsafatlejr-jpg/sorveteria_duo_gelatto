@@ -1,0 +1,25 @@
+{
+  "query": "SELECT cacheKey, LEFT(CAST(data AS CHAR), 150) as data_preview, syncedAt FROM instagram_cache ORDER BY syncedAt DESC LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT cacheKey, LEFT(CAST(data AS CHAR), 150) as data_preview, syncedAt FROM instagram_cache ORDER BY syncedAt DESC LIMIT 10;",
+  "rows": [
+    {
+      "cacheKey": "recent_posts",
+      "data_preview": "\"{\\\"data\\\":[{\\\"id\\\":\\\"17932298145085229\\\",\\\"type\\\":\\\"VIDEO\\\",\\\"caption\\\":\\\"☀️🍦 Nesse calor, nada melhor do que se refrescar aqui na Duo Gelatto Urias ",
+      "syncedAt": "2026-05-08 11:04:27"
+    },
+    {
+      "cacheKey": "performance_summary",
+      "data_preview": "\"{\\\"avgLikes\\\":8.2,\\\"avgComments\\\":0.55,\\\"totalLikes\\\":164,\\\"topPost\\\":{\\\"id\\\":\\\"17894701479311027\\\",\\\"type\\\":\\\"VIDEO\\\",\\\"caption\\\":\\\"Hoje tem partici",
+      "syncedAt": "2026-05-08 11:04:27"
+    },
+    {
+      "cacheKey": "account_info",
+      "data_preview": "\"{\\\"username\\\":\\\"duogelattouriasmagalhaes\\\",\\\"name\\\":\\\"Sorveteria Duo Gelatto - Urias Magalhães\\\",\\\"bio\\\":\\\"💚 Sabor que conquista em DOBRO\\\\n✨️ Moment",
+      "syncedAt": "2026-05-08 11:04:27"
+    }
+  ],
+  "messages": [],
+  "stdout": "cacheKey\tdata_preview\tsyncedAt\nrecent_posts\t\"{\\\"data\\\":[{\\\"id\\\":\\\"17932298145085229\\\",\\\"type\\\":\\\"VIDEO\\\",\\\"caption\\\":\\\"☀️🍦 Nesse calor, nada melhor do que se refrescar aqui na Duo Gelatto Urias \t2026-05-08 11:04:27\nperformance_summary\t\"{\\\"avgLikes\\\":8.2,\\\"avgComments\\\":0.55,\\\"totalLikes\\\":164,\\\"topPost\\\":{\\\"id\\\":\\\"17894701479311027\\\",\\\"type\\\":\\\"VIDEO\\\",\\\"caption\\\":\\\"Hoje tem partici\t2026-05-08 11:04:27\naccount_info\t\"{\\\"username\\\":\\\"duogelattouriasmagalhaes\\\",\\\"name\\\":\\\"Sorveteria Duo Gelatto - Urias Magalhães\\\",\\\"bio\\\":\\\"💚 Sabor que conquista em DOBRO\\\\n✨️ Moment\t2026-05-08 11:04:27\n",
+  "stderr": "",
+  "execution_time_ms": 560
+}

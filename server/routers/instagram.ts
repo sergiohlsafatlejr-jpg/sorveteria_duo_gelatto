@@ -46,7 +46,12 @@ async function getCacheData(table: 'instagram_cache' | 'meta_ads_cache', key: st
     const tableRef = table === 'instagram_cache' ? instagramCache : metaAdsCache;
     const rows = await db.select().from(tableRef as any).where(eq((tableRef as any).cacheKey, key)).limit(1);
     if (!rows.length) return null;
-    return rows[0].data;
+    let value = rows[0].data;
+    // Corrige double-encoded JSON: quando o campo data é uma string JSON em vez de objeto
+    if (typeof value === 'string') {
+      try { value = JSON.parse(value); } catch { /* mantém como string */ }
+    }
+    return value;
   } catch {
     return null;
   }
