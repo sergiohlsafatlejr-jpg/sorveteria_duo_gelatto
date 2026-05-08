@@ -1,0 +1,20 @@
+{
+  "query": "SELECT id, host, port, `database`, username, active, lastSyncStatus, lastSyncMessage FROM inove_connector_config LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT id, host, port, `database`, username, active, lastSyncStatus, lastSyncMessage FROM inove_connector_config LIMIT 5;",
+  "rows": [
+    {
+      "id": "1",
+      "host": "duo-urias.safatle.net.br",
+      "port": "55444",
+      "database": "DUOGELATTO",
+      "username": "sa",
+      "active": "1",
+      "lastSyncStatus": "success",
+      "lastSyncMessage": "0/3 vendas processadas, 3 clientes criados, 0 pontos lançados"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\thost\tport\tdatabase\tusername\tactive\tlastSyncStatus\tlastSyncMessage\n1\tduo-urias.safatle.net.br\t55444\tDUOGELATTO\tsa\t1\tsuccess\t0/3 vendas processadas, 3 clientes criados, 0 pontos lançados\n",
+  "stderr": "",
+  "execution_time_ms": 556
+}

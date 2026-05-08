@@ -52,6 +52,7 @@ type MssqlPool = {
 };
 
 // Helper: criar conexão com o banco INOVE (SQL Server)
+// Usa ConnectionPool diretamente para evitar cache global de pool que fica abortado após restart
 async function createInovePool(config: {
   host: string;
   port: number;
@@ -59,8 +60,28 @@ async function createInovePool(config: {
   password: string;
   database: string;
 }): Promise<MssqlPool> {
-  // tsx expõe connect diretamente no namespace; fallback para .default em outros runtimes
   const mssqlAny = mssqlLib as unknown as Record<string, unknown>;
+  // Tenta usar ConnectionPool diretamente (mais confiável que mssql.connect que usa cache global)
+  const PoolClass = (mssqlAny.ConnectionPool
+    ?? (mssqlAny.default as Record<string, unknown>)?.ConnectionPool) as new (cfg: MssqlConfig) => { connect: () => Promise<MssqlPool> };
+  if (PoolClass) {
+    const mssqlConfig: MssqlConfig = {
+      server: config.host,
+      port: config.port,
+      user: config.username,
+      password: config.password,
+      database: config.database || "DUOGELATTO",
+      options: {
+        encrypt: false,
+        trustServerCertificate: true,
+        connectTimeout: 15000,
+        requestTimeout: 30000,
+      },
+    };
+    const pool = new PoolClass(mssqlConfig);
+    return pool.connect();
+  }
+  // Fallback: usar mssql.connect
   const connectFn = (typeof mssqlAny.connect === 'function'
     ? mssqlAny.connect
     : (mssqlAny.default as Record<string, unknown>)?.connect) as (cfg: MssqlConfig) => Promise<MssqlPool>;
@@ -2317,7 +2338,8 @@ export const inoveRouter = router({
         const totalAnterior = meses.reduce((s, m) => s + m.anterior.totalRevenue, 0);
         const totalVarPct = totalAnterior > 0 ? ((totalAtual - totalAnterior) / totalAnterior) * 100 : null;
         return { meses, anoAtual, anoAnterior, totalAtual, totalAnterior, totalVarPct, fonte: 'inove' as const };
-      } catch {
+      } catch (err: unknown) {
+        console.error('[getComparativoAnual] INOVE error, falling back to local:', err instanceof Error ? err.message : String(err));
         const meses = await Promise.all(
           Array.from({ length: 12 }, async (_, i) => {
             const m = i + 1;

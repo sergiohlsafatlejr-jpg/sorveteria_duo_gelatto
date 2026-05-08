@@ -1,0 +1,30 @@
+{
+  "query": "SELECT referenceMonth, status, COUNT(*) as qtd FROM sales_imports GROUP BY referenceMonth, status ORDER BY referenceMonth DESC LIMIT 30;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT referenceMonth, status, COUNT(*) as qtd FROM sales_imports GROUP BY referenceMonth, status ORDER BY referenceMonth DESC LIMIT 30;",
+  "rows": [
+    {
+      "referenceMonth": "2026-04",
+      "status": "confirmed",
+      "qtd": "7"
+    },
+    {
+      "referenceMonth": "2026-03",
+      "status": "confirmed",
+      "qtd": "1"
+    },
+    {
+      "referenceMonth": "2026-02",
+      "status": "confirmed",
+      "qtd": "1"
+    },
+    {
+      "referenceMonth": "2026-01",
+      "status": "confirmed",
+      "qtd": "1"
+    }
+  ],
+  "messages": [],
+  "stdout": "referenceMonth\tstatus\tqtd\n2026-04\tconfirmed\t7\n2026-03\tconfirmed\t1\n2026-02\tconfirmed\t1\n2026-01\tconfirmed\t1\n",
+  "stderr": "",
+  "execution_time_ms": 644
+}
