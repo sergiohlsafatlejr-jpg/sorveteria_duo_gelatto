@@ -1,0 +1,40 @@
+{
+  "query": "SELECT referenceMonth, importMode, status, COUNT(*) as total FROM sales_imports GROUP BY referenceMonth, importMode, status ORDER BY referenceMonth DESC LIMIT 15;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT referenceMonth, importMode, status, COUNT(*) as total FROM sales_imports GROUP BY referenceMonth, importMode, status ORDER BY referenceMonth DESC LIMIT 15;",
+  "rows": [
+    {
+      "referenceMonth": "2026-04",
+      "importMode": "monthly",
+      "status": "confirmed",
+      "total": "2"
+    },
+    {
+      "referenceMonth": "2026-04",
+      "importMode": "daily",
+      "status": "confirmed",
+      "total": "5"
+    },
+    {
+      "referenceMonth": "2026-03",
+      "importMode": "monthly",
+      "status": "confirmed",
+      "total": "1"
+    },
+    {
+      "referenceMonth": "2026-02",
+      "importMode": "monthly",
+      "status": "confirmed",
+      "total": "1"
+    },
+    {
+      "referenceMonth": "2026-01",
+      "importMode": "monthly",
+      "status": "confirmed",
+      "total": "1"
+    }
+  ],
+  "messages": [],
+  "stdout": "referenceMonth\timportMode\tstatus\ttotal\n2026-04\tmonthly\tconfirmed\t2\n2026-04\tdaily\tconfirmed\t5\n2026-03\tmonthly\tconfirmed\t1\n2026-02\tmonthly\tconfirmed\t1\n2026-01\tmonthly\tconfirmed\t1\n",
+  "stderr": "",
+  "execution_time_ms": 588
+}

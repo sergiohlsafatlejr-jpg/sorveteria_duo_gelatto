@@ -176,6 +176,13 @@
       "when": 1778521039474,
       "tag": "0024_high_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1778523082598,
+      "tag": "0025_abandoned_marrow",
+      "breakpoints": true
     }
   ]
 }

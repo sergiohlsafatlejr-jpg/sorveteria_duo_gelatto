@@ -1222,16 +1222,16 @@ export const inoveRouter = router({
       const config = rows[0];
       try {
         const pool = await createInovePool(config);
-        const sf = input.search ? `AND (p.PRO_DESCRICAO LIKE '%${input.search.replace(/'/g,"''")}%' OR p.PRO_CODIGO_BARRAS LIKE '%${input.search.replace(/'/g,"''")}%')` : "";
+        const sf = input.search ? `AND (p.PRO_NOME LIKE '%${input.search.replace(/'/g,"''")}%' OR p.PRO_CODIGO_BARRAS LIKE '%${input.search.replace(/'/g,"''")}%')` : "";
         const res = await pool.request().query(`
-          SELECT p.PRODUTO as id, p.PRO_DESCRICAO as nome, p.PRO_CODIGO_BARRAS as barcode,
+          SELECT p.PRODUTO as id, p.PRO_NOME as nome, p.PRO_CODIGO_BARRAS as barcode,
             ISNULL(CAST(p.PRO_CUSTO as float), 0) as custo,
             ISNULL(CAST(p.PRO_VENDA as float), 0) as venda,
             ISNULL((
               SELECT TOP 1 CAST(MVE_SALDO_ATUAL as float) FROM MOVIMENTOS_ESTOQUES me
               WHERE me.PRODUTO = p.PRODUTO ORDER BY me.MOVIMENTO_ESTOQUE DESC
             ), 0) as estoque
-          FROM PRODUTOS p WHERE p.PRO_ATIVO = 1 ${sf} ORDER BY p.PRO_DESCRICAO
+          FROM PRODUTOS p WHERE p.PRO_ATIVO = 1 ${sf} ORDER BY p.PRO_NOME
         `);
         await pool.close();
         return (res.recordset as Array<{ id: number; nome: string; barcode: string; custo: number; venda: number; estoque: number }>)
@@ -1335,7 +1335,7 @@ export const inoveRouter = router({
         const currRes = await pool.request().query(`
           SELECT
             p.PRODUTO as produtoId,
-            p.PRO_DESCRICAO as nome,
+            p.PRO_NOME as nome,
             p.PRO_CODIGO as codPdv,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamento
@@ -1345,7 +1345,7 @@ export const inoveRouter = router({
           WHERE v.VEN_SITUACAO = 2
             AND YEAR(v.VEN_DATA_FIM) = ${year}
             AND MONTH(v.VEN_DATA_FIM) = ${month}
-          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO
           ORDER BY faturamento DESC
         `);
         const prevRes = await pool.request().query(`
@@ -1400,6 +1400,13 @@ export const inoveRouter = router({
           totalProdutos: curr.length,
         };
       } catch (err) {
+        // Tentar usar cache local se a conexão com o SQL Server falhar
+        const { inoveSalesCache } = await import("../../drizzle/schema");
+        const cacheKey = input.month;
+        const cached = await db.select().from(inoveSalesCache).where(eq(inoveSalesCache.cacheKey, cacheKey)).limit(1);
+        if (cached.length > 0) {
+          return JSON.parse(cached[0].data);
+        }
         throw new Error(err instanceof Error ? err.message : String(err));
       }
     }),
@@ -1469,12 +1476,12 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const sf = input.search
-          ? `AND p.PRO_DESCRICAO LIKE '%${input.search.replace(/'/g, "''")}%'`
+          ? `AND p.PRO_NOME LIKE '%${input.search.replace(/'/g, "''")}%'`
           : "";
         const res = await pool.request().query(`
           SELECT
             p.PRODUTO as produtoId,
-            p.PRO_DESCRICAO as nome,
+            p.PRO_NOME as nome,
             p.PRO_CODIGO as codPdv,
             ISNULL(CAST(p.PRO_CUSTO as float), 0) as custo,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
@@ -1486,7 +1493,7 @@ export const inoveRouter = router({
           WHERE v.VEN_SITUACAO = 2
             AND v.VEN_DATA_FIM >= DATEADD(month, -12, GETDATE())
             ${sf}
-          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_CUSTO
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO
           ORDER BY receita DESC
         `);
         await pool.close();
@@ -1664,7 +1671,7 @@ export const inoveRouter = router({
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${monthFilter}
-          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_CUSTO
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO
           ORDER BY faturamento DESC
         `);
         await pool.close();

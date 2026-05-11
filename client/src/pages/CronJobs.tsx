@@ -10,8 +10,22 @@ import { Link } from "wouter";
 
 export default function CronJobs() {
   const [isTriggering, setIsTriggering] = useState(false);
+  const [isTriggeringCache, setIsTriggeringCache] = useState(false);
 
   const { data: logs, isLoading, refetch } = trpc.cron.getLogs.useQuery({ limit: 50 });
+
+  const triggerCacheMutation = trpc.cron.triggerSyncSalesCache.useMutation({
+    onMutate: () => setIsTriggeringCache(true),
+    onSuccess: () => {
+      toast.success("✅ Cache de produtos sincronizado", { description: "Os dados de vendas por produto foram atualizados do INOVE PDV." });
+      refetch();
+      setIsTriggeringCache(false);
+    },
+    onError: (err) => {
+      toast.error("❌ Erro na sincronização", { description: err.message });
+      setIsTriggeringCache(false);
+    },
+  });
 
   const triggerMutation = trpc.cron.triggerSyncRevenue.useMutation({
     onMutate: () => setIsTriggering(true),
@@ -40,6 +54,7 @@ export default function CronJobs() {
 
   const jobLabel = (name: string) => {
     if (name === "sync-daily-revenue") return "Importar Faturamento INOVE";
+    if (name === "sync-sales-cache") return "Cache de Vendas por Produto";
     return name;
   };
 

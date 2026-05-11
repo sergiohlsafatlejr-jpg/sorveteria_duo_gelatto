@@ -44,9 +44,10 @@ export default function InoveProductSales() {
     { retry: false }
   );
 
+  type InoveProductItem = { produtoId: number; nome: string; codPdv: string; qtd: number; faturamento: number; faturamentoPrev: number | null; qtdPrev: number | null; variacao: number | null };
   const chartData = useMemo(() => {
     if (!data?.top10) return [];
-    return data.top10.map((item) => ({
+    return (data.top10 as InoveProductItem[]).map((item) => ({
       nome: (item.nome ?? "").length > 14 ? (item.nome ?? "").substring(0, 14) + "…" : (item.nome ?? `Produto ${item.produtoId}`),
       nomeCompleto: item.nome ?? `Produto ${item.produtoId}`,
       atual: item.faturamento,
@@ -239,7 +240,7 @@ export default function InoveProductSales() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.top10.map((item, idx) => (
+                    {(data.top10 as InoveProductItem[]).map((item, idx) => (
                       <tr key={item.produtoId} className="border-t hover:bg-muted/20">
                         <td className="p-3">
                           <span

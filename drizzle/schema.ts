@@ -702,3 +702,14 @@ export const cronJobLog = mysqlTable("cron_job_log", {
 });
 export type CronJobLog = typeof cronJobLog.$inferSelect;
 export type InsertCronJobLog = typeof cronJobLog.$inferInsert;
+
+// ── Cache de Vendas por Produto INOVE ─────────────────────────────────────────
+export const inoveSalesCache = mysqlTable("inove_sales_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  cacheKey: varchar("cacheKey", { length: 50 }).notNull().unique(), // ex: "2026-04", "2026-03"
+  data: text("data").notNull(), // JSON com array de produtos e vendas
+  updatedAt: int("updatedAt").notNull(),
+});
+
+export type InoveSalesCache = typeof inoveSalesCache.$inferSelect;
+export type InsertInoveSalesCache = typeof inoveSalesCache.$inferInsert;

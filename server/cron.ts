@@ -7,7 +7,7 @@
 import cron from "node-cron";
 import { notifyOwner } from "./_core/notification";
 import { getDb, getUserByOpenId } from "./db";
-import { inoveConnectorConfig, finDailyRevenue, cronJobLog } from "../drizzle/schema";
+import { inoveConnectorConfig, finDailyRevenue, cronJobLog, inoveSalesCache } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import * as mssqlLib from "mssql";
 import { ENV } from "./_core/env";
@@ -166,6 +166,143 @@ async function syncDailyRevenue(): Promise<void> {
 }
 
 /**
+ * Sincroniza o cache de vendas por produto (top 10 dos últimos 2 meses)
+ * para que o site publicado possa exibir dados mesmo sem conexão direta ao SQL Server.
+ */
+async function syncSalesCache(): Promise<void> {
+  const startedAt = Date.now();
+  console.log("[cron/sync-sales-cache] Iniciando sincronização do cache de vendas por produto...");
+
+  const db = await getDb();
+  if (!db) {
+    await logCronJob("sync-sales-cache", "error", "DB indisponível", Date.now() - startedAt);
+    return;
+  }
+
+  const rows = await db.select().from(inoveConnectorConfig).limit(1);
+  if (rows.length === 0 || !rows[0].active) {
+    await logCronJob("sync-sales-cache", "skipped", "Conector INOVE inativo", Date.now() - startedAt);
+    return;
+  }
+  const config = rows[0];
+
+  let pool: MssqlPool | null = null;
+  try {
+    pool = await createInovePool(config);
+
+    // Sincronizar os últimos 3 meses
+    const now = new Date();
+    const monthsToSync: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      monthsToSync.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+
+    let synced = 0;
+    for (const monthKey of monthsToSync) {
+      const [year, month] = monthKey.split("-").map(Number);
+      const prevDate = new Date(year, month - 2, 1);
+      const prevYear = prevDate.getFullYear();
+      const prevMonth = prevDate.getMonth() + 1;
+
+      const currRes = await pool.request().query(`
+        SELECT TOP 10
+          p.PRODUTO as produtoId,
+          p.PRO_DESCRICAO as nome,
+          p.PRO_CODIGO as codPdv,
+          CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
+          CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamento
+        FROM ITENS_VENDAS iv
+        JOIN VENDAS v ON v.VENDA = iv.VENDA
+        JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+        WHERE v.VEN_SITUACAO = 2
+          AND YEAR(v.VEN_DATA_FIM) = ${year}
+          AND MONTH(v.VEN_DATA_FIM) = ${month}
+        GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO
+        ORDER BY faturamento DESC
+      `);
+
+      const prevRes = await pool.request().query(`
+        SELECT
+          p.PRODUTO as produtoId,
+          CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
+          CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamento
+        FROM ITENS_VENDAS iv
+        JOIN VENDAS v ON v.VENDA = iv.VENDA
+        JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+        WHERE v.VEN_SITUACAO = 2
+          AND YEAR(v.VEN_DATA_FIM) = ${prevYear}
+          AND MONTH(v.VEN_DATA_FIM) = ${prevMonth}
+        GROUP BY p.PRODUTO
+      `);
+
+      type CurrRow = { produtoId: number; nome: string; codPdv: string; qtd: number; faturamento: number };
+      type PrevRow = { produtoId: number; qtd: number; faturamento: number };
+      const curr = currRes.recordset as CurrRow[];
+      const prev = prevRes.recordset as PrevRow[];
+      const prevMap = new Map(prev.map((p: PrevRow) => [Number(p.produtoId), p]));
+
+      const top10 = curr.slice(0, 10).map((c: CurrRow) => {
+        const p = prevMap.get(Number(c.produtoId));
+        const variacao = p && Number(p.faturamento) > 0
+          ? ((Number(c.faturamento) - Number(p.faturamento)) / Number(p.faturamento)) * 100
+          : null;
+        return {
+          produtoId: Number(c.produtoId),
+          nome: c.nome,
+          codPdv: c.codPdv,
+          qtd: Number(c.qtd),
+          faturamento: Number(c.faturamento),
+          faturamentoPrev: p ? Number(p.faturamento) : null,
+          qtdPrev: p ? Number(p.qtd) : null,
+          variacao,
+        };
+      });
+
+      const totalFaturamento = curr.reduce((s: number, c: CurrRow) => s + Number(c.faturamento), 0);
+      const totalQtd = curr.reduce((s: number, c: CurrRow) => s + Number(c.qtd), 0);
+      const totalFaturamentoPrev = prev.reduce((s: number, p: PrevRow) => s + Number(p.faturamento), 0);
+      const top10Faturamento = top10.reduce((s, c) => s + c.faturamento, 0);
+      const top10Qtd = top10.reduce((s, c) => s + c.qtd, 0);
+
+      const cacheData = JSON.stringify({
+        month: monthKey,
+        prevMonth: `${prevYear}-${String(prevMonth).padStart(2, "0")}`,
+        top10,
+        totalFaturamento,
+        totalQtd,
+        totalFaturamentoPrev,
+        top10Faturamento,
+        top10Qtd,
+        totalProdutos: curr.length,
+      });
+
+      // Upsert no cache
+      const existingCache = await db.select().from(inoveSalesCache).where(eq(inoveSalesCache.cacheKey, monthKey)).limit(1);
+      if (existingCache.length > 0) {
+        await db.update(inoveSalesCache).set({ data: cacheData, updatedAt: Math.floor(Date.now() / 1000) }).where(eq(inoveSalesCache.cacheKey, monthKey));
+      } else {
+        await db.insert(inoveSalesCache).values({ cacheKey: monthKey, data: cacheData, updatedAt: Math.floor(Date.now() / 1000) });
+      }
+      synced++;
+    }
+
+    await pool.close();
+    pool = null;
+
+    const msg = `Cache de vendas por produto atualizado para ${synced} mês(es)`;
+    console.log(`[cron/sync-sales-cache] ✅ ${msg}`);
+    await logCronJob("sync-sales-cache", "success", msg, Date.now() - startedAt);
+
+  } catch (err) {
+    if (pool) await pool.close().catch(() => {});
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[cron/sync-sales-cache] Erro:", message);
+    await logCronJob("sync-sales-cache", "error", message, Date.now() - startedAt);
+  }
+}
+
+/**
  * Registra todos os cron jobs.
  * Chamado uma vez durante a inicialização do servidor.
  */
@@ -176,9 +313,16 @@ export function registerCronJobs(): void {
     name: "sync-daily-revenue",
   });
 
+  // Sincronização do cache de vendas por produto — todos os dias às 8h05 (após o faturamento)
+  cron.schedule("5 8 * * *", syncSalesCache, {
+    timezone: "America/Sao_Paulo",
+    name: "sync-sales-cache",
+  });
+
   console.log("[cron] Cron jobs registrados:");
   console.log("[cron]   → sync-daily-revenue: todos os dias às 08:00 (Brasília)");
+  console.log("[cron]   → sync-sales-cache: todos os dias às 08:05 (Brasília)");
 }
 
 // Exportar para uso no endpoint manual (disparar agora)
-export { syncDailyRevenue };
+export { syncDailyRevenue, syncSalesCache };

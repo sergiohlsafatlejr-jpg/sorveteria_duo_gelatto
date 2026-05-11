@@ -80,9 +80,11 @@ export default function SalesReport() {
   const usingLocal = !!inoveError && !!localReport;
 
   // Normalizar dados para formato unificado
-  const top10 = useMemo(() => {
+  type Top10Item = { id: string; name: string; codPdv: string; qty: number; revenue: number; prevRevenue: number | null; prevQty: number | null; variacao: number | null };
+  const top10 = useMemo((): Top10Item[] => {
     if (usingInove && inoveData) {
-      return inoveData.top10.map(item => ({
+      type InoveItem = { produtoId: number; nome: string; codPdv: string; qtd: number; faturamento: number; faturamentoPrev: number | null; qtdPrev: number | null; variacao: number | null };
+      return (inoveData.top10 as InoveItem[]).map(item => ({
         id: String(item.produtoId),
         name: item.nome ?? `Produto ${item.produtoId}`,
         codPdv: item.codPdv ?? String(item.produtoId),

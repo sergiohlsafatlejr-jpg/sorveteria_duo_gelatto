@@ -14,7 +14,7 @@ import { reportsRouter } from "./routers/reports";
 import { metaAdsRouter } from "./routers/meta-ads";
 import { adLibraryRouter } from "./routers/ad-library";
 import { inoveRouter } from "./routers/inove";
-import { syncDailyRevenue } from "./cron";
+import { syncDailyRevenue, syncSalesCache } from "./cron";
 import { cronJobLog } from "../drizzle/schema";
 import { desc } from "drizzle-orm";
 import { getDb } from "./db";
@@ -997,6 +997,12 @@ export const appRouter = router({
     triggerSyncRevenue: protectedProcedure
       .mutation(async () => {
         await syncDailyRevenue();
+        return { ok: true };
+      }),
+    // Disparar sincronização do cache de vendas por produto manualmente
+    triggerSyncSalesCache: protectedProcedure
+      .mutation(async () => {
+        await syncSalesCache();
         return { ok: true };
       }),
   }),

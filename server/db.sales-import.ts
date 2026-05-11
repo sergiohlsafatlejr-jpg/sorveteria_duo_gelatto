@@ -851,30 +851,50 @@ export async function getSalesAverageByProduct(months = 6): Promise<ProductSales
   if (!db) return [];
 
   // Buscar importações mensais confirmadas dos últimos N meses
-  const { sql, gte } = await import("drizzle-orm");
+  const { sql: _sql, gte, or } = await import("drizzle-orm");
 
   // Calcular data de corte (N meses atrás)
   const cutoffDate = new Date();
   cutoffDate.setMonth(cutoffDate.getMonth() - months);
   const cutoffMonth = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, "0")}`;
 
-  // Buscar importações mensais confirmadas no período
+  // Mês atual para incluir dados parciais (importações diárias)
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  // Buscar importações mensais confirmadas no período + importações diárias do mês atual
   const confirmedImports = await db
     .select({ id: salesImports.id, referenceMonth: salesImports.referenceMonth })
     .from(salesImports)
     .where(
       and(
-        eq(salesImports.status, "confirmed"),
-        eq(salesImports.importMode, "monthly"),
-        gte(salesImports.referenceMonth, cutoffMonth)
+        gte(salesImports.referenceMonth, cutoffMonth),
+        or(
+          // Mensais confirmadas
+          and(
+            eq(salesImports.status, "confirmed"),
+            eq(salesImports.importMode, "monthly")
+          ),
+          // Diárias do mês atual (qualquer status exceto cancelado)
+          and(
+            eq(salesImports.importMode, "daily"),
+            gte(salesImports.referenceMonth, currentMonth)
+          )
+        )
       )
     )
     .orderBy(desc(salesImports.referenceMonth));
 
   if (confirmedImports.length === 0) return [];
 
+  // Agrupar importações diárias pelo mês de referência
   const importIds = confirmedImports.map((i) => i.id);
-  const importMonthMap = new Map<number, string>(confirmedImports.map((i) => [i.id, i.referenceMonth]));
+  const importMonthMap = new Map<number, string>();
+  for (const imp of confirmedImports) {
+    // Para importações diárias, usar o mês (YYYY-MM) como chave de agrupamento
+    const month = imp.referenceMonth.slice(0, 7); // garante formato YYYY-MM
+    importMonthMap.set(imp.id, month);
+  }
 
   // Buscar todos os itens vinculados dessas importações
   const items = await db
