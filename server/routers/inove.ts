@@ -1072,6 +1072,51 @@ export const inoveRouter = router({
     }
   }),
 
+  // ── Vendas por Datas Específicas (para preencher dias faltantes no calendário) ──
+  getVendasMissingDays: protectedProcedure
+    .input(z.object({
+      dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1).max(60),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return null;
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        // Busca total de vendas para cada data em uma única query
+        const dateList = input.dates.map(d => `'${d}'`).join(",");
+        const res = await pool.request().query(`
+          SELECT
+            CAST(VEN_DATA_FIM AS DATE) as data,
+            ISNULL(SUM(VEN_TOTAL), 0) as total,
+            COUNT(*) as qtd
+          FROM VENDAS
+          WHERE CAST(VEN_DATA_FIM AS DATE) IN (${dateList})
+            AND VEN_SITUACAO = 2
+          GROUP BY CAST(VEN_DATA_FIM AS DATE)
+          ORDER BY data
+        `);
+        await pool.close();
+        // Montar mapa de data -> { total, qtd }
+        const result: Record<string, { total: number; qtd: number }> = {};
+        for (const row of res.recordset as Array<{ data: Date | string; total: number; qtd: number }>) {
+          const dateStr = typeof row.data === 'string'
+            ? row.data.slice(0, 10)
+            : new Date(row.data).toISOString().slice(0, 10);
+          result[dateStr] = { total: Number(row.total), qtd: Number(row.qtd) };
+        }
+        // Garantir que todas as datas solicitadas apareçam no resultado (mesmo sem vendas)
+        for (const d of input.dates) {
+          if (!result[d]) result[d] = { total: 0, qtd: 0 };
+        }
+        return result;
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
   // ── Médias Históricas por Mês (para Fluxo de Caixa Preditivo) ─────────────────
   getMediasHistoricas: protectedProcedure.query(async () => {
     const db = await getDb();

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import BackButton from "@/components/BackButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -218,6 +218,7 @@ export default function FinRevenueForecast() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showInoveImport, setShowInoveImport] = useState(false);
   const [inoveImporting, setInoveImporting] = useState(false);
+  const [inoveImportProgress, setInoveImportProgress] = useState<{ done: number; total: number } | null>(null);
   const { data: vendasOntem } = trpc.inove.getVendasOntem.useQuery();
   const clearMonthMut = trpc.fin.forecastCalendar.clearMonthRealRevenues.useMutation({
     onSuccess: (r: { deleted: number }) => {
@@ -235,6 +236,23 @@ export default function FinRevenueForecast() {
     realRevenues.forEach(r => m.set(r.revenueDate, Number(r.realAmount)));
     return m;
   }, [realRevenues]);
+
+  // Calcular dias passados sem valor real no mês atual
+  const missingDays = useMemo(() => {
+    if (!data) return [];
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    return data.days
+      .filter(d => d.date < todayStr && !realMap.has(d.date))
+      .map(d => d.date)
+      .sort();
+  }, [data, realMap]);
+
+  // Buscar vendas dos dias faltantes via INOVE
+  const { data: vendasMissingDays, isLoading: loadingMissingDays } = trpc.inove.getVendasMissingDays.useQuery(
+    { dates: missingDays.length > 0 ? missingDays : ["1970-01-01"] },
+    { enabled: showInoveImport && missingDays.length > 0 }
+  );
 
   // Mapa de meta por data (finRevenueForecasts.amount)
   const goalMap = useMemo(() => {
@@ -974,76 +992,149 @@ export default function FinRevenueForecast() {
           </div>
         </DialogContent>
       </Dialog>
-      {/* Modal Importar INOVE */}
-      <Dialog open={showInoveImport} onOpenChange={setShowInoveImport}>
-        <DialogContent className="max-w-md">
+      {/* Modal Importar INOVE — Dias Faltantes */}
+      <Dialog open={showInoveImport} onOpenChange={(open) => { if (!inoveImporting) { setShowInoveImport(open); setInoveImportProgress(null); } }}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Database className="h-5 w-5 text-blue-400" />
-              Importar Faturamento de Ontem — INOVE
+              Importar Faturamento — INOVE PDV
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {!vendasOntem ? (
-              <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
-                <span className="animate-pulse text-sm">Buscando dados do INOVE...</span>
+            {/* Seção de dias faltantes */}
+            {missingDays.length === 0 ? (
+              <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3 text-center">
+                <CheckCircle2 className="h-5 w-5 text-emerald-500 mx-auto mb-1" />
+                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Todos os dias passados já têm faturamento lançado!</p>
               </div>
-            ) : vendasOntem.qtd > 0 ? (
+            ) : (
               <div className="space-y-3">
-                <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3">
-                  <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">
-                    Vendas de ontem: {fmtBRL(Number(vendasOntem.total))} ({vendasOntem.qtd} transações)
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                    {missingDays.length} dia(s) sem faturamento real lançado
                   </p>
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                    Período: {new Date(missingDays[0] + "T12:00:00").toLocaleDateString("pt-BR")} até {new Date(missingDays[missingDays.length - 1] + "T12:00:00").toLocaleDateString("pt-BR")}
+                  </p>
+                </div>
 
-                </div>
-                <div className="space-y-1">
-                  {(vendasOntem.formas ?? []).map((f: { forma: string; valor: number | string }, i: number) => (
-                    <div key={i} className="flex justify-between text-sm px-1">
-                      <span className="text-muted-foreground">{f.forma}</span>
-                      <span className="font-medium">{fmtBRL(Number(f.valor))}</span>
+                {/* Lista de dias faltantes com valores do INOVE */}
+                <div className="max-h-52 overflow-y-auto space-y-1 rounded-lg border border-border/40 p-2">
+                  {loadingMissingDays ? (
+                    <div className="flex items-center justify-center py-6 gap-2 text-muted-foreground">
+                      <span className="animate-pulse text-sm">Buscando dados do INOVE...</span>
                     </div>
-                  ))}
+                  ) : (
+                    missingDays.map(date => {
+                      const info = vendasMissingDays?.[date];
+                      const hasVendas = info && info.total > 0;
+                      return (
+                        <div key={date} className="flex items-center justify-between text-xs px-2 py-1.5 rounded hover:bg-muted/30">
+                          <span className="text-muted-foreground">
+                            {new Date(date + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "short", day: "numeric", month: "short" })}
+                          </span>
+                          {!vendasMissingDays ? (
+                            <span className="text-muted-foreground/50 italic">carregando...</span>
+                          ) : hasVendas ? (
+                            <span className="font-semibold text-emerald-500">{fmtBRL(info!.total)} <span className="text-muted-foreground font-normal">({info!.qtd} vendas)</span></span>
+                          ) : (
+                            <span className="text-rose-400 italic">sem vendas</span>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
-                <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2">
-                  Isso irá salvar o total de <strong>{fmtBRL(Number(vendasOntem.total))}</strong> como faturamento real do dia anterior no calendário de previsão.
-                </p>
+
+                {/* Progresso da importação */}
+                {inoveImportProgress && (
+                  <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3">
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                      Importando... {inoveImportProgress.done}/{inoveImportProgress.total} dias
+                    </p>
+                    <div className="mt-1.5 h-1.5 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 rounded-full transition-all"
+                        style={{ width: `${(inoveImportProgress.done / inoveImportProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Resumo do que será importado */}
+                {vendasMissingDays && !inoveImportProgress && (() => {
+                  const daysWithData = missingDays.filter(d => vendasMissingDays[d]?.total > 0);
+                  const totalToImport = daysWithData.reduce((s, d) => s + (vendasMissingDays[d]?.total ?? 0), 0);
+                  return daysWithData.length > 0 ? (
+                    <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2">
+                      Serão importados <strong>{daysWithData.length} dia(s)</strong> com total de <strong>{fmtBRL(totalToImport)}</strong>.
+                      {missingDays.length - daysWithData.length > 0 && (
+                        <span className="text-rose-400"> {missingDays.length - daysWithData.length} dia(s) sem vendas serão ignorados.</span>
+                      )}
+                    </p>
+                  ) : null;
+                })()}
+
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => setShowInoveImport(false)} className="flex-1 h-9 text-sm">
+                  <Button variant="outline" onClick={() => { setShowInoveImport(false); setInoveImportProgress(null); }} className="flex-1 h-9 text-sm" disabled={inoveImporting}>
                     Cancelar
                   </Button>
                   <Button
                     className="flex-1 h-9 text-sm bg-blue-600 hover:bg-blue-700 text-white gap-2"
-                    disabled={inoveImporting}
+                    disabled={inoveImporting || loadingMissingDays || !vendasMissingDays}
                     onClick={async () => {
+                      if (!vendasMissingDays) return;
+                      const daysWithData = missingDays.filter(d => vendasMissingDays[d]?.total > 0);
+                      if (daysWithData.length === 0) {
+                        toast.info("Nenhum dia com vendas encontrado no INOVE para importar.");
+                        return;
+                      }
                       setInoveImporting(true);
-                      try {
-                        // Calcula a data de ontem no fuso de Brasília
-                        const now = new Date();
-                        const brtOffset = -3 * 60;
-                        const brtNow = new Date(now.getTime() + (brtOffset - now.getTimezoneOffset()) * 60000);
-                        brtNow.setDate(brtNow.getDate() - 1);
-                        const dateStr = brtNow.toISOString().slice(0, 10);
-                        await saveRealMut.mutateAsync({
-                          revenueDate: dateStr,
-                          realAmount: Number(vendasOntem.total),
-                          note: `Importado do INOVE PDV (${vendasOntem.qtd} vendas)`,
-                        });
-                        setShowInoveImport(false);
-                        toast.success(`Faturamento de ${fmtBRL(Number(vendasOntem.total))} importado do INOVE!`);
-                      } catch (e: unknown) {
-                        toast.error(e instanceof Error ? e.message : "Erro ao importar");
-                      } finally {
-                        setInoveImporting(false);
+                      setInoveImportProgress({ done: 0, total: daysWithData.length });
+                      let imported = 0;
+                      let errors = 0;
+                      for (const date of daysWithData) {
+                        const info = vendasMissingDays[date];
+                        try {
+                          await saveRealMut.mutateAsync({
+                            revenueDate: date,
+                            realAmount: info.total,
+                            note: `Importado do INOVE PDV (${info.qtd} vendas)`,
+                          });
+                          imported++;
+                          setInoveImportProgress({ done: imported, total: daysWithData.length });
+                        } catch {
+                          errors++;
+                        }
+                      }
+                      setInoveImporting(false);
+                      setInoveImportProgress(null);
+                      setShowInoveImport(false);
+                      if (errors > 0) {
+                        toast.warning(`${imported} dia(s) importados, ${errors} com erro.`);
+                      } else {
+                        toast.success(`${imported} dia(s) importados do INOVE com sucesso!`);
                       }
                     }}
                   >
                     <Database className="h-4 w-4" />
-                    Importar {fmtBRL(Number(vendasOntem.total))}
+                    {inoveImporting ? `Importando...` : `Importar ${vendasMissingDays ? missingDays.filter(d => vendasMissingDays[d]?.total > 0).length : ""} dia(s)`}
                   </Button>
                 </div>
               </div>
-            ) : (
-              <p className="text-center text-sm text-muted-foreground py-4">Conector INOVE não configurado ou sem vendas ontem.</p>
+            )}
+
+            {/* Separador para ontem (acesso rápido) */}
+            {vendasOntem && vendasOntem.qtd > 0 && missingDays.length === 0 && (
+              <div className="border-t border-border/40 pt-3">
+                <p className="text-xs text-muted-foreground mb-2">Vendas de ontem disponíveis:</p>
+                <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3">
+                  <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                    {fmtBRL(Number(vendasOntem.total))} ({vendasOntem.qtd} transações)
+                  </p>
+                </div>
+              </div>
             )}
           </div>
         </DialogContent>
