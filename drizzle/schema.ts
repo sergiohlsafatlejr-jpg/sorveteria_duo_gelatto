@@ -690,3 +690,15 @@ export const inoveSyncLog = mysqlTable("inove_sync_log", {
 });
 export type InoveSyncLog = typeof inoveSyncLog.$inferSelect;
 export type InsertInoveSyncLog = typeof inoveSyncLog.$inferInsert;
+
+// ─── Cron Job Log (histórico de execuções de tarefas agendadas) ───────────────
+export const cronJobLog = mysqlTable("cron_job_log", {
+  id: int("id").autoincrement().primaryKey(),
+  jobName: varchar("jobName", { length: 100 }).notNull(),   // ex: "sync-daily-revenue"
+  status: mysqlEnum("status", ["success", "error", "skipped"]).notNull(),
+  message: text("message"),                                  // resumo do resultado
+  executedAt: timestamp("executedAt").defaultNow().notNull(),
+  durationMs: int("durationMs"),                             // tempo de execução em ms
+});
+export type CronJobLog = typeof cronJobLog.$inferSelect;
+export type InsertCronJobLog = typeof cronJobLog.$inferInsert;

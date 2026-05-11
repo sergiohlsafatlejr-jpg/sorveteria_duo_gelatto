@@ -61,6 +61,7 @@ import {
   Megaphone,
   Search,
   FileText,
+  Clock,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -160,6 +161,7 @@ const menuGroups: MenuGroup[] = [
       { icon: UserCog, label: "Usuários", path: "/users" },
       { icon: Database, label: "Conector Externo", path: "/connector" },
       { icon: Database, label: "Conector INOVE PDV", path: "/inove-connector" },
+      { icon: Clock, label: "Agendamentos", path: "/cron-jobs" },
     ],
   },
 ];

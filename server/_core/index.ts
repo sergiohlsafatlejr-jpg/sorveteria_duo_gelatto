@@ -9,6 +9,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { salesImportExpressRouter } from "../routers/sales-import";
 import { scheduledRouter } from "../routers/scheduledRoutes";
+import { registerCronJobs } from "../cron";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -65,6 +66,8 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // Registrar cron jobs após o servidor iniciar
+    registerCronJobs();
   });
 }
 

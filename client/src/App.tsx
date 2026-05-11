@@ -46,6 +46,7 @@ import MetaAds from "./pages/MetaAds";
 import AdLibrary from "./pages/AdLibrary";
 import GiroEstoque from "./pages/GiroEstoque";
 import InoveConnector from "./pages/InoveConnector";
+import CronJobs from "./pages/CronJobs";
 import InoveReports from "./pages/InoveReports";
 import InoveProductSales from "./pages/InoveProductSales";
 import InoveCostMargin from "./pages/InoveCostMargin";
@@ -106,6 +107,7 @@ function Router() {
       <Route path="/inove/product-sales">{() => <ProtectedRoute path="/inove/product-sales"><InoveProductSales /></ProtectedRoute>}</Route>
       <Route path="/inove/cost-margin">{() => <ProtectedRoute path="/inove/cost-margin"><InoveCostMargin /></ProtectedRoute>}</Route>
       <Route path="/inove/managerial">{() => <ProtectedRoute path="/inove/managerial"><InoveManagerial /></ProtectedRoute>}</Route>
+      <Route path="/cron-jobs">{() => <ProtectedRoute path="/cron-jobs"><CronJobs /></ProtectedRoute>}</Route>
       {/* Página pública de fidelidade — sem login */}
       <Route path="/fidelidade/:token" component={PublicLoyalty} />
       {/* Acesso negado */}

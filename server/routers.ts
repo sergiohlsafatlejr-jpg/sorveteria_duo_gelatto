@@ -14,6 +14,9 @@ import { reportsRouter } from "./routers/reports";
 import { metaAdsRouter } from "./routers/meta-ads";
 import { adLibraryRouter } from "./routers/ad-library";
 import { inoveRouter } from "./routers/inove";
+import { syncDailyRevenue } from "./cron";
+import { cronJobLog } from "../drizzle/schema";
+import { desc } from "drizzle-orm";
 import { getDb } from "./db";
 import { finTransactions, finReceivables, products } from "../drizzle/schema";
 import { and, eq, lt, lte, sql } from "drizzle-orm";
@@ -977,6 +980,26 @@ export const appRouter = router({
   metaAds: metaAdsRouter,
   adLibrary: adLibraryRouter,
   inove: inoveRouter,
+  cron: router({
+    // Listar últimas execuções dos cron jobs
+    getLogs: protectedProcedure
+      .input(z.object({ limit: z.number().min(1).max(100).default(50) }).optional())
+      .query(async ({ input }) => {
+        const dbInstance = await getDb();
+        if (!dbInstance) return [];
+        return dbInstance
+          .select()
+          .from(cronJobLog)
+          .orderBy(desc(cronJobLog.executedAt))
+          .limit(input?.limit ?? 50);
+      }),
+    // Disparar sincronização de faturamento manualmente
+    triggerSyncRevenue: protectedProcedure
+      .mutation(async () => {
+        await syncDailyRevenue();
+        return { ok: true };
+      }),
+  }),
   alerts: router({
     counts: protectedProcedure.query(async ({ ctx }) => {
       const dbInstance = await getDb();
