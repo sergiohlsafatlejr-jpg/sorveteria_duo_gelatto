@@ -1,0 +1,108 @@
+{
+  "query": "SELECT id, userId, revenueDate, realAmount, note FROM fin_daily_revenue WHERE YEAR(revenueDate) = 2026 AND MONTH(revenueDate) = 5 ORDER BY revenueDate, id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT id, userId, revenueDate, realAmount, note FROM fin_daily_revenue WHERE YEAR(revenueDate) = 2026 AND MONTH(revenueDate) = 5 ORDER BY revenueDate, id;",
+  "rows": [
+    {
+      "id": "300003",
+      "userId": "1",
+      "revenueDate": "2026-05-01",
+      "realAmount": "5933.19",
+      "note": "NULL"
+    },
+    {
+      "id": "300006",
+      "userId": "720111",
+      "revenueDate": "2026-05-01",
+      "realAmount": "5933.21",
+      "note": "NULL"
+    },
+    {
+      "id": "300004",
+      "userId": "1",
+      "revenueDate": "2026-05-02",
+      "realAmount": "4947.77",
+      "note": "NULL"
+    },
+    {
+      "id": "300007",
+      "userId": "720111",
+      "revenueDate": "2026-05-02",
+      "realAmount": "4947.78",
+      "note": "NULL"
+    },
+    {
+      "id": "300001",
+      "userId": "1",
+      "revenueDate": "2026-05-03",
+      "realAmount": "8220.91",
+      "note": "Importado do INOVE PDV (200 vendas)"
+    },
+    {
+      "id": "300008",
+      "userId": "720111",
+      "revenueDate": "2026-05-03",
+      "realAmount": "8220.96",
+      "note": "NULL"
+    },
+    {
+      "id": "300002",
+      "userId": "1",
+      "revenueDate": "2026-05-04",
+      "realAmount": "2142.76",
+      "note": "Importado do INOVE PDV (66 vendas)"
+    },
+    {
+      "id": "300009",
+      "userId": "720111",
+      "revenueDate": "2026-05-04",
+      "realAmount": "2142.77",
+      "note": "NULL"
+    },
+    {
+      "id": "300005",
+      "userId": "1",
+      "revenueDate": "2026-05-05",
+      "realAmount": "1834.89",
+      "note": "Importado do INOVE PDV (68 vendas)"
+    },
+    {
+      "id": "330002",
+      "userId": "1",
+      "revenueDate": "2026-05-06",
+      "realAmount": "2406.79",
+      "note": "NULL"
+    },
+    {
+      "id": "330001",
+      "userId": "1",
+      "revenueDate": "2026-05-07",
+      "realAmount": "1807.02",
+      "note": "Importado do INOVE PDV (61 vendas)"
+    },
+    {
+      "id": "360002",
+      "userId": "1",
+      "revenueDate": "2026-05-08",
+      "realAmount": "2611.66",
+      "note": "Importado do INOVE PDV (79 vendas)"
+    },
+    {
+      "id": "360003",
+      "userId": "1",
+      "revenueDate": "2026-05-09",
+      "realAmount": "5945.07",
+      "note": "Importado do INOVE PDV (126 vendas)"
+    },
+    {
+      "id": "360001",
+      "userId": "1",
+      "revenueDate": "2026-05-10",
+      "realAmount": "8957.42",
+      "note": "Importado do INOVE PDV (201 vendas)"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tuserId\trevenueDate\trealAmount\tnote\n300003\t1\t2026-05-01\t5933.19\tNULL\n300006\t720111\t2026-05-01\t5933.21\tNULL\n300004\t1\t2026-05-02\t4947.77\tNULL\n300007\t720111\t2026-05-02\t4947.78\tNULL\n300001\t1\t2026-05-03\t8220.91\tImportado do INOVE PDV (200 vendas)\n300008\t720111\t2026-05-03\t8220.96\tNULL\n300002\t1\t2026-05-04\t2142.76\tImportado do INOVE PDV (66 vendas)\n300009\t720111\t2026-05-04\t2142.77\tNULL\n300005\t1\t2026-05-05\t1834.89\tImportado do INOVE PDV (68 vendas)\n330002\t1\t2026-05-06\t2406.79\tNULL\n330001\t1\t2026-05-07\t1807.02\tImportado do INOVE PDV (61 vendas)\n360002\t1\t2026-05-08\t2611.66\tImportado do INOVE PDV (79 vendas)\n360003\t1\t2026-05-09\t5945.07\tImportado do INOVE PDV (126 vendas)\n360001\t1\t2026-05-10\t8957.42\tImportado do INOVE PDV (201 vendas)\n",
+  "stderr": "",
+  "execution_time_ms": 602
+}

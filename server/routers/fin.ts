@@ -665,7 +665,7 @@ export const finRouter = router({
             time.forEach((d: string, i: number) => {
               weatherMap.set(d, {
                 code: weathercode[i],
-                tempMax: temperature_2m_max[i],
+                tempMax: temperature_2m_max[i] ?? 0,
                 precip: precipitation_sum[i] ?? 0,
                 precipProb: precipitation_probability_max[i] ?? 0,
               });
@@ -771,13 +771,13 @@ export const finRouter = router({
       .input(z.object({
         revenueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       }))
-      .mutation(({ input }) => deleteRealRevenue(input.revenueDate)),
+      .mutation(({ ctx, input }) => deleteRealRevenue(ctx.user.id, input.revenueDate)),
     clearMonthRealRevenues: protectedProcedure
       .input(z.object({
         year: z.number().int(),
         month: z.number().int().min(1).max(12),
       }))
-      .mutation(({ input }) => clearMonthRealRevenues(input.year, input.month)),
+      .mutation(({ ctx, input }) => clearMonthRealRevenues(ctx.user.id, input.year, input.month)),
     getAccuracyHistory: protectedProcedure
       .input(z.object({
         avgWeekday: z.number().default(2000),

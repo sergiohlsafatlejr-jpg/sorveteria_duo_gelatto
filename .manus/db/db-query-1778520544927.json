@@ -1,0 +1,9 @@
+{
+  "query": "DELETE t1 FROM fin_daily_revenue t1 INNER JOIN fin_daily_revenue t2 WHERE t1.id < t2.id AND t1.revenueDate = t2.revenueDate AND t1.userId = t2.userId;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute DELETE t1 FROM fin_daily_revenue t1 INNER JOIN fin_daily_revenue t2 WHERE t1.id < t2.id AND t1.revenueDate = t2.revenueDate AND t1.userId = t2.userId;",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 576
+}

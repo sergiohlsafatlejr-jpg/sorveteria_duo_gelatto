@@ -1,0 +1,8 @@
+{
+  "query": "SELECT revenue_date, real_amount, note FROM fin_daily_revenue WHERE YEAR(revenue_date) = 2026 AND MONTH(revenue_date) = 5 ORDER BY revenue_date;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT revenue_date, real_amount, note FROM fin_daily_revenue WHERE YEAR(revenue_date) = 2026 AND MONTH(revenue_date) = 5 ORDER BY revenue_date;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'revenue_date' in 'where clause'"
+  ]
+}

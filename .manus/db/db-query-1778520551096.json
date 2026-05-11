@@ -1,0 +1,80 @@
+{
+  "query": "SELECT revenueDate, realAmount, note FROM fin_daily_revenue WHERE YEAR(revenueDate) = 2026 AND MONTH(revenueDate) = 5 ORDER BY revenueDate;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT revenueDate, realAmount, note FROM fin_daily_revenue WHERE YEAR(revenueDate) = 2026 AND MONTH(revenueDate) = 5 ORDER BY revenueDate;",
+  "rows": [
+    {
+      "revenueDate": "2026-05-01",
+      "realAmount": "5933.19",
+      "note": "NULL"
+    },
+    {
+      "revenueDate": "2026-05-01",
+      "realAmount": "5933.21",
+      "note": "NULL"
+    },
+    {
+      "revenueDate": "2026-05-02",
+      "realAmount": "4947.78",
+      "note": "NULL"
+    },
+    {
+      "revenueDate": "2026-05-02",
+      "realAmount": "4947.77",
+      "note": "NULL"
+    },
+    {
+      "revenueDate": "2026-05-03",
+      "realAmount": "8220.91",
+      "note": "Importado do INOVE PDV (200 vendas)"
+    },
+    {
+      "revenueDate": "2026-05-03",
+      "realAmount": "8220.96",
+      "note": "NULL"
+    },
+    {
+      "revenueDate": "2026-05-04",
+      "realAmount": "2142.76",
+      "note": "Importado do INOVE PDV (66 vendas)"
+    },
+    {
+      "revenueDate": "2026-05-04",
+      "realAmount": "2142.77",
+      "note": "NULL"
+    },
+    {
+      "revenueDate": "2026-05-05",
+      "realAmount": "1834.89",
+      "note": "Importado do INOVE PDV (68 vendas)"
+    },
+    {
+      "revenueDate": "2026-05-06",
+      "realAmount": "2406.79",
+      "note": "NULL"
+    },
+    {
+      "revenueDate": "2026-05-07",
+      "realAmount": "1807.02",
+      "note": "Importado do INOVE PDV (61 vendas)"
+    },
+    {
+      "revenueDate": "2026-05-08",
+      "realAmount": "2611.66",
+      "note": "Importado do INOVE PDV (79 vendas)"
+    },
+    {
+      "revenueDate": "2026-05-09",
+      "realAmount": "5945.07",
+      "note": "Importado do INOVE PDV (126 vendas)"
+    },
+    {
+      "revenueDate": "2026-05-10",
+      "realAmount": "8957.42",
+      "note": "Importado do INOVE PDV (201 vendas)"
+    }
+  ],
+  "messages": [],
+  "stdout": "revenueDate\trealAmount\tnote\n2026-05-01\t5933.19\tNULL\n2026-05-01\t5933.21\tNULL\n2026-05-02\t4947.78\tNULL\n2026-05-02\t4947.77\tNULL\n2026-05-03\t8220.91\tImportado do INOVE PDV (200 vendas)\n2026-05-03\t8220.96\tNULL\n2026-05-04\t2142.76\tImportado do INOVE PDV (66 vendas)\n2026-05-04\t2142.77\tNULL\n2026-05-05\t1834.89\tImportado do INOVE PDV (68 vendas)\n2026-05-06\t2406.79\tNULL\n2026-05-07\t1807.02\tImportado do INOVE PDV (61 vendas)\n2026-05-08\t2611.66\tImportado do INOVE PDV (79 vendas)\n2026-05-09\t5945.07\tImportado do INOVE PDV (126 vendas)\n2026-05-10\t8957.42\tImportado do INOVE PDV (201 vendas)\n",
+  "stderr": "",
+  "execution_time_ms": 579
+}
