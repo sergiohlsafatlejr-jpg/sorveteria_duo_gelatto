@@ -1,0 +1,25 @@
+{
+  "query": "SELECT * FROM inove_connector_config LIMIT 1;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT * FROM inove_connector_config LIMIT 1;",
+  "rows": [
+    {
+      "id": "1",
+      "host": "duo-urias.safatle.net.br",
+      "port": "55444",
+      "database": "DUOGELATTO",
+      "username": "sa",
+      "password": "548469351",
+      "active": "1",
+      "lastSyncAt": "2026-05-08 14:26:22",
+      "lastSyncStatus": "error",
+      "lastSyncMessage": "Failed to connect to duo-urias.safatle.net.br:55444 in 15000ms",
+      "syncIntervalMinutes": "5",
+      "createdAt": "2026-04-28 13:27:01",
+      "updatedAt": "2026-05-11 13:12:23"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\thost\tport\tdatabase\tusername\tpassword\tactive\tlastSyncAt\tlastSyncStatus\tlastSyncMessage\tsyncIntervalMinutes\tcreatedAt\tupdatedAt\n1\tduo-urias.safatle.net.br\t55444\tDUOGELATTO\tsa\t548469351\t1\t2026-05-08 14:26:22\terror\tFailed to connect to duo-urias.safatle.net.br:55444 in 15000ms\t5\t2026-04-28 13:27:01\t2026-05-11 13:12:23\n",
+  "stderr": "",
+  "execution_time_ms": 703
+}

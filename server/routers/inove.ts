@@ -71,11 +71,11 @@ async function createInovePool(config: {
       user: config.username,
       password: config.password,
       database: config.database || "DUOGELATTO",
-      options: {
+        options: {
         encrypt: false,
         trustServerCertificate: true,
-        connectTimeout: 15000,
-        requestTimeout: 30000,
+        connectTimeout: 30000,
+        requestTimeout: 60000,
       },
     };
     const pool = new PoolClass(mssqlConfig);
@@ -95,8 +95,8 @@ async function createInovePool(config: {
     options: {
       encrypt: false,
       trustServerCertificate: true,
-      connectTimeout: 15000,
-      requestTimeout: 30000,
+      connectTimeout: 30000,
+      requestTimeout: 60000,
     },
   };
   return connectFn(mssqlConfig);
@@ -1405,7 +1405,28 @@ export const inoveRouter = router({
         const cacheKey = input.month;
         const cached = await db.select().from(inoveSalesCache).where(eq(inoveSalesCache.cacheKey, cacheKey)).limit(1);
         if (cached.length > 0) {
-          return JSON.parse(cached[0].data);
+          const parsed = JSON.parse(cached[0].data);
+          // O cache pode ser um array (formato antigo) ou um objeto completo (formato novo)
+          if (Array.isArray(parsed)) {
+            // Reconstruir o objeto completo a partir do array
+            const top10 = parsed as Array<{ produtoId: number; nome: string; codPdv: string | null; qtd: number; faturamento: number; faturamentoPrev: number | null; qtdPrev: number | null; variacao: number | null }>;
+            const [year, month] = input.month.split('-').map(Number);
+            const prevDate = new Date(year, month - 2, 1);
+            const prevYear = prevDate.getFullYear();
+            const prevMonth = prevDate.getMonth() + 1;
+            return {
+              month: input.month,
+              prevMonth: `${prevYear}-${String(prevMonth).padStart(2, '0')}`,
+              top10,
+              totalFaturamento: top10.reduce((s, c) => s + c.faturamento, 0),
+              totalQtd: top10.reduce((s, c) => s + c.qtd, 0),
+              totalFaturamentoPrev: top10.reduce((s, c) => s + (c.faturamentoPrev ?? 0), 0),
+              top10Faturamento: top10.reduce((s, c) => s + c.faturamento, 0),
+              top10Qtd: top10.reduce((s, c) => s + c.qtd, 0),
+              totalProdutos: top10.length,
+            };
+          }
+          return parsed;
         }
         throw new Error(err instanceof Error ? err.message : String(err));
       }
@@ -2109,15 +2130,15 @@ export const inoveRouter = router({
         // 3. Por forma de pagamento
         const payRes = await pool.request().query(`
           SELECT
-            ISNULL(fp.FOR_DESCRICAO, 'Outros') as formaPagamento,
+            ISNULL(fp.PAG_NOME, 'Outros') as formaPagamento,
             CAST(SUM(pv.PAG_VALOR) as float) as total
           FROM PAGAMENTOS_VENDAS pv
           JOIN VENDAS v ON v.VENDA = pv.VENDA
-          LEFT JOIN FORMAS_PAGAMENTO fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+          LEFT JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
           WHERE v.VEN_SITUACAO = 2
             AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
             AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
-          GROUP BY fp.FOR_DESCRICAO
+          GROUP BY fp.PAG_NOME
           ORDER BY total DESC
         `);
         type PRow = { formaPagamento: string; total: number };
@@ -2129,15 +2150,16 @@ export const inoveRouter = router({
         // 4. Top produtos
         const topRes = await pool.request().query(`
           SELECT TOP 10
-            ISNULL(iv.ITE_NOME, 'Produto s/nome') as nome,
+            ISNULL(p.PRO_NOME, ISNULL(iv.ITE_NOME, 'Produto s/nome')) as nome,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qty,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as revenue
           FROM ITENS_VENDAS iv
           JOIN VENDAS v ON v.VENDA = iv.VENDA
+          LEFT JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2
             AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
             AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
-          GROUP BY iv.ITE_NOME
+          GROUP BY p.PRO_NOME, iv.ITE_NOME
           ORDER BY revenue DESC
         `);
         type TRow = { nome: string; qty: number; revenue: number };

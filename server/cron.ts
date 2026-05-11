@@ -208,7 +208,7 @@ async function syncSalesCache(): Promise<void> {
       const currRes = await pool.request().query(`
         SELECT TOP 10
           p.PRODUTO as produtoId,
-          p.PRO_DESCRICAO as nome,
+          ISNULL(p.PRO_NOME, 'Produto s/nome') as nome,
           p.PRO_CODIGO as codPdv,
           CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
           CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamento
@@ -218,7 +218,7 @@ async function syncSalesCache(): Promise<void> {
         WHERE v.VEN_SITUACAO = 2
           AND YEAR(v.VEN_DATA_FIM) = ${year}
           AND MONTH(v.VEN_DATA_FIM) = ${month}
-        GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO
+        GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO
         ORDER BY faturamento DESC
       `);
 

@@ -1,0 +1,15 @@
+{
+  "query": "SELECT cacheKey, LEFT(data, 500) as data_preview, updatedAt FROM inove_sales_cache WHERE cacheKey = '2026-04';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2xKWvZvidGuv3Qt.a162269de313 --database WYaP3gu8gnshPc3N2h65yG --execute SELECT cacheKey, LEFT(data, 500) as data_preview, updatedAt FROM inove_sales_cache WHERE cacheKey = '2026-04';",
+  "rows": [
+    {
+      "cacheKey": "2026-04",
+      "data_preview": "[{\"produtoId\":1,\"nome\":\"SORVETE KG\",\"codPdv\":null,\"qtd\":1030.138,\"faturamento\":66855.9562,\"faturamentoPrev\":70654.561,\"qtdPrev\":1088.69,\"variacao\":-5.38},{\"produtoId\":74,\"nome\":\"ACAI PREMIUM 1,5L\",\"codPdv\":null,\"qtd\":88,\"faturamento\":4039.2,\"faturamentoPrev\":4314.6,\"qtdPrev\":94,\"variacao\":-6.38},{\"produtoId\":133,\"nome\":\"SORVETE KILO 2\",\"codPdv\":null,\"qtd\":51.514,\"faturamento\":3343.2586,\"faturamentoPrev\":2195.3723,\"qtdPrev\":33.827,\"variacao\":52.29},{\"produtoId\":201,\"nome\":\"ACAI TRADICIONAL PREMIU",
+      "updatedAt": "1778523648"
+    }
+  ],
+  "messages": [],
+  "stdout": "cacheKey\tdata_preview\tupdatedAt\n2026-04\t[{\"produtoId\":1,\"nome\":\"SORVETE KG\",\"codPdv\":null,\"qtd\":1030.138,\"faturamento\":66855.9562,\"faturamentoPrev\":70654.561,\"qtdPrev\":1088.69,\"variacao\":-5.38},{\"produtoId\":74,\"nome\":\"ACAI PREMIUM 1,5L\",\"codPdv\":null,\"qtd\":88,\"faturamento\":4039.2,\"faturamentoPrev\":4314.6,\"qtdPrev\":94,\"variacao\":-6.38},{\"produtoId\":133,\"nome\":\"SORVETE KILO 2\",\"codPdv\":null,\"qtd\":51.514,\"faturamento\":3343.2586,\"faturamentoPrev\":2195.3723,\"qtdPrev\":33.827,\"variacao\":52.29},{\"produtoId\":201,\"nome\":\"ACAI TRADICIONAL PREMIU\t1778523648\n",
+  "stderr": "",
+  "execution_time_ms": 607
+}

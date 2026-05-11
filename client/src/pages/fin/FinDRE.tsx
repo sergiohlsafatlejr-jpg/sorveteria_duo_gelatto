@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { TrendingDown, TrendingUp, ShoppingCart } from "lucide-react";
+import { TrendingDown, TrendingUp, ShoppingCart, Zap } from "lucide-react";
 import { Link } from "wouter";
 
 const fmtBRL = (v: number) =>
@@ -33,20 +33,31 @@ export default function FinDRE() {
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(currentYear);
 
-  const dateFrom = new Date(year, month, 1);
-  const dateTo = new Date(year, month + 1, 0, 23, 59, 59);
+  const dateFrom = useMemo(() => new Date(year, month, 1), [year, month]);
+  const dateTo = useMemo(() => new Date(year, month + 1, 0, 23, 59, 59), [year, month]);
 
   // Mês no formato YYYY-MM para busca nas vendas PDV
   const referenceMonth = `${year}-${String(month + 1).padStart(2, "0")}`;
+
+  // Datas no formato YYYY-MM-DD para o INOVE
+  const fromStr = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const toStr = `${year}-${String(month + 1).padStart(2, "0")}-${new Date(year, month + 1, 0).getDate().toString().padStart(2, "0")}`;
 
   const { data: transactions = [] } = trpc.fin.transactions.list.useQuery({ dateFrom, dateTo });
   const { data: receivables = [] } = trpc.fin.receivables.list.useQuery({ dateFrom, dateTo });
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
 
-  // Dados de vendas PDV importadas (apenas receita — CMV já está nas despesas)
-  const { data: dreVendas } = trpc.reports.dre.useQuery({ referenceMonth });
+  // Dados de vendas do INOVE (fonte primária de receita)
+  const { data: inoveData, isLoading: inoveLoading } = trpc.inove.getFinancialSummaryInove.useQuery(
+    { from: fromStr, to: toStr },
+    { retry: false }
+  );
 
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+
+  // ── Receita PDV (INOVE — fonte primária) ─────────────────────────────────
+  const totalRevenuePDV = inoveData?.totalRevenue ?? 0;
+  const fonteInove = inoveData?.fonte === "inove";
 
   // ── Receitas Financeiras (Contas a Receber) ───────────────────────────────
   const totalRevenueFin = receivables
@@ -56,12 +67,8 @@ export default function FinDRE() {
     .filter(r => !r.isReceived)
     .reduce((s, r) => s + Number(r.amount), 0);
 
-  // ── Receita PDV (Vendas importadas do caixa) ──────────────────────────────
-  // CMV NÃO é subtraído aqui — já está incluído nas despesas operacionais (NF-e de compras)
-  const totalRevenuePDV = dreVendas?.totalRevenue ?? 0;
-
   // ── Receita Total Combinada ───────────────────────────────────────────────
-  const totalRevenue = totalRevenueFin + totalRevenuePDV;
+  const totalRevenue = totalRevenuePDV + totalRevenueFin;
   const pendingRevenue = pendingRevenueFin;
 
   // ── Despesas (Contas a Pagar — já incluem custo de mercadorias via NF-e) ──
@@ -88,9 +95,7 @@ export default function FinDRE() {
   const totalExpenses = totalExpensesPaid + totalExpensesPending;
 
   // ── Cálculos do DRE ───────────────────────────────────────────────────────
-  // Lucro Bruto = Receitas Recebidas - Despesas Pagas (CMV já está nas despesas)
   const grossProfit = totalRevenue - totalExpensesPaid;
-  // Resultado Líquido = Receita Total - Despesas Totais
   const netResult = (totalRevenue + pendingRevenue) - totalExpenses;
   const margin = (totalRevenue + pendingRevenue) > 0
     ? (netResult / (totalRevenue + pendingRevenue)) * 100
@@ -112,7 +117,13 @@ export default function FinDRE() {
     // Receitas
     { label: "RECEITA BRUTA TOTAL", value: totalRevenue + pendingRevenue, bold: true, positive: true },
     ...(totalRevenuePDV > 0 ? [
-      { label: "Vendas PDV (Caixa)", value: totalRevenuePDV, indent: 1, positive: true, note: "Importado do PDV" },
+      {
+        label: "Vendas PDV (Caixa)",
+        value: totalRevenuePDV,
+        indent: 1,
+        positive: true,
+        note: fonteInove ? "PDV INOVE — tempo real" : "Importado do PDV",
+      },
     ] : []),
     ...(totalRevenueFin > 0 || pendingRevenueFin > 0 ? [
       { label: "Receitas Financeiras Recebidas", value: totalRevenueFin, indent: 1, positive: true },
@@ -168,13 +179,29 @@ export default function FinDRE() {
         </div>
       </div>
 
-      {/* Banner PDV */}
-      {totalRevenuePDV > 0 && (
-        <div className="flex items-center gap-3 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-sm">
-          <ShoppingCart className="w-4 h-4 text-indigo-500 flex-shrink-0" />
-          <span className="text-indigo-700 dark:text-indigo-300">
+      {/* Banner PDV INOVE */}
+      {!inoveLoading && totalRevenuePDV > 0 && (
+        <div className={cn(
+          "flex items-center gap-3 p-3 rounded-lg text-sm",
+          fonteInove
+            ? "bg-emerald-500/10 border border-emerald-500/20"
+            : "bg-indigo-500/10 border border-indigo-500/20"
+        )}>
+          {fonteInove ? (
+            <Zap className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+          ) : (
+            <ShoppingCart className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+          )}
+          <span className={fonteInove ? "text-emerald-700 dark:text-emerald-300" : "text-indigo-700 dark:text-indigo-300"}>
             Vendas PDV de <strong>{MONTHS[month]}/{year}</strong> incluídas: <strong>{fmtBRL(totalRevenuePDV)}</strong>
-            <span className="text-xs ml-2 opacity-70">(custo das mercadorias já está nas despesas)</span>
+            {fonteInove && (
+              <span className="ml-2 text-xs px-1.5 py-0.5 bg-emerald-500/20 rounded text-emerald-600 dark:text-emerald-400 font-medium">
+                PDV INOVE
+              </span>
+            )}
+            {!fonteInove && (
+              <span className="text-xs ml-2 opacity-70">(dados locais — INOVE indisponível)</span>
+            )}
           </span>
           <Link to="/gerencial" className="ml-auto text-xs text-indigo-500 underline underline-offset-2 hover:text-indigo-700">
             Ver relatório gerencial →
@@ -182,11 +209,11 @@ export default function FinDRE() {
         </div>
       )}
 
-      {totalRevenuePDV === 0 && (
+      {!inoveLoading && totalRevenuePDV === 0 && (
         <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/50 text-sm">
           <ShoppingCart className="w-4 h-4 text-muted-foreground flex-shrink-0" />
           <span className="text-muted-foreground">
-            Nenhuma venda PDV confirmada para <strong>{MONTHS[month]}/{year}</strong>.
+            Nenhuma venda PDV encontrada para <strong>{MONTHS[month]}/{year}</strong>.
           </span>
           <Link to="/sales-import" className="ml-auto text-xs text-primary underline underline-offset-2">
             Importar vendas →
