@@ -392,17 +392,26 @@ function Products() {
     const product = products?.find((p) => p.id === quickStockProductId);
     if (!product) return;
     const newStock = parseInt(quickStockForm.newStock);
+    if (isNaN(newStock)) return;
     const diff = newStock - product.currentStock;
     if (diff === 0) { setQuickStockOpen(false); return; }
-    stockMutation.mutate({
-      productId: quickStockProductId,
-      type: "adjustment",
-      quantity: Math.abs(diff),
-      previousStock: product.currentStock,
-      newStock,
-      reason: quickStockForm.reason || "Ajuste manual",
-    });
-    setQuickStockOpen(false);
+    stockMutation.mutate(
+      {
+        productId: quickStockProductId,
+        type: "adjustment",
+        quantity: Math.abs(diff),
+        previousStock: product.currentStock,
+        newStock,
+        reason: quickStockForm.reason || "Ajuste manual",
+      },
+      {
+        onSuccess: () => {
+          setQuickStockOpen(false);
+          toast.success(`Estoque atualizado para ${newStock} unidades!`);
+        },
+        onError: (err) => toast.error(err.message),
+      }
+    );
   }
 
   function handleSubmit(e: React.FormEvent) {

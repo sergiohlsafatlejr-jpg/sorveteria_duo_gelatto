@@ -442,11 +442,19 @@ export async function createStockMovement(data: InsertStockMovement): Promise<vo
   const db = await getDb();
   if (!db) return;
   await db.insert(stockMovements).values(data);
-  const delta = data.type === "in" || data.type === "adjustment" ? data.quantity : -data.quantity;
-  await db
-    .update(products)
-    .set({ currentStock: sql`currentStock + ${delta}` })
-    .where(eq(products.id, data.productId));
+  if (data.type === "adjustment") {
+    // Para ajuste, define o valor exato do estoque (newStock)
+    await db
+      .update(products)
+      .set({ currentStock: data.newStock })
+      .where(eq(products.id, data.productId));
+  } else {
+    const delta = data.type === "in" ? data.quantity : -data.quantity;
+    await db
+      .update(products)
+      .set({ currentStock: sql`currentStock + ${delta}` })
+      .where(eq(products.id, data.productId));
+  }
 }
 
 export async function getStockMovements(productId?: number): Promise<StockMovement[]> {
