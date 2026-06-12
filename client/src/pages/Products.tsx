@@ -37,10 +37,12 @@ import {
   Loader2,
   Package,
   Plus,
+  RefreshCw,
   Search,
   ShoppingCart,
   Trash2,
   TrendingUp,
+  Pencil,
 } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
@@ -67,6 +69,11 @@ type StockForm = {
   purchaseDate: string;
   supplier: string;
   unitCost: string;
+};
+
+type QuickStockForm = {
+  newStock: string;
+  reason: string;
 };
 
 const emptyForm: ProductForm = {
@@ -151,7 +158,9 @@ function InoveStockTab() {
   const [lowStock, setLowStock] = useState(false);
   const pageSize = 50;
 
-  const { data, isLoading } = trpc.inove.getStock.useQuery({
+  const utils = trpc.useUtils();
+
+  const { data, isLoading, isFetching } = trpc.inove.getStock.useQuery({
     page,
     pageSize,
     search: search || undefined,
@@ -192,6 +201,16 @@ function InoveStockTab() {
           </div>
           <Button type="submit" variant="outline" size="sm">Buscar</Button>
         </form>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 shrink-0"
+          onClick={() => utils.inove.getStock.invalidate()}
+          disabled={isFetching}
+        >
+          {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Atualizar
+        </Button>
         <Select value={grupo} onValueChange={(v) => { setGrupo(v === "__all__" ? "" : v); setPage(1); }}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="Todos os grupos" />
@@ -297,6 +316,11 @@ function Products() {
   const [stockProductId, setStockProductId] = useState<number | null>(null);
   const [stockForm, setStockForm] = useState<StockForm>(emptyStockForm);
 
+  // Modal de ajuste rápido de estoque
+  const [quickStockOpen, setQuickStockOpen] = useState(false);
+  const [quickStockProductId, setQuickStockProductId] = useState<number | null>(null);
+  const [quickStockForm, setQuickStockForm] = useState<QuickStockForm>({ newStock: "", reason: "" });
+
   // Filtro do relatório mensal
   const now = new Date();
   const [reportYear, setReportYear] = useState(now.getFullYear());
@@ -349,10 +373,36 @@ function Products() {
     setOpen(true);
   }
 
-  function openStock(productId: number) {
+  function openStock(productId: number, type: "in" | "out" = "in") {
     setStockProductId(productId);
-    setStockForm({ ...emptyStockForm, purchaseDate: new Date().toISOString().split("T")[0] });
+    setStockForm({ ...emptyStockForm, type, purchaseDate: new Date().toISOString().split("T")[0] });
     setStockOpen(true);
+  }
+
+  function openQuickStock(productId: number) {
+    const product = products?.find((p) => p.id === productId);
+    setQuickStockProductId(productId);
+    setQuickStockForm({ newStock: String(product?.currentStock ?? 0), reason: "Ajuste manual" });
+    setQuickStockOpen(true);
+  }
+
+  function handleQuickStockSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!quickStockProductId) return;
+    const product = products?.find((p) => p.id === quickStockProductId);
+    if (!product) return;
+    const newStock = parseInt(quickStockForm.newStock);
+    const diff = newStock - product.currentStock;
+    if (diff === 0) { setQuickStockOpen(false); return; }
+    stockMutation.mutate({
+      productId: quickStockProductId,
+      type: "adjustment",
+      quantity: Math.abs(diff),
+      previousStock: product.currentStock,
+      newStock,
+      reason: quickStockForm.reason || "Ajuste manual",
+    });
+    setQuickStockOpen(false);
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -507,8 +557,14 @@ function Products() {
                             {p.sku && <p className="text-xs text-muted-foreground">SKU: {p.sku}</p>}
                           </div>
                           <div className="flex gap-1 shrink-0 ml-2">
-                            <Button size="icon" variant="ghost" className="h-7 w-7" title="Registrar entrada" onClick={() => openStock(p.id)}>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="Registrar entrada" onClick={() => openStock(p.id, "in")}>
                               <ArrowUp className="h-3.5 w-3.5 text-green-600" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="Registrar saída" onClick={() => openStock(p.id, "out")}>
+                              <ArrowDown className="h-3.5 w-3.5 text-red-500" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="Ajustar estoque" onClick={() => openQuickStock(p.id)}>
+                              <Pencil className="h-3.5 w-3.5 text-blue-500" />
                             </Button>
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(p)}>
                               <Edit className="h-3.5 w-3.5" />
@@ -773,6 +829,73 @@ function Products() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal: Ajuste Rápido de Estoque ── */}
+      <Dialog open={quickStockOpen} onOpenChange={setQuickStockOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-blue-500" />
+              Ajustar Estoque
+            </DialogTitle>
+          </DialogHeader>
+          {quickStockProductId && (() => {
+            const product = products?.find((p) => p.id === quickStockProductId);
+            return (
+              <form onSubmit={handleQuickStockSubmit} className="space-y-4 mt-2">
+                {product && (
+                  <div className="bg-muted/30 rounded-lg p-3 text-sm">
+                    <p className="font-semibold">{product.name}</p>
+                    <p className="text-muted-foreground mt-0.5">
+                      Estoque atual: <strong className={product.currentStock <= product.minStock ? "text-amber-600" : "text-emerald-600"}>{product.currentStock} {product.unit}</strong>
+                      {product.currentStock <= product.minStock && (
+                        <span className="ml-2 text-amber-600 text-xs">(abaixo do mínimo: {product.minStock})</span>
+                      )}
+                    </p>
+                  </div>
+                )}
+                <div>
+                  <Label>Novo valor de estoque *</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={quickStockForm.newStock}
+                    onChange={(e) => setQuickStockForm((f) => ({ ...f, newStock: e.target.value }))}
+                    required
+                    autoFocus
+                    className="text-lg font-bold mt-1"
+                  />
+                  {quickStockForm.newStock !== "" && product && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {parseInt(quickStockForm.newStock) > product.currentStock
+                        ? <span className="text-green-600">+{parseInt(quickStockForm.newStock) - product.currentStock} unidades</span>
+                        : parseInt(quickStockForm.newStock) < product.currentStock
+                        ? <span className="text-red-500">-{product.currentStock - parseInt(quickStockForm.newStock)} unidades</span>
+                        : <span className="text-muted-foreground">Sem alteração</span>
+                      }
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <Label>Motivo</Label>
+                  <Input
+                    value={quickStockForm.reason}
+                    onChange={(e) => setQuickStockForm((f) => ({ ...f, reason: e.target.value }))}
+                    placeholder="Ex: Contagem física, Ajuste de inventário..."
+                  />
+                </div>
+                <div className="flex gap-2 justify-end pt-1">
+                  <Button type="button" variant="outline" onClick={() => setQuickStockOpen(false)}>Cancelar</Button>
+                  <Button type="submit" disabled={stockMutation.isPending} className="gap-2">
+                    {stockMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
+                    Salvar Estoque
+                  </Button>
+                </div>
+              </form>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
