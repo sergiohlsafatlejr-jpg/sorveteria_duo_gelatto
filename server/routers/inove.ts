@@ -2460,7 +2460,7 @@ export const inoveRouter = router({
 
       const pool = await createInovePool(config);
       try {
-        // Vendas dos últimos N dias por produto no INOVE
+        // Query única: vendas + estoque atual do INOVE + custo do produto
         const vendasRes = await pool.request().query(`
           SELECT
             p.PRODUTO as produtoId,
@@ -2468,14 +2468,19 @@ export const inoveRouter = router({
             p.PRO_CODIGO as codPdv,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtdTotal,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamentoTotal,
-            COUNT(DISTINCT CAST(v.VEN_DATA_FIM as date)) as diasComVenda
+            COUNT(DISTINCT CAST(v.VEN_DATA_FIM as date)) as diasComVenda,
+            CAST(ISNULL(
+              (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
+               WHERE PRODUTO = p.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC), 0
+            ) as float) as estoqueAtual,
+            CAST(ISNULL(p.PRO_PRECO_CUSTO, 0) as float) as custoProduto
           FROM ITENS_VENDAS iv
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2
             AND CAST(v.VEN_DATA_FIM as date) >= CAST(DATEADD(day, -${input.diasAnalise}, GETDATE()) as date)
             AND CAST(v.VEN_DATA_FIM as date) < CAST(GETDATE() as date)
-          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_PRECO_CUSTO
           ORDER BY qtdTotal DESC
         `);
 
@@ -2488,11 +2493,11 @@ export const inoveRouter = router({
 
         await pool.close();
 
-        type VendaRow = { produtoId: number; nome: string; codPdv: string; qtdTotal: number; faturamentoTotal: number; diasComVenda: number };
+        type VendaRow = { produtoId: number; nome: string; codPdv: string; qtdTotal: number; faturamentoTotal: number; diasComVenda: number; estoqueAtual: number; custoProduto: number };
         const vendas = vendasRes.recordset as VendaRow[];
         const periodo = periodoRes.recordset[0] as { dataInicio: string; dataFim: string };
 
-        // Criar mapa de produtos locais por nome (fuzzy) e por SKU/barcode
+        // Criar mapa de produtos locais por nome para buscar estoque mínimo
         const localMap = new Map<string, typeof localProducts[0]>();
         for (const lp of localProducts) {
           if (lp.name) localMap.set(lp.name.toLowerCase().trim(), lp);
@@ -2506,23 +2511,23 @@ export const inoveRouter = router({
           const necessidadeProjecao = mediaDiaria * input.diasProjecao;
           const necessidadeComSeguranca = necessidadeProjecao * (1 + input.fatorSeguranca);
 
-          // Tentar encontrar o produto local pelo nome
+          // Estoque real vem do INOVE diretamente
+          const estoqueAtual = Number(v.estoqueAtual);
+          // Custo do produto vem do INOVE; se zero, tenta o local
           const nomeLower = (v.nome || '').toLowerCase().trim();
           const produtoLocal = localMap.get(nomeLower) ||
             localProducts.find(lp => lp.name && nomeLower.includes(lp.name.toLowerCase().trim().substring(0, 6))) ||
             null;
-
-          const estoqueAtual = produtoLocal ? produtoLocal.currentStock : null;
           const estoqueMinimo = produtoLocal ? produtoLocal.minStock : null;
-          const custoProduto = produtoLocal ? Number(produtoLocal.costPrice) : null;
+          const custoProduto = Number(v.custoProduto) > 0
+            ? Number(v.custoProduto)
+            : (produtoLocal ? Number(produtoLocal.costPrice) : null);
 
-          const sugestaoQtd = estoqueAtual !== null
-            ? Math.max(0, Math.ceil(necessidadeComSeguranca - estoqueAtual))
-            : Math.ceil(necessidadeComSeguranca);
+          const sugestaoQtd = Math.max(0, Math.ceil(necessidadeComSeguranca - estoqueAtual));
 
           const prioridade: 'alta' | 'media' | 'baixa' =
-            estoqueAtual !== null && estoqueAtual <= 0 ? 'alta' :
-            estoqueAtual !== null && estoqueMinimo !== null && estoqueAtual <= estoqueMinimo ? 'alta' :
+            estoqueAtual <= 0 ? 'alta' :
+            estoqueMinimo !== null && estoqueAtual <= estoqueMinimo ? 'alta' :
             sugestaoQtd > 0 ? 'media' : 'baixa';
 
           return {
