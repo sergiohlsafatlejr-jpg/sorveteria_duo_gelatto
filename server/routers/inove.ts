@@ -2428,4 +2428,147 @@ export const inoveRouter = router({
         return { meses, anoAtual, anoAnterior, totalAtual, totalAnterior, totalVarPct, fonte: 'local' as const };
       }
     }),
+
+  // ── Sugestão de Compras ────────────────────────────────────────────────────
+  getSugestaoCompras: protectedProcedure
+    .input(z.object({
+      diasAnalise: z.number().int().min(7).max(30).default(7),
+      diasProjecao: z.number().int().min(7).max(30).default(7),
+      fatorSeguranca: z.number().min(0).max(1).default(0.2), // 20% extra de segurança
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error('DB unavailable');
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (connRows.length === 0 || !connRows[0].active) {
+        throw new Error('Conector INOVE inativo. Configure e ative o conector INOVE nas configurações.');
+      }
+      const config = connRows[0];
+
+      // Buscar estoque local do MySQL
+      const { products } = await import('../../drizzle/schema');
+      const localProducts = await db.select({
+        id: products.id,
+        name: products.name,
+        sku: products.sku,
+        barcode: products.barcode,
+        currentStock: products.currentStock,
+        minStock: products.minStock,
+        unit: products.unit,
+        costPrice: products.costPrice,
+      }).from(products).where(eq(products.active, true));
+
+      const pool = await createInovePool(config);
+      try {
+        // Vendas dos últimos N dias por produto no INOVE
+        const vendasRes = await pool.request().query(`
+          SELECT
+            p.PRODUTO as produtoId,
+            p.PRO_NOME as nome,
+            p.PRO_CODIGO as codPdv,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtdTotal,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamentoTotal,
+            COUNT(DISTINCT CAST(v.VEN_DATA_FIM as date)) as diasComVenda
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= CAST(DATEADD(day, -${input.diasAnalise}, GETDATE()) as date)
+            AND CAST(v.VEN_DATA_FIM as date) < CAST(GETDATE() as date)
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO
+          ORDER BY qtdTotal DESC
+        `);
+
+        // Período de análise (datas de início e fim)
+        const periodoRes = await pool.request().query(`
+          SELECT
+            FORMAT(CAST(DATEADD(day, -${input.diasAnalise}, GETDATE()) as date), 'yyyy-MM-dd') as dataInicio,
+            FORMAT(CAST(DATEADD(day, -1, GETDATE()) as date), 'yyyy-MM-dd') as dataFim
+        `);
+
+        await pool.close();
+
+        type VendaRow = { produtoId: number; nome: string; codPdv: string; qtdTotal: number; faturamentoTotal: number; diasComVenda: number };
+        const vendas = vendasRes.recordset as VendaRow[];
+        const periodo = periodoRes.recordset[0] as { dataInicio: string; dataFim: string };
+
+        // Criar mapa de produtos locais por nome (fuzzy) e por SKU/barcode
+        const localMap = new Map<string, typeof localProducts[0]>();
+        for (const lp of localProducts) {
+          if (lp.name) localMap.set(lp.name.toLowerCase().trim(), lp);
+          if (lp.sku) localMap.set(lp.sku.toLowerCase().trim(), lp);
+          if (lp.barcode) localMap.set(lp.barcode.toLowerCase().trim(), lp);
+        }
+
+        // Calcular sugestão de compra para cada produto
+        const sugestoes = vendas.map(v => {
+          const mediaDiaria = v.qtdTotal / input.diasAnalise;
+          const necessidadeProjecao = mediaDiaria * input.diasProjecao;
+          const necessidadeComSeguranca = necessidadeProjecao * (1 + input.fatorSeguranca);
+
+          // Tentar encontrar o produto local pelo nome
+          const nomeLower = (v.nome || '').toLowerCase().trim();
+          const produtoLocal = localMap.get(nomeLower) ||
+            localProducts.find(lp => lp.name && nomeLower.includes(lp.name.toLowerCase().trim().substring(0, 6))) ||
+            null;
+
+          const estoqueAtual = produtoLocal ? produtoLocal.currentStock : null;
+          const estoqueMinimo = produtoLocal ? produtoLocal.minStock : null;
+          const custoProduto = produtoLocal ? Number(produtoLocal.costPrice) : null;
+
+          const sugestaoQtd = estoqueAtual !== null
+            ? Math.max(0, Math.ceil(necessidadeComSeguranca - estoqueAtual))
+            : Math.ceil(necessidadeComSeguranca);
+
+          const prioridade: 'alta' | 'media' | 'baixa' =
+            estoqueAtual !== null && estoqueAtual <= 0 ? 'alta' :
+            estoqueAtual !== null && estoqueMinimo !== null && estoqueAtual <= estoqueMinimo ? 'alta' :
+            sugestaoQtd > 0 ? 'media' : 'baixa';
+
+          return {
+            produtoId: Number(v.produtoId),
+            nome: v.nome,
+            codPdv: v.codPdv,
+            qtdVendidaSemana: Number(v.qtdTotal),
+            diasComVenda: Number(v.diasComVenda),
+            mediaDiaria: Math.round(mediaDiaria * 100) / 100,
+            necessidadeProjecao: Math.ceil(necessidadeProjecao),
+            necessidadeComSeguranca: Math.ceil(necessidadeComSeguranca),
+            estoqueAtual,
+            estoqueMinimo,
+            sugestaoCompra: sugestaoQtd,
+            custoProduto,
+            custoTotal: custoProduto !== null ? Math.round(sugestaoQtd * custoProduto * 100) / 100 : null,
+            prioridade,
+            produtoLocalId: produtoLocal?.id ?? null,
+          };
+        });
+
+        // Ordenar por prioridade e depois por quantidade sugerida
+        const ordemPrioridade = { alta: 0, media: 1, baixa: 2 };
+        sugestoes.sort((a, b) => {
+          const pa = ordemPrioridade[a.prioridade];
+          const pb = ordemPrioridade[b.prioridade];
+          if (pa !== pb) return pa - pb;
+          return b.sugestaoCompra - a.sugestaoCompra;
+        });
+
+        const totalCustoEstimado = sugestoes.reduce((s, x) => s + (x.custoTotal ?? 0), 0);
+        const totalItensParaComprar = sugestoes.filter(x => x.sugestaoCompra > 0).length;
+
+        return {
+          sugestoes,
+          periodo,
+          diasAnalise: input.diasAnalise,
+          diasProjecao: input.diasProjecao,
+          fatorSeguranca: input.fatorSeguranca,
+          totalCustoEstimado,
+          totalItensParaComprar,
+          totalProdutosAnalisados: vendas.length,
+        };
+      } catch (err) {
+        await pool.close().catch(() => {});
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
 });
