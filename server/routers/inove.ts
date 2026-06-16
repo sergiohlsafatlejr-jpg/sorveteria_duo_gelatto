@@ -2473,14 +2473,14 @@ export const inoveRouter = router({
               (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
                WHERE PRODUTO = p.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC), 0
             ) as float) as estoqueAtual,
-            CAST(ISNULL(p.PRO_PRECO_CUSTO, 0) as float) as custoProduto
+            CAST(ISNULL(p.PRO_CUSTO, 0) as float) as custoProduto
           FROM ITENS_VENDAS iv
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2
             AND CAST(v.VEN_DATA_FIM as date) >= CAST(DATEADD(day, -${input.diasAnalise}, GETDATE()) as date)
             AND CAST(v.VEN_DATA_FIM as date) < CAST(GETDATE() as date)
-          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_PRECO_CUSTO
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO
           ORDER BY qtdTotal DESC
         `);
 
