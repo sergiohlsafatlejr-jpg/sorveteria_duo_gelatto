@@ -217,6 +217,13 @@ export default function FinPayables() {
   const totalPaid = data.filter(t => t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
   const totalOverdue = data.filter(t => !t.isPaid && new Date(t.dueDate) < now).reduce((s, t) => s + Number(t.amount), 0);
 
+  // Totais dos itens selecionados
+  const selectedItems = data.filter(t => selectedIds.has(t.id));
+  const selectedTotal = selectedItems.reduce((s, t) => s + Number(t.amount), 0);
+  const selectedPaid = selectedItems.filter(t => t.isPaid).reduce((s, t) => s + Number(t.amount), 0);
+  const selectedPending = selectedItems.filter(t => !t.isPaid && new Date(t.dueDate) >= now).reduce((s, t) => s + Number(t.amount), 0);
+  const selectedOverdue = selectedItems.filter(t => !t.isPaid && new Date(t.dueDate) < now).reduce((s, t) => s + Number(t.amount), 0);
+
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
   const bankMap = new Map(banks.map(b => [b.id, b.name]));
   const costMap = new Map(costs.map(c => [c.id, c.name]));
@@ -231,17 +238,7 @@ export default function FinPayables() {
           <p className="text-sm text-muted-foreground">Gerencie seus lançamentos de despesas</p>
         </div>
         <div className="flex gap-2">
-          {selectedIds.size > 0 && (
-            <Button
-              variant="outline"
-              onClick={() => duplicateMut.mutate({ ids: Array.from(selectedIds) })}
-              disabled={duplicateMut.isPending}
-              className="gap-2 border-blue-500/50 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
-            >
-              <CopyPlus className="h-4 w-4" />
-              Duplicar {selectedIds.size} para próximo mês
-            </Button>
-          )}
+
           {data.length > 0 && (
             <Button
               variant="outline"
@@ -296,6 +293,63 @@ export default function FinPayables() {
         categories={categories}
         banks={banks}
       />
+
+      {/* Barra de totalizador de seleção */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-0 z-20 rounded-xl border border-blue-500/40 bg-blue-50 dark:bg-blue-950/60 shadow-lg px-5 py-3 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <CheckSquare className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+              {selectedIds.size} {selectedIds.size === 1 ? "item selecionado" : "itens selecionados"}
+            </span>
+          </div>
+          <div className="h-4 w-px bg-blue-300/60" />
+          <div className="flex flex-wrap gap-4 flex-1">
+            <div className="text-center">
+              <p className="text-xs text-blue-600/70 dark:text-blue-400/70 font-medium uppercase tracking-wide">Total Selecionado</p>
+              <p className="text-lg font-bold text-blue-700 dark:text-blue-200">{fmtBRL(selectedTotal)}</p>
+            </div>
+            {selectedPaid > 0 && (
+              <div className="text-center">
+                <p className="text-xs text-emerald-600/70 font-medium uppercase tracking-wide">Pago</p>
+                <p className="text-base font-semibold text-emerald-600">{fmtBRL(selectedPaid)}</p>
+              </div>
+            )}
+            {selectedPending > 0 && (
+              <div className="text-center">
+                <p className="text-xs text-amber-600/70 font-medium uppercase tracking-wide">Pendente</p>
+                <p className="text-base font-semibold text-amber-600">{fmtBRL(selectedPending)}</p>
+              </div>
+            )}
+            {selectedOverdue > 0 && (
+              <div className="text-center">
+                <p className="text-xs text-red-600/70 font-medium uppercase tracking-wide">Vencido</p>
+                <p className="text-base font-semibold text-red-600">{fmtBRL(selectedOverdue)}</p>
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2 ml-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 border-blue-400/50 text-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900"
+              onClick={() => duplicateMut.mutate({ ids: Array.from(selectedIds) })}
+              disabled={duplicateMut.isPending}
+            >
+              <CopyPlus className="h-3.5 w-3.5" />
+              Duplicar para próximo mês
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Limpar seleção
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div className="rounded-xl border border-border/50 overflow-hidden">
