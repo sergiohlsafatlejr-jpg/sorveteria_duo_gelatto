@@ -1,11 +1,13 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TrendingDown, TrendingUp, ShoppingCart, Zap } from "lucide-react";
+import { TrendingDown, TrendingUp, ShoppingCart, Zap, FileSpreadsheet, FileText } from "lucide-react";
 import { Link } from "wouter";
+import * as XLSX from "xlsx";
 
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -32,14 +34,11 @@ interface DRERow {
 export default function FinDRE() {
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(currentYear);
+  const printRef = useRef<HTMLDivElement>(null);
 
   const dateFrom = useMemo(() => new Date(year, month, 1), [year, month]);
   const dateTo = useMemo(() => new Date(year, month + 1, 0, 23, 59, 59), [year, month]);
 
-  // Mês no formato YYYY-MM para busca nas vendas PDV
-  const referenceMonth = `${year}-${String(month + 1).padStart(2, "0")}`;
-
-  // Datas no formato YYYY-MM-DD para o INOVE
   const fromStr = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const toStr = `${year}-${String(month + 1).padStart(2, "0")}-${new Date(year, month + 1, 0).getDate().toString().padStart(2, "0")}`;
 
@@ -47,7 +46,6 @@ export default function FinDRE() {
   const { data: receivables = [] } = trpc.fin.receivables.list.useQuery({ dateFrom, dateTo });
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
 
-  // Dados de vendas do INOVE (fonte primária de receita)
   const { data: inoveData, isLoading: inoveLoading } = trpc.inove.getFinancialSummaryInove.useQuery(
     { from: fromStr, to: toStr },
     { retry: false }
@@ -55,11 +53,9 @@ export default function FinDRE() {
 
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
 
-  // ── Receita PDV (INOVE — fonte primária) ─────────────────────────────────
   const totalRevenuePDV = inoveData?.totalRevenue ?? 0;
   const fonteInove = inoveData?.fonte === "inove";
 
-  // ── Receitas Financeiras (Contas a Receber) ───────────────────────────────
   const totalRevenueFin = receivables
     .filter(r => r.isReceived)
     .reduce((s, r) => s + Number(r.amount), 0);
@@ -67,11 +63,9 @@ export default function FinDRE() {
     .filter(r => !r.isReceived)
     .reduce((s, r) => s + Number(r.amount), 0);
 
-  // ── Receita Total Combinada ───────────────────────────────────────────────
   const totalRevenue = totalRevenuePDV + totalRevenueFin;
   const pendingRevenue = pendingRevenueFin;
 
-  // ── Despesas (Contas a Pagar — já incluem custo de mercadorias via NF-e) ──
   const expensesByCategory = new Map<string, { paid: number; pending: number }>();
   transactions.forEach(t => {
     const cat = t.categoryId
@@ -94,14 +88,12 @@ export default function FinDRE() {
     .reduce((s, t) => s + Number(t.amount), 0);
   const totalExpenses = totalExpensesPaid + totalExpensesPending;
 
-  // ── Cálculos do DRE ───────────────────────────────────────────────────────
   const grossProfit = totalRevenue - totalExpensesPaid;
   const netResult = (totalRevenue + pendingRevenue) - totalExpenses;
   const margin = (totalRevenue + pendingRevenue) > 0
     ? (netResult / (totalRevenue + pendingRevenue)) * 100
     : 0;
 
-  // ── Linhas do DRE ─────────────────────────────────────────────────────────
   const categoryRows: DRERow[] = Array.from(expensesByCategory.entries()).flatMap(([cat, vals]) => {
     const rows: DRERow[] = [
       { label: cat, value: vals.paid + vals.pending, indent: 2 },
@@ -114,7 +106,6 @@ export default function FinDRE() {
   });
 
   const dreRows: DRERow[] = [
-    // Receitas
     { label: "RECEITA BRUTA TOTAL", value: totalRevenue + pendingRevenue, bold: true, positive: true },
     ...(totalRevenuePDV > 0 ? [
       {
@@ -130,13 +121,11 @@ export default function FinDRE() {
       { label: "Receitas Financeiras Pendentes", value: pendingRevenueFin, indent: 1 },
     ] : []),
     { label: "", value: 0, separator: true },
-    // Despesas (incluem custo de mercadorias)
     { label: "(-) DESPESAS TOTAIS", value: totalExpenses, bold: true, negative: true, note: "Inclui custo de mercadorias" },
     { label: "Despesas Pagas", value: totalExpensesPaid, indent: 1, negative: true },
     { label: "Despesas Pendentes", value: totalExpensesPending, indent: 1 },
     ...categoryRows,
     { label: "", value: 0, separator: true },
-    // Resultado
     { label: "LUCRO BRUTO", value: grossProfit, bold: true, positive: grossProfit >= 0, negative: grossProfit < 0 },
     { label: "(Receitas recebidas − Despesas pagas)", value: 0, indent: 1 },
     { label: "", value: 0, separator: true },
@@ -144,8 +133,148 @@ export default function FinDRE() {
     { label: `Margem Líquida: ${margin.toFixed(1)}%`, value: netResult, indent: 1, positive: netResult >= 0, negative: netResult < 0 },
   ];
 
+  // ── Exportar Excel ────────────────────────────────────────────────────────
+  const handleExportExcel = () => {
+    const periodo = `${MONTHS[month]} ${year}`;
+    const fonte = fonteInove ? "PDV INOVE — tempo real" : "Dados locais";
+
+    const wsData: (string | number)[][] = [
+      [`DRE — Demonstrativo de Resultado — ${periodo}`],
+      [`Fonte: ${fonte}`],
+      [`Gerado em: ${new Date().toLocaleString("pt-BR")}`],
+      [],
+      ["Descrição", "Valor (R$)", "Observação"],
+    ];
+
+    dreRows.forEach(row => {
+      if (row.separator || !row.label) return;
+      const indent = "  ".repeat(row.indent ?? 0);
+      const sinal = row.negative ? -Math.abs(row.value) : row.value;
+      wsData.push([`${indent}${row.label}`, row.value !== 0 ? sinal : "", row.note ?? ""]);
+    });
+
+    wsData.push([]);
+    wsData.push(["RESULTADO DO PERÍODO", netResult, netResult >= 0 ? "Lucro" : "Prejuízo"]);
+    wsData.push([`Margem Líquida`, `${margin.toFixed(1)}%`, ""]);
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Largura das colunas
+    ws["!cols"] = [{ wch: 45 }, { wch: 18 }, { wch: 30 }];
+
+    // Negrito no título
+    if (ws["A1"]) ws["A1"].s = { font: { bold: true, sz: 14 } };
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `DRE ${MONTHS[month]} ${year}`);
+    XLSX.writeFile(wb, `DRE_${MONTHS[month]}_${year}.xlsx`);
+  };
+
+  // ── Exportar PDF (via impressão do browser) ───────────────────────────────
+  const handleExportPDF = () => {
+    const periodo = `${MONTHS[month]} ${year}`;
+    const fonte = fonteInove ? "PDV INOVE — tempo real" : "Dados locais";
+    const geradoEm = new Date().toLocaleString("pt-BR");
+
+    const rowsHtml = dreRows
+      .filter(r => !r.separator)
+      .map(r => {
+        if (!r.label) return "";
+        const indent = (r.indent ?? 0) * 20;
+        const color = r.positive ? "#16a34a" : r.negative ? "#dc2626" : "#1f2937";
+        const fontWeight = r.bold ? "bold" : "normal";
+        const valStr = r.value !== 0
+          ? `${r.negative ? "-" : ""}${fmtBRL(Math.abs(r.value))}`
+          : "";
+        return `
+          <tr style="border-bottom:1px solid #e5e7eb;">
+            <td style="padding:6px 8px;padding-left:${8 + indent}px;font-weight:${fontWeight};color:${color};font-size:12px;">
+              ${r.label}${r.note ? ` <span style="font-size:10px;color:#9ca3af;font-style:italic;">(${r.note})</span>` : ""}
+            </td>
+            <td style="padding:6px 8px;text-align:right;font-weight:${fontWeight};color:${color};font-size:12px;white-space:nowrap;">
+              ${valStr}
+            </td>
+          </tr>`;
+      }).join("");
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8"/>
+        <title>DRE — ${periodo}</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: Arial, sans-serif; color: #1f2937; padding: 32px; }
+          h1 { font-size: 20px; font-weight: bold; margin-bottom: 4px; }
+          .sub { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
+          .summary { display: flex; gap: 16px; margin-bottom: 20px; }
+          .card { flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; text-align: center; }
+          .card .lbl { font-size: 11px; color: #6b7280; }
+          .card .val { font-size: 16px; font-weight: bold; }
+          table { width: 100%; border-collapse: collapse; }
+          thead th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 12px; border-bottom: 2px solid #d1d5db; }
+          thead th:last-child { text-align: right; }
+          .footer-row td { padding: 10px 8px; font-weight: bold; font-size: 14px; border-top: 2px solid #d1d5db; }
+          .footer-row td:last-child { text-align: right; }
+          @media print { body { padding: 16px; } }
+        </style>
+      </head>
+      <body>
+        <h1>DRE — Demonstrativo de Resultado</h1>
+        <div class="sub">Período: ${periodo} &nbsp;|&nbsp; Fonte: ${fonte} &nbsp;|&nbsp; Gerado em: ${geradoEm}</div>
+
+        <div class="summary">
+          <div class="card">
+            <div class="lbl">Receita Total</div>
+            <div class="val" style="color:#16a34a;">${fmtBRL(totalRevenue + pendingRevenue)}</div>
+          </div>
+          <div class="card">
+            <div class="lbl">Despesas Totais</div>
+            <div class="val" style="color:#dc2626;">${fmtBRL(totalExpenses)}</div>
+          </div>
+          <div class="card">
+            <div class="lbl">Resultado Líquido</div>
+            <div class="val" style="color:${netResult >= 0 ? "#16a34a" : "#dc2626"};">${fmtBRL(netResult)}</div>
+          </div>
+          <div class="card">
+            <div class="lbl">Margem Líquida</div>
+            <div class="val" style="color:${margin >= 20 ? "#16a34a" : margin >= 10 ? "#d97706" : "#dc2626"};">${margin.toFixed(1)}%</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Descrição</th>
+              <th style="text-align:right;">Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+          <tfoot>
+            <tr class="footer-row">
+              <td>RESULTADO DO PERÍODO</td>
+              <td style="color:${netResult >= 0 ? "#16a34a" : "#dc2626"};">${fmtBRL(netResult)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </body>
+      </html>`;
+
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => {
+      win.print();
+    }, 500);
+  };
+
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-6 space-y-5" ref={printRef}>
       <BackButton to="/fin/dashboard" />
 
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -153,7 +282,8 @@ export default function FinDRE() {
           <h1 className="text-2xl font-bold">DRE — Demonstrativo de Resultado</h1>
           <p className="text-sm text-muted-foreground">Análise financeira do período selecionado</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Filtros de período */}
           <div className="space-y-1">
             <Label className="text-xs">Mês</Label>
             <Select value={String(month)} onValueChange={v => setMonth(Number(v))}>
@@ -175,6 +305,30 @@ export default function FinDRE() {
                 {YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
               </SelectContent>
             </Select>
+          </div>
+          {/* Botões de exportação */}
+          <div className="space-y-1">
+            <Label className="text-xs opacity-0 select-none">Exportar</Label>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs border-green-500/40 text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-950/30"
+                onClick={handleExportExcel}
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                Excel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs border-red-500/40 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                onClick={handleExportPDF}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                PDF
+              </Button>
+            </div>
           </div>
         </div>
       </div>
