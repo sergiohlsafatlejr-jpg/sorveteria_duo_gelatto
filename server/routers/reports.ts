@@ -21,8 +21,9 @@ import {
   inoveConnectorConfig,
   salesImports,
   salesImportItems,
+  finDailyRevenue,
 } from "../../drizzle/schema";
-import { and, eq, sql, desc } from "drizzle-orm";
+import { and, eq, sql, desc, gte, lte } from "drizzle-orm";
 import * as mssql from "mssql";
 
 export const reportsRouter = router({
@@ -110,40 +111,64 @@ export const reportsRouter = router({
       const { month } = input;
       const [year, mon] = month.split("-").map(Number);
 
-      // ── 1. Receita real do INOVE ──────────────────────────────────────────
+      // ── 1. Receita real — usa finDailyRevenue (mesma base da Previsão de Faturamento) ──
+      // Fonte primária: faturamento diário real importado do INOVE via tela de Previsão
       let receitaInove = 0;
-      let fonteReceita: "inove" | "local" = "local";
-      try {
-        const connRows = await db.select().from(inoveConnectorConfig).limit(1);
-        if (connRows.length && connRows[0].active) {
-          const cfg = connRows[0];
-          const pool = await mssql.connect({
-            server: cfg.host,
-            port: cfg.port ?? 55444,
-            database: cfg.database,
-            user: cfg.username,
-            password: cfg.password,
-            options: { encrypt: false, trustServerCertificate: true },
-            connectionTimeout: 30000,
-            requestTimeout: 30000,
-          });
-          const res = await pool.request().query(`
-            SELECT CAST(COALESCE(SUM(v.VEN_TOTAL), 0) as float) as total
-            FROM VENDAS v
-            WHERE v.VEN_SITUACAO = 2
-              AND YEAR(v.VEN_DATA_FIM) = ${year}
-              AND MONTH(v.VEN_DATA_FIM) = ${mon}
-          `);
-          receitaInove = Number(res.recordset[0]?.total) || 0;
-          fonteReceita = "inove";
-          await pool.close();
-        }
-      } catch {
-        // fallback local
+      let fonteReceita: "previsao" | "inove" | "local" = "local";
+
+      const dateFrom = `${year}-${String(mon).padStart(2, "0")}-01`;
+      const daysInMonth = new Date(year!, mon!, 0).getDate();
+      const dateTo = `${year}-${String(mon).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+
+      // 1a. Tenta buscar da tabela finDailyRevenue (faturamento real importado do INOVE)
+      const dailyRows = await db
+        .select({ total: sql<number>`COALESCE(SUM(${finDailyRevenue.realAmount}), 0)` })
+        .from(finDailyRevenue)
+        .where(
+          and(
+            gte(finDailyRevenue.revenueDate, dateFrom),
+            lte(finDailyRevenue.revenueDate, dateTo)
+          )
+        );
+      receitaInove = Number(dailyRows[0]?.total) || 0;
+      if (receitaInove > 0) {
+        fonteReceita = "previsao";
       }
 
+      // 1b. Fallback: tenta buscar direto do SQL Server INOVE
       if (receitaInove === 0) {
-        // Fallback: busca nas importações locais
+        try {
+          const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+          if (connRows.length && connRows[0].active) {
+            const cfg = connRows[0];
+            const pool = await mssql.connect({
+              server: cfg.host,
+              port: cfg.port ?? 55444,
+              database: cfg.database,
+              user: cfg.username,
+              password: cfg.password,
+              options: { encrypt: false, trustServerCertificate: true },
+              connectionTimeout: 30000,
+              requestTimeout: 30000,
+            });
+            const res = await pool.request().query(`
+              SELECT CAST(COALESCE(SUM(v.VEN_TOTAL), 0) as float) as total
+              FROM VENDAS v
+              WHERE v.VEN_SITUACAO = 2
+                AND YEAR(v.VEN_DATA_FIM) = ${year}
+                AND MONTH(v.VEN_DATA_FIM) = ${mon}
+            `);
+            receitaInove = Number(res.recordset[0]?.total) || 0;
+            fonteReceita = "inove";
+            await pool.close();
+          }
+        } catch {
+          // fallback local
+        }
+      }
+
+      // 1c. Fallback final: importações locais confirmadas
+      if (receitaInove === 0) {
         const rows = await db
           .select({ total: sql<number>`COALESCE(SUM(${salesImports.totalRevenue}), 0)` })
           .from(salesImports)
