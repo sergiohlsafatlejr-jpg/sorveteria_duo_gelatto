@@ -38,6 +38,7 @@ import WhatsApp from "./pages/WhatsApp";
 import InstagramPage from "./pages/Instagram";
 import ProductsRegister from "./pages/ProductsRegister";
 import PurchaseSuggestion from "./pages/PurchaseSuggestion";
+import SmartPurchasePlanner from "./pages/SmartPurchasePlanner";
 import SalesImport from "./pages/SalesImport";
 import ProductMapping from "./pages/ProductMapping";
 import SalesReport from "./pages/SalesReport";
@@ -69,6 +70,7 @@ function Router() {
       <Route path="/products-register">{() => <ProtectedRoute path="/products-register"><ProductsRegister /></ProtectedRoute>}</Route>
       <Route path="/products">{() => <ProtectedRoute path="/products"><Products /></ProtectedRoute>}</Route>
       <Route path="/purchase-suggestion">{() => <ProtectedRoute path="/purchase-suggestion"><PurchaseSuggestion /></ProtectedRoute>}</Route>
+      <Route path="/smart-purchase-plan">{() => <ProtectedRoute path="/smart-purchase-plan"><SmartPurchasePlanner /></ProtectedRoute>}</Route>
       <Route path="/reports">{() => <ProtectedRoute path="/reports"><Reports /></ProtectedRoute>}</Route>
       <Route path="/gerencial">{() => <ProtectedRoute path="/gerencial"><GerencialReports /></ProtectedRoute>}</Route>
       {/* Pontos — regras e canais (gerente+) */}

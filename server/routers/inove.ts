@@ -29,6 +29,7 @@ import { eq, desc, sql, and } from "drizzle-orm";
 import crypto from "crypto";
 import * as mssqlLib from "mssql";
 import { notifyOwner } from "../_core/notification";
+import { invokeLLM } from "../_core/llm";
 
 // ── Tipos do SQL Server ───────────────────────────────────────────────────────
 interface MssqlConfig {
@@ -2570,6 +2571,185 @@ export const inoveRouter = router({
           totalCustoEstimado,
           totalItensParaComprar,
           totalProdutosAnalisados: vendas.length,
+        };
+      } catch (err) {
+        await pool.close().catch(() => {});
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+  // ── Planejamento Inteligente de Compras com IA ────────────────────────────
+  getSmartPurchasePlan: protectedProcedure
+    .input(z.object({
+      diasAnalise: z.number().int().min(7).max(30).default(7),
+      diasProjecao: z.number().int().min(7).max(14).default(7),
+      fatorSeguranca: z.number().min(0).max(1).default(0.2),
+      orcamentoTotal: z.number().min(0).optional(), // orçamento máximo em R$
+      filtroCategoria: z.string().optional(), // ex: 'picole', 'pote', 'acai'
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error('DB unavailable');
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (connRows.length === 0 || !connRows[0].active) {
+        throw new Error('Conector INOVE inativo.');
+      }
+      const config = connRows[0];
+      const pool = await createInovePool(config);
+
+      try {
+        // Query 1: Vendas da semana (diasAnalise) por produto com estoque e custo
+        const vendasSemanaRes = await pool.request().query(`
+          SELECT
+            p.PRODUTO as produtoId,
+            p.PRO_NOME as nome,
+            p.PRO_CODIGO as codPdv,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtdSemana,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamentoSemana,
+            COUNT(DISTINCT CAST(v.VEN_DATA_FIM as date)) as diasComVenda,
+            CAST(ISNULL(p.PRO_CUSTO, 0) as float) as custoProduto,
+            CAST(ISNULL(
+              (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
+               WHERE PRODUTO = p.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC), 0
+            ) as float) as estoqueAtual
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= CAST(DATEADD(day, -${input.diasAnalise}, GETDATE()) as date)
+            AND CAST(v.VEN_DATA_FIM as date) < CAST(GETDATE() as date)
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO
+          ORDER BY qtdSemana DESC
+        `);
+
+        // Query 2: Vendas do mês atual para contexto
+        const vendasMesRes = await pool.request().query(`
+          SELECT
+            p.PRODUTO as produtoId,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtdMes,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as faturamentoMes
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= CAST(DATEADD(day, -30, GETDATE()) as date)
+            AND CAST(v.VEN_DATA_FIM as date) < CAST(GETDATE() as date)
+          GROUP BY p.PRODUTO
+        `);
+
+        // Query 3: Período
+        const periodoRes = await pool.request().query(`
+          SELECT
+            FORMAT(CAST(DATEADD(day, -${input.diasAnalise}, GETDATE()) as date), 'dd/MM/yyyy') as dataInicio,
+            FORMAT(CAST(DATEADD(day, -1, GETDATE()) as date), 'dd/MM/yyyy') as dataFim,
+            FORMAT(GETDATE(), 'dd/MM/yyyy') as hoje
+        `);
+
+        await pool.close();
+
+        type VendaRow = { produtoId: number; nome: string; codPdv: string; qtdSemana: number; faturamentoSemana: number; diasComVenda: number; custoProduto: number; estoqueAtual: number };
+        type MesRow = { produtoId: number; qtdMes: number; faturamentoMes: number };
+
+        const vendas = vendasSemanaRes.recordset as VendaRow[];
+        const vendasMesMap = new Map<number, MesRow>();
+        for (const m of vendasMesRes.recordset as MesRow[]) {
+          vendasMesMap.set(Number(m.produtoId), m);
+        }
+        const periodo = periodoRes.recordset[0] as { dataInicio: string; dataFim: string; hoje: string };
+
+        // Calcular sugestão de compra para cada produto
+        const itens = vendas.map(v => {
+          const mediaDiaria = Number(v.qtdSemana) / input.diasAnalise;
+          const necessidade = mediaDiaria * input.diasProjecao;
+          const necessidadeComSeguranca = necessidade * (1 + input.fatorSeguranca);
+          const estoqueAtual = Number(v.estoqueAtual);
+          const custoProduto = Number(v.custoProduto);
+          const sugestaoQtd = Math.max(0, Math.ceil(necessidadeComSeguranca - estoqueAtual));
+          const custoTotal = custoProduto > 0 ? Math.round(sugestaoQtd * custoProduto * 100) / 100 : 0;
+          const mesData = vendasMesMap.get(Number(v.produtoId));
+          const qtdMes = mesData ? Number(mesData.qtdMes) : 0;
+          const faturamentoMes = mesData ? Number(mesData.faturamentoMes) : 0;
+
+          const prioridade: 'alta' | 'media' | 'baixa' =
+            estoqueAtual <= 0 ? 'alta' :
+            sugestaoQtd > 0 && estoqueAtual < necessidade ? 'alta' :
+            sugestaoQtd > 0 ? 'media' : 'baixa';
+
+          return {
+            produtoId: Number(v.produtoId),
+            nome: v.nome,
+            codPdv: v.codPdv,
+            qtdSemana: Number(v.qtdSemana),
+            qtdMes,
+            faturamentoSemana: Number(v.faturamentoSemana),
+            faturamentoMes,
+            diasComVenda: Number(v.diasComVenda),
+            mediaDiaria: Math.round(mediaDiaria * 100) / 100,
+            necessidade: Math.ceil(necessidade),
+            necessidadeComSeguranca: Math.ceil(necessidadeComSeguranca),
+            estoqueAtual,
+            custoProduto,
+            sugestaoQtd,
+            custoTotal,
+            custoTotalAjustado: custoTotal, // editável pelo usuário
+            qtdAjustada: sugestaoQtd, // editável pelo usuário
+            prioridade,
+            selecionado: sugestaoQtd > 0, // pré-selecionados os que precisam comprar
+          };
+        });
+
+        // Ordenar: alta prioridade primeiro, depois por custo total desc
+        const ordem = { alta: 0, media: 1, baixa: 2 };
+        itens.sort((a, b) => {
+          if (ordem[a.prioridade] !== ordem[b.prioridade]) return ordem[a.prioridade] - ordem[b.prioridade];
+          return b.custoTotal - a.custoTotal;
+        });
+
+        const totalCustoEstimado = itens.reduce((s, x) => s + x.custoTotal, 0);
+        const totalItensParaComprar = itens.filter(x => x.sugestaoQtd > 0).length;
+
+        // ── Análise da IA ──────────────────────────────────────────────────────
+        // Preparar resumo para a IA (top 20 produtos com maior necessidade)
+        const top20 = itens.slice(0, 20);
+        const resumoParaIA = top20.map(x =>
+          `${x.nome}: vendeu ${x.qtdSemana}un/semana (${x.qtdMes}un/mês), estoque=${x.estoqueAtual}un, custo=R$${x.custoProduto.toFixed(2)}, sugestão=${x.sugestaoQtd}un (R$${x.custoTotal.toFixed(2)}), prioridade=${x.prioridade}`
+        ).join('\n');
+
+        const orcamentoInfo = input.orcamentoTotal
+          ? `Orçamento total disponível: R$ ${input.orcamentoTotal.toFixed(2)}. Custo estimado total: R$ ${totalCustoEstimado.toFixed(2)}.`
+          : `Custo estimado total da compra: R$ ${totalCustoEstimado.toFixed(2)}.`;
+
+        let analiseIA = '';
+        try {
+          const llmResp = await invokeLLM({
+            messages: [
+              {
+                role: 'system',
+                content: `Você é um assistente especialista em gestão de estoque para sorveteria. Analise os dados de vendas e estoque e forneça recomendações práticas e objetivas em português. Seja direto e útil. Máximo 5 pontos principais.`
+              },
+              {
+                role: 'user',
+                content: `Analise o planejamento de compras da Sorveteria Duo Gelatto para a próxima semana (${input.diasProjecao} dias):\n\nPeríodo analisado: ${periodo.dataInicio} a ${periodo.dataFim}\n${orcamentoInfo}\n\nTop 20 produtos por necessidade:\n${resumoParaIA}\n\nForneça:\n1. Avaliação geral do plano de compras\n2. Produtos críticos que NÃO podem faltar\n3. Produtos que podem ter quantidade reduzida para economizar\n4. Alerta sobre produtos com estoque negativo ou zerado\n5. Sugestão de priorização se o orçamento for insuficiente`
+              }
+            ]
+          });
+          const rawContent = llmResp?.choices?.[0]?.message?.content;
+          analiseIA = typeof rawContent === 'string' ? rawContent : (Array.isArray(rawContent) ? rawContent.map((c: { type: string; text?: string }) => c.type === 'text' ? c.text : '').join('') : '');
+        } catch {
+          analiseIA = 'Análise de IA temporariamente indisponível.';
+        }
+
+        return {
+          itens,
+          periodo,
+          diasAnalise: input.diasAnalise,
+          diasProjecao: input.diasProjecao,
+          fatorSeguranca: input.fatorSeguranca,
+          totalCustoEstimado: Math.round(totalCustoEstimado * 100) / 100,
+          totalItensParaComprar,
+          totalProdutosAnalisados: itens.length,
+          analiseIA,
+          orcamentoTotal: input.orcamentoTotal ?? null,
         };
       } catch (err) {
         await pool.close().catch(() => {});
