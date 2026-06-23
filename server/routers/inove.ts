@@ -24,6 +24,7 @@ import {
   salesImports,
   salesImportItems,
   salesImportPayments,
+  purchaseProductConfig,
 } from "../../drizzle/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 import crypto from "crypto";
@@ -2755,5 +2756,71 @@ export const inoveRouter = router({
         await pool.close().catch(() => {});
         throw new Error(err instanceof Error ? err.message : String(err));
       }
+    }),
+
+  // ── Configuração de produtos para planejamento de compras ─────────────────
+  getPurchaseProductConfigs: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new Error('DB unavailable');
+    const configs = await db.select().from(purchaseProductConfig).orderBy(purchaseProductConfig.nomeProduto);
+    return configs;
+  }),
+
+  upsertPurchaseProductConfig: protectedProcedure
+    .input(z.object({
+      produtoId: z.number().int(),
+      nomeProduto: z.string().min(1),
+      ignorar: z.boolean().default(false),
+      motivoIgnorar: z.string().optional(),
+      unidadeCompra: z.string().optional(),
+      fatorConversao: z.number().optional(),
+      qtdMinimaEstoque: z.number().optional(),
+      qtdLoteCompra: z.number().optional(),
+      observacao: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error('DB unavailable');
+      const existing = await db.select({ id: purchaseProductConfig.id })
+        .from(purchaseProductConfig)
+        .where(eq(purchaseProductConfig.produtoId, input.produtoId))
+        .limit(1);
+      if (existing.length > 0) {
+        await db.update(purchaseProductConfig)
+          .set({
+            nomeProduto: input.nomeProduto,
+            ignorar: input.ignorar,
+            motivoIgnorar: input.motivoIgnorar ?? null,
+            unidadeCompra: input.unidadeCompra ?? null,
+            fatorConversao: input.fatorConversao?.toString() ?? null,
+            qtdMinimaEstoque: input.qtdMinimaEstoque?.toString() ?? null,
+            qtdLoteCompra: input.qtdLoteCompra?.toString() ?? null,
+            observacao: input.observacao ?? null,
+            updatedAt: new Date(),
+          })
+          .where(eq(purchaseProductConfig.produtoId, input.produtoId));
+      } else {
+        await db.insert(purchaseProductConfig).values({
+          produtoId: input.produtoId,
+          nomeProduto: input.nomeProduto,
+          ignorar: input.ignorar,
+          motivoIgnorar: input.motivoIgnorar ?? null,
+          unidadeCompra: input.unidadeCompra ?? null,
+          fatorConversao: input.fatorConversao?.toString() ?? null,
+          qtdMinimaEstoque: input.qtdMinimaEstoque?.toString() ?? null,
+          qtdLoteCompra: input.qtdLoteCompra?.toString() ?? null,
+          observacao: input.observacao ?? null,
+        });
+      }
+      return { success: true };
+    }),
+
+  deletePurchaseProductConfig: protectedProcedure
+    .input(z.object({ produtoId: z.number().int() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error('DB unavailable');
+      await db.delete(purchaseProductConfig).where(eq(purchaseProductConfig.produtoId, input.produtoId));
+      return { success: true };
     }),
 });

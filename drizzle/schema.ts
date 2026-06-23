@@ -713,3 +713,21 @@ export const inoveSalesCache = mysqlTable("inove_sales_cache", {
 
 export type InoveSalesCache = typeof inoveSalesCache.$inferSelect;
 export type InsertInoveSalesCache = typeof inoveSalesCache.$inferInsert;
+
+// ── Configuração de Produtos para Planejamento de Compras ─────────────────────
+export const purchaseProductConfig = mysqlTable("purchase_product_config", {
+  id: int("id").autoincrement().primaryKey(),
+  produtoId: int("produtoId").notNull().unique(), // ID do produto no INOVE (PRO_CODIGO)
+  nomeProduto: varchar("nomeProduto", { length: 200 }).notNull(),
+  ignorar: boolean("ignorar").default(false).notNull(), // true = ignorar no planejamento (ex: sorvete kg, milkshake)
+  motivoIgnorar: varchar("motivoIgnorar", { length: 200 }), // ex: "vendido em kg, comprado em litros"
+  unidadeCompra: varchar("unidadeCompra", { length: 50 }), // ex: "caixa", "litro", "kg", "unidade"
+  fatorConversao: decimal("fatorConversao", { precision: 10, scale: 4 }), // ex: 1 caixa = 5 litros
+  qtdMinimaEstoque: decimal("qtdMinimaEstoque", { precision: 10, scale: 2 }), // estoque mínimo desejado
+  qtdLoteCompra: decimal("qtdLoteCompra", { precision: 10, scale: 2 }), // múltiplo de compra (ex: comprar em caixas de 12)
+  observacao: text("observacao"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type PurchaseProductConfig = typeof purchaseProductConfig.$inferSelect;
+export type InsertPurchaseProductConfig = typeof purchaseProductConfig.$inferInsert;

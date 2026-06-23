@@ -6,11 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import {
   Brain, ShoppingCart, TrendingUp, Package, AlertTriangle,
   RefreshCw, FileSpreadsheet, FileText, ChevronDown, ChevronUp,
-  CheckSquare, Square, Sparkles, DollarSign, BarChart3
+  CheckSquare, Square, Sparkles, DollarSign, BarChart3, Settings2, EyeOff
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
@@ -62,6 +64,57 @@ export default function SmartPurchasePlanner() {
   // ── Edições locais (qtd ajustada e seleção) ─────────────────────────────────
   const [edits, setEdits] = useState<Map<number, ItemEdit>>(new Map());
 
+  // ── Configuração de produtos ────────────────────────────────────────────────
+  const [configSheetOpen, setConfigSheetOpen] = useState(false);
+  const [configProduto, setConfigProduto] = useState<{ produtoId: number; nome: string } | null>(null);
+  const [configIgnorar, setConfigIgnorar] = useState(false);
+  const [configMotivo, setConfigMotivo] = useState("");
+  const [configUnidade, setConfigUnidade] = useState("");
+  const [configLote, setConfigLote] = useState("");
+  const [configEstoqueMin, setConfigEstoqueMin] = useState("");
+  const [mostrarIgnorados, setMostrarIgnorados] = useState(false);
+
+  const utils = trpc.useUtils();
+  const { data: configs } = trpc.inove.getPurchaseProductConfigs.useQuery();
+  const configMap = useMemo(() => {
+    const m = new Map<number, typeof configs extends (infer T)[] | undefined ? T : never>();
+    configs?.forEach(c => m.set(c.produtoId, c));
+    return m;
+  }, [configs]);
+
+  const upsertConfig = trpc.inove.upsertPurchaseProductConfig.useMutation({
+    onSuccess: () => {
+      utils.inove.getPurchaseProductConfigs.invalidate();
+      toast.success("Configuração salva!");
+      setConfigSheetOpen(false);
+    },
+    onError: (e) => toast.error("Erro ao salvar: " + e.message),
+  });
+
+  const openConfig = (produtoId: number, nome: string) => {
+    const existing = configMap.get(produtoId);
+    setConfigProduto({ produtoId, nome });
+    setConfigIgnorar(existing?.ignorar ?? false);
+    setConfigMotivo(existing?.motivoIgnorar ?? "");
+    setConfigUnidade(existing?.unidadeCompra ?? "");
+    setConfigLote(existing?.qtdLoteCompra ? String(existing.qtdLoteCompra) : "");
+    setConfigEstoqueMin(existing?.qtdMinimaEstoque ? String(existing.qtdMinimaEstoque) : "");
+    setConfigSheetOpen(true);
+  };
+
+  const saveConfig = () => {
+    if (!configProduto) return;
+    upsertConfig.mutate({
+      produtoId: configProduto.produtoId,
+      nomeProduto: configProduto.nome,
+      ignorar: configIgnorar,
+      motivoIgnorar: configMotivo || undefined,
+      unidadeCompra: configUnidade || undefined,
+      qtdLoteCompra: configLote ? parseFloat(configLote) : undefined,
+      qtdMinimaEstoque: configEstoqueMin ? parseFloat(configEstoqueMin) : undefined,
+    });
+  };
+
   const orcamentoNum = orcamentoTotal ? parseFloat(orcamentoTotal.replace(",", ".")) : undefined;
 
   const { data, isLoading, error, refetch } = trpc.inove.getSmartPurchasePlan.useQuery(
@@ -94,7 +147,10 @@ export default function SmartPurchasePlanner() {
   // Filtrar itens
   const itensFiltrados = useMemo(() => {
     return itens.filter(item => {
-      if (mostrarSoComSugestao && item.qtdAjustada <= 0 && !item.selecionado) return false;
+      const cfg = configMap.get(item.produtoId);
+      const isIgnorado = cfg?.ignorar === true;
+      if (isIgnorado && !mostrarIgnorados) return false;
+      if (mostrarSoComSugestao && item.qtdAjustada <= 0 && !item.selecionado && !isIgnorado) return false;
       if (filtroPrioridade !== "todas" && item.prioridade !== filtroPrioridade) return false;
       if (filtro) {
         const f = filtro.toLowerCase();
@@ -102,7 +158,7 @@ export default function SmartPurchasePlanner() {
       }
       return true;
     });
-  }, [itens, filtro, filtroPrioridade, mostrarSoComSugestao]);
+  }, [itens, filtro, filtroPrioridade, mostrarSoComSugestao, configMap, mostrarIgnorados]);
 
   // Totais dos itens selecionados
   const totais = useMemo(() => {
@@ -500,9 +556,19 @@ export default function SmartPurchasePlanner() {
               />
               Só com sugestão
             </label>
-            <button onClick={selecionarTodos} className="text-xs text-primary underline underline-offset-2 ml-auto">
+            <button onClick={selecionarTodos} className="text-xs text-primary underline underline-offset-2">
               Selecionar todos
             </button>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer ml-auto">
+              <input
+                type="checkbox"
+                checked={mostrarIgnorados}
+                onChange={e => setMostrarIgnorados(e.target.checked)}
+                className="rounded"
+              />
+              <EyeOff className="w-3 h-3" />
+              Mostrar ignorados ({configs?.filter(c => c.ignorar).length ?? 0})
+            </label>
           </div>
 
           {/* Tabela de produtos */}
@@ -521,12 +587,13 @@ export default function SmartPurchasePlanner() {
                     <th className="p-3 text-center font-medium text-primary whitespace-nowrap">Qtd.<br/><span className="text-[10px]">comprar</span></th>
                     <th className="p-3 text-right font-medium text-primary whitespace-nowrap">Custo<br/><span className="text-[10px]">total</span></th>
                     <th className="p-3 text-center font-medium text-muted-foreground">Prior.</th>
+                    <th className="w-10 p-3 text-center"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/20">
                   {itensFiltrados.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="p-8 text-center text-muted-foreground text-sm">
+                      <td colSpan={11} className="p-8 text-center text-muted-foreground text-sm">
                         Nenhum produto encontrado com os filtros aplicados.
                       </td>
                     </tr>
@@ -535,27 +602,44 @@ export default function SmartPurchasePlanner() {
                     const pc = prioridadeConfig[item.prioridade];
                     const estoqueNegativo = item.estoqueAtual < 0;
                     const estoqueZero = item.estoqueAtual === 0;
+                    const cfg = configMap.get(item.produtoId);
+                    const isIgnorado = cfg?.ignorar === true;
                     return (
                       <tr
                         key={item.produtoId}
                         className={cn(
                           "transition-colors",
+                          isIgnorado ? "opacity-40 bg-muted/10" :
                           item.selecionado ? "bg-primary/5" : "hover:bg-muted/10",
-                          item.prioridade === "alta" && !item.selecionado && "bg-red-500/3"
+                          item.prioridade === "alta" && !item.selecionado && !isIgnorado && "bg-red-500/3"
                         )}
                       >
                         {/* Checkbox */}
                         <td className="p-3 text-center">
-                          <button onClick={() => toggleSelecionado(item.produtoId, item.selecionado)}>
-                            {item.selecionado
-                              ? <CheckSquare className="w-4 h-4 text-primary" />
-                              : <Square className="w-4 h-4 text-muted-foreground" />
-                            }
-                          </button>
+                          {!isIgnorado && (
+                            <button onClick={() => toggleSelecionado(item.produtoId, item.selecionado)}>
+                              {item.selecionado
+                                ? <CheckSquare className="w-4 h-4 text-primary" />
+                                : <Square className="w-4 h-4 text-muted-foreground" />
+                              }
+                            </button>
+                          )}
                         </td>
                         {/* Nome */}
                         <td className="p-3">
-                          <div className="font-medium text-sm leading-tight">{item.nome}</div>
+                          <div className="font-medium text-sm leading-tight flex items-center gap-1.5">
+                            {item.nome}
+                            {isIgnorado && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground border border-border/50 font-normal">
+                                ignorado
+                              </span>
+                            )}
+                            {cfg?.unidadeCompra && !isIgnorado && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20 font-normal">
+                                {cfg.unidadeCompra}
+                              </span>
+                            )}
+                          </div>
                           {item.codPdv && (
                             <div className="text-[10px] text-muted-foreground">Cód: {item.codPdv}</div>
                           )}
@@ -618,9 +702,24 @@ export default function SmartPurchasePlanner() {
                         </td>
                         {/* Prioridade */}
                         <td className="p-3 text-center">
-                          <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", pc.color)}>
-                            {pc.label}
-                          </span>
+                          {!isIgnorado && (
+                            <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", pc.color)}>
+                              {pc.label}
+                            </span>
+                          )}
+                        </td>
+                        {/* Botão configurar */}
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => openConfig(item.produtoId, item.nome)}
+                            className={cn(
+                              "p-1 rounded hover:bg-muted/50 transition-colors",
+                              isIgnorado ? "text-muted-foreground" : "text-muted-foreground hover:text-foreground"
+                            )}
+                            title="Configurar produto"
+                          >
+                            <Settings2 className="w-3.5 h-3.5" />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -629,7 +728,7 @@ export default function SmartPurchasePlanner() {
                 {totais.totalItens > 0 && (
                   <tfoot>
                     <tr className="bg-muted/20 border-t-2 border-border/50">
-                      <td colSpan={7} className="p-3 text-right text-sm font-semibold text-muted-foreground">
+                      <td colSpan={8} className="p-3 text-right text-sm font-semibold text-muted-foreground">
                         Total selecionado ({totais.totalItens} itens · {fmtNum(totais.totalUnidades, 0)} un):
                       </td>
                       <td className="p-3 text-center font-bold text-primary">{fmtNum(totais.totalUnidades, 0)}</td>
@@ -665,6 +764,119 @@ export default function SmartPurchasePlanner() {
           </p>
         </>
       )}
+      {/* Sheet de Configuração de Produto */}
+      <Sheet open={configSheetOpen} onOpenChange={setConfigSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader className="mb-4">
+            <SheetTitle className="flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-primary" />
+              Configurar Produto
+            </SheetTitle>
+            {configProduto && (
+              <p className="text-sm text-muted-foreground font-medium">{configProduto.nome}</p>
+            )}
+          </SheetHeader>
+
+          <div className="space-y-5">
+            {/* Ignorar no planejamento */}
+            <div className="rounded-lg border border-border/50 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm font-semibold">Ignorar no planejamento</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Produto não aparecerá na lista de compras</p>
+                </div>
+                <Switch
+                  checked={configIgnorar}
+                  onCheckedChange={setConfigIgnorar}
+                />
+              </div>
+              {configIgnorar && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Motivo (opcional)</Label>
+                  <Input
+                    placeholder="Ex: vendido em kg, comprado em litros"
+                    value={configMotivo}
+                    onChange={e => setConfigMotivo(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Unidade de compra */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-semibold">Unidade de Compra</Label>
+              <p className="text-xs text-muted-foreground">Como este produto é comprado do fornecedor</p>
+              <div className="grid grid-cols-3 gap-2">
+                {["unidade", "caixa", "litro", "kg", "fardo", "pacote"].map(u => (
+                  <button
+                    key={u}
+                    onClick={() => setConfigUnidade(configUnidade === u ? "" : u)}
+                    className={cn(
+                      "text-xs px-2 py-1.5 rounded border transition-colors",
+                      configUnidade === u
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border/50 hover:bg-muted/50"
+                    )}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+              <Input
+                placeholder="Ou digite outra unidade..."
+                value={["unidade", "caixa", "litro", "kg", "fardo", "pacote"].includes(configUnidade) ? "" : configUnidade}
+                onChange={e => setConfigUnidade(e.target.value)}
+                className="h-8 text-sm mt-1"
+              />
+            </div>
+
+            {/* Lote mínimo */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-semibold">Lote Mínimo de Compra</Label>
+              <p className="text-xs text-muted-foreground">Múltiplo de compra (ex: caixas de 12 unidades)</p>
+              <Input
+                type="number"
+                min={0}
+                step={1}
+                placeholder="Ex: 12"
+                value={configLote}
+                onChange={e => setConfigLote(e.target.value)}
+                className="h-8 text-sm"
+              />
+            </div>
+
+            {/* Estoque mínimo */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-semibold">Estoque Mínimo Desejado</Label>
+              <p className="text-xs text-muted-foreground">Quantidade mínima que deve sempre ter em estoque</p>
+              <Input
+                type="number"
+                min={0}
+                step={1}
+                placeholder="Ex: 50"
+                value={configEstoqueMin}
+                onChange={e => setConfigEstoqueMin(e.target.value)}
+                className="h-8 text-sm"
+              />
+            </div>
+
+            {/* Botões */}
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={saveConfig}
+                disabled={upsertConfig.isPending}
+                className="flex-1"
+              >
+                {upsertConfig.isPending ? "Salvando..." : "Salvar Configuração"}
+              </Button>
+              <Button variant="outline" onClick={() => setConfigSheetOpen(false)}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
