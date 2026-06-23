@@ -13,8 +13,9 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { ChevronDown, ChevronRight, Calendar, TrendingDown, CheckCircle, AlertCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, Calendar, TrendingDown, CheckCircle, AlertCircle, FileSpreadsheet } from "lucide-react";
 import { Link } from "wouter";
+import { exportToExcelMultiSheet, fmtMoeda } from "@/lib/exportExcel";
 
 const MONTH_NAMES = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -96,6 +97,46 @@ export default function FinWeekdayReport() {
     setExpandedDay(expandedDay === key ? null : key);
   }
 
+  function handleExportExcel() {
+    const monthLabel = `${MONTH_NAMES[month - 1]}_${year}`;
+    // Aba 1: Resumo por semana
+    const resumoSemanas = weekData.flatMap((week: any, idx: number) =>
+      (week.days ?? []).map((day: any) => ({
+        Semana: WEEK_LABELS[idx],
+        "Período": week.dateRange,
+        "Dia": day.dayName,
+        "Data": day.dateLabel,
+        "Lançamentos": day.count,
+        "Pendente": fmtMoeda(day.pending),
+        "Pago": fmtMoeda(day.paid),
+        "Vencido": fmtMoeda(day.overdue),
+        "Total": fmtMoeda(day.total),
+      }))
+    );
+    // Aba 2: Todos os lançamentos detalhados
+    const lancamentos = weekData.flatMap((week: any, idx: number) =>
+      (week.days ?? []).flatMap((day: any) =>
+        (day.items ?? []).map((item: any) => ({
+          Semana: WEEK_LABELS[idx],
+          "Dia": day.dayName,
+          "Descrição": item.description,
+          "Categoria": item.categoryName ?? "",
+          "Banco": item.bankName ?? "",
+          "Vencimento": item.dueDate ? new Date(item.dueDate).toLocaleDateString("pt-BR") : "",
+          "Status": item.isPaid ? "Pago" : item.isOverdue ? "Vencido" : "Pendente",
+          "Valor": fmtMoeda(item.amount),
+        }))
+      )
+    );
+    exportToExcelMultiSheet(
+      [
+        { name: "Resumo por Semana", data: resumoSemanas },
+        { name: "Lançamentos Detalhados", data: lancamentos },
+      ],
+      `Contas_a_Pagar_Semanal_${monthLabel}`
+    );
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
@@ -116,13 +157,26 @@ export default function FinWeekdayReport() {
             Acompanhamento dos valores a pagar agrupados por dia da semana (Segunda a Sexta)
           </p>
         </div>
-        {/* Navegação de mês */}
-        <div className="flex items-center gap-2 bg-card border rounded-lg px-4 py-2">
-          <Button variant="ghost" size="sm" onClick={prevMonth}>‹</Button>
-          <span className="font-semibold text-lg min-w-[160px] text-center">
-            {MONTH_NAMES[month - 1]} {year}
-          </span>
-          <Button variant="ghost" size="sm" onClick={nextMonth}>›</Button>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Botão Excel */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportExcel}
+            disabled={weekData.length === 0}
+            className="gap-2 text-green-700 border-green-300 hover:bg-green-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Excel
+          </Button>
+          {/* Navegação de mês */}
+          <div className="flex items-center gap-2 bg-card border rounded-lg px-4 py-2">
+            <Button variant="ghost" size="sm" onClick={prevMonth}>‹</Button>
+            <span className="font-semibold text-lg min-w-[160px] text-center">
+              {MONTH_NAMES[month - 1]} {year}
+            </span>
+            <Button variant="ghost" size="sm" onClick={nextMonth}>›</Button>
+          </div>
         </div>
       </div>
 

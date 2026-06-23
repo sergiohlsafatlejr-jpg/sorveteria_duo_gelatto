@@ -33,6 +33,7 @@ import {
   Bell,
   Database,
   Edit,
+  FileSpreadsheet,
   FileText,
   Loader2,
   Package,
@@ -47,6 +48,7 @@ import {
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
+import { exportToExcel, fmtMoeda } from "@/lib/exportExcel";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 type ProductForm = {
@@ -489,9 +491,33 @@ function Products() {
 
         {(lowStock?.length ?? 0) > 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              <span className="font-semibold text-amber-700 text-sm">Produtos com Estoque Baixo</span>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <span className="font-semibold text-amber-700 text-sm">Produtos com Estoque Baixo</span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-green-700 border-green-300 hover:bg-green-50 text-xs h-7"
+                onClick={() => {
+                  exportToExcel(
+                    lowStock!.map((p) => ({
+                      "Produto": p.name,
+                      "Estoque Atual": p.currentStock,
+                      "Estoque Mínimo": p.minStock,
+                      "Unidade": p.unit ?? "",
+                      "Preço Custo": fmtMoeda(p.costPrice ?? 0),
+                      "Preço Venda": fmtMoeda(p.salePrice ?? 0),
+                      "Média Vendas/Mês": p.avgSalesQty ?? 0,
+                    })),
+                    `Estoque_Baixo_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}`
+                  );
+                }}
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                Exportar Excel
+              </Button>
             </div>
             <div className="flex flex-wrap gap-2">
               {lowStock!.map((p) => (

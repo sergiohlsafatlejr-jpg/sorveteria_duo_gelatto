@@ -105,7 +105,7 @@ export const reportsRouter = router({
         orcamentoCompras: z.number().optional(), // orçamento disponível para compras
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
 
@@ -120,16 +120,28 @@ export const reportsRouter = router({
       const daysInMonth = new Date(year!, mon!, 0).getDate();
       const dateTo = `${year}-${String(mon).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
 
-      // 1a. Calcula a projeção do mês usando as médias salvas em forecastSettings
-      // (mesmo cálculo da tela Previsão de Faturamento)
+      // 1a. Calcula a projeção do mês usando as médias salvas em forecastSettings do usuário
+      // (mesmo cálculo da tela Previsão de Faturamento — inclui ajuste climático)
       try {
-        const settingsRows = await db.select().from(forecastSettings).limit(1);
-        const settings = settingsRows[0] ?? { avgWeekday: 2000, avgSaturday: 5300, avgSundayHoliday: 8300 };
+        // Busca as configurações do usuário logado (igual à tela Previsão)
+        const settingsRows = await db
+          .select()
+          .from(forecastSettings)
+          .where(eq(forecastSettings.userId, ctx.user.id))
+          .limit(1);
+        // Se não tiver configurações do usuário, tenta qualquer registro
+        const fallbackRows = settingsRows.length === 0
+          ? await db.select().from(forecastSettings).limit(1)
+          : settingsRows;
+        const settings = fallbackRows[0];
+        if (!settings) throw new Error("Sem configurações de previsão");
+
         const avgWeekday = Number(settings.avgWeekday) || 2000;
         const avgSaturday = Number(settings.avgSaturday) || 5300;
         const avgSundayHoliday = Number(settings.avgSundayHoliday) || 8300;
+        const rainFactor = parseFloat(settings.rainFactor ?? "0.7") || 0.7;
 
-        // Buscar feriados nacionais
+        // Buscar feriados nacionais (igual à tela Previsão)
         let holidayDates = new Set<string>();
         try {
           const res = await fetch(`https://brasilapi.com.br/api/feriados/v1/${year}`);
@@ -139,7 +151,26 @@ export const reportsRouter = router({
           }
         } catch { /* ignora */ }
 
-        // Calcular projeção somando média por tipo de dia
+        // Buscar previsão do tempo para Goiânia (igual à tela Previsão)
+        type WeatherDay = { code: number; precip: number; precipProb: number };
+        const weatherMap = new Map<string, WeatherDay>();
+        try {
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=-16.6864&longitude=-49.2643&daily=weathercode,precipitation_sum,precipitation_probability_max&timezone=America%2FSao_Paulo&start_date=${dateFrom}&end_date=${dateTo}`;
+          const res = await fetch(url);
+          if (res.ok) {
+            const wdata = await res.json();
+            const { time, weathercode, precipitation_sum, precipitation_probability_max } = wdata.daily;
+            (time as string[]).forEach((d: string, i: number) => {
+              weatherMap.set(d, {
+                code: weathercode[i],
+                precip: precipitation_sum[i] ?? 0,
+                precipProb: precipitation_probability_max[i] ?? 0,
+              });
+            });
+          }
+        } catch { /* ignora */ }
+
+        // Calcular projeção somando média por tipo de dia + ajuste climático
         let totalProjecao = 0;
         for (let day = 1; day <= daysInMonth; day++) {
           const dateStr = `${year}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -148,9 +179,30 @@ export const reportsRouter = router({
           const isHoliday = holidayDates.has(dateStr);
           const isSunday = weekday === 0;
           const isSaturday = weekday === 6;
-          if (isHoliday || isSunday) totalProjecao += avgSundayHoliday;
-          else if (isSaturday) totalProjecao += avgSaturday;
-          else totalProjecao += avgWeekday;
+
+          // Média base pelo tipo de dia
+          let baseAvg = (isHoliday || isSunday) ? avgSundayHoliday
+            : isSaturday ? avgSaturday
+            : avgWeekday;
+
+          // Ajuste climático (igual à tela Previsão)
+          const weather = weatherMap.get(dateStr);
+          let projectedAmount = baseAvg;
+          if (weather) {
+            const { code, precip, precipProb } = weather;
+            let weatherLabel: "sun" | "cloud" | "rain" | "storm" | "unknown" = "unknown";
+            if (code === 0) weatherLabel = "sun";
+            else if (code <= 3) weatherLabel = "cloud";
+            else if (code <= 67 || (code >= 80 && code <= 84)) {
+              weatherLabel = precip > 5 || precipProb > 60 ? "rain" : "cloud";
+            } else if (code >= 85 || code >= 95) weatherLabel = "storm";
+            else weatherLabel = "cloud";
+
+            if (weatherLabel === "rain") projectedAmount = baseAvg * rainFactor;
+            else if (weatherLabel === "storm") projectedAmount = baseAvg * (rainFactor * 0.8);
+            else if (weatherLabel === "cloud") projectedAmount = baseAvg * 0.9;
+          }
+          totalProjecao += Math.round(projectedAmount);
         }
         receitaInove = totalProjecao;
         fonteReceita = "projecao";

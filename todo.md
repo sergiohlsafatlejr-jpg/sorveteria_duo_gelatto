@@ -765,8 +765,8 @@
 - [x] Exportar aba Formas de Pagamento (GerencialReports) para Excel
 - [x] Exportar Contas a Pagar (FinPayables) para Excel
 - [x] Exportar Contas a Receber (FinReceivables) para Excel
-- [ ] Exportar relatório de Contas a Pagar (semanal por semana do mês) para Excel
-- [ ] Exportar lista de Estoque Baixo para Excel
+- [x] Exportar relatório de Contas a Pagar (semanal por semana do mês) para Excel
+- [x] Exportar lista de Estoque Baixo para Excel
 
 ### Página Meta Ads Analytics
 - [x] Backend: router metaAds com endpoints getCampaigns, getInsights, getAdSets, getRecommendations (proxy MCP via shell)
@@ -793,3 +793,10 @@
 - [ ] Dashboard: gráfico de vendas por dia e top produtos vindos do INOVE
 - [ ] Página Vendas: tabela de vendas recentes e KPIs do INOVE
 - [ ] Página Estoque/Produtos: saldo real do INOVE (MVE_SALDO_ATUAL)
+
+## Correção Projeção de Faturamento na Otimização Financeira (23/06)
+- [x] Corrigir badge da fonte: exibe "📊 Projeção de Faturamento" (roxo) quando fonte = "projecao"
+- [x] Corrigir lógica: endpoint analiseOtimizacao agora busca forecastSettings pelo userId do usuário logado (ctx.user.id)
+- [x] Corrigir lógica: inclui ajuste climático (Open-Meteo Goiânia) igual à tela Previsão de Faturamento
+- [x] Corrigir lógica: fallback para qualquer registro de forecastSettings se usuário não tiver configurações próprias
+- [x] TypeScript 0 erros após todas as correções
