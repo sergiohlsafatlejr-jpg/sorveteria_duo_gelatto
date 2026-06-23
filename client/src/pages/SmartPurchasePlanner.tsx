@@ -73,6 +73,8 @@ export default function SmartPurchasePlanner() {
   const [configLote, setConfigLote] = useState("");
   const [configEstoqueMin, setConfigEstoqueMin] = useState("");
   const [mostrarIgnorados, setMostrarIgnorados] = useState(false);
+  const [configCategoria, setConfigCategoria] = useState<"sorvete" | "guloseimas" | "outros">("sorvete");
+  const [abaAtiva, setAbaAtiva] = useState<"sorvete" | "guloseimas" | "outros" | "todos">("sorvete");
 
   const utils = trpc.useUtils();
   const { data: configs } = trpc.inove.getPurchaseProductConfigs.useQuery();
@@ -99,6 +101,7 @@ export default function SmartPurchasePlanner() {
     setConfigUnidade(existing?.unidadeCompra ?? "");
     setConfigLote(existing?.qtdLoteCompra ? String(existing.qtdLoteCompra) : "");
     setConfigEstoqueMin(existing?.qtdMinimaEstoque ? String(existing.qtdMinimaEstoque) : "");
+    setConfigCategoria((existing?.purchaseCategory as "sorvete" | "guloseimas" | "outros") ?? "sorvete");
     setConfigSheetOpen(true);
   };
 
@@ -112,6 +115,7 @@ export default function SmartPurchasePlanner() {
       unidadeCompra: configUnidade || undefined,
       qtdLoteCompra: configLote ? parseFloat(configLote) : undefined,
       qtdMinimaEstoque: configEstoqueMin ? parseFloat(configEstoqueMin) : undefined,
+      purchaseCategory: configCategoria,
     });
   };
 
@@ -156,9 +160,14 @@ export default function SmartPurchasePlanner() {
         const f = filtro.toLowerCase();
         if (!item.nome.toLowerCase().includes(f) && !item.codPdv?.toLowerCase().includes(f)) return false;
       }
+      // Filtro por aba de categoria
+      if (abaAtiva !== "todos") {
+        const cat = cfg?.purchaseCategory ?? "sorvete"; // padrão sorvete se não configurado
+        if (cat !== abaAtiva) return false;
+      }
       return true;
     });
-  }, [itens, filtro, filtroPrioridade, mostrarSoComSugestao, configMap, mostrarIgnorados]);
+  }, [itens, filtro, filtroPrioridade, mostrarSoComSugestao, configMap, mostrarIgnorados, abaAtiva]);
 
   // Totais dos itens selecionados
   const totais = useMemo(() => {
@@ -523,6 +532,40 @@ export default function SmartPurchasePlanner() {
             </div>
           )}
 
+          {/* Abas de categoria de compra */}
+          <div className="flex gap-1 border-b border-border/50 pb-0">
+            {([
+              { key: "sorvete", label: "🍦 Sorvete", emoji: "🍦" },
+              { key: "guloseimas", label: "🍬 Guloseimas", emoji: "🍬" },
+              { key: "outros", label: "📦 Outros", emoji: "📦" },
+              { key: "todos", label: "Todos", emoji: "" },
+            ] as const).map(aba => {
+              const count = itens.filter(item => {
+                const cfg = configMap.get(item.produtoId);
+                if (aba.key === "todos") return true;
+                return (cfg?.purchaseCategory ?? "sorvete") === aba.key;
+              }).length;
+              return (
+                <button
+                  key={aba.key}
+                  onClick={() => setAbaAtiva(aba.key)}
+                  className={cn(
+                    "px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px",
+                    abaAtiva === aba.key
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+                  )}
+                >
+                  {aba.label}
+                  <span className={cn(
+                    "ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full",
+                    abaAtiva === aba.key ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+                  )}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+
           {/* Filtros da tabela */}
           <div className="flex flex-wrap gap-2 items-center">
             <Input
@@ -801,6 +844,32 @@ export default function SmartPurchasePlanner() {
                   />
                 </div>
               )}
+            </div>
+
+            {/* Categoria de compra */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Categoria de Compra</Label>
+              <p className="text-xs text-muted-foreground">Define em qual aba do planejamento este produto aparece</p>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { key: "sorvete", label: "🍦 Sorvete" },
+                  { key: "guloseimas", label: "🍬 Guloseimas" },
+                  { key: "outros", label: "📦 Outros" },
+                ] as const).map(cat => (
+                  <button
+                    key={cat.key}
+                    onClick={() => setConfigCategoria(cat.key)}
+                    className={cn(
+                      "text-xs px-2 py-2 rounded border transition-colors",
+                      configCategoria === cat.key
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border/50 hover:bg-muted/50"
+                    )}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Unidade de compra */}

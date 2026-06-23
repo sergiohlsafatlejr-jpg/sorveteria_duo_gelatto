@@ -726,6 +726,7 @@ export const purchaseProductConfig = mysqlTable("purchase_product_config", {
   qtdMinimaEstoque: decimal("qtdMinimaEstoque", { precision: 10, scale: 2 }), // estoque mínimo desejado
   qtdLoteCompra: decimal("qtdLoteCompra", { precision: 10, scale: 2 }), // múltiplo de compra (ex: comprar em caixas de 12)
   observacao: text("observacao"),
+  purchaseCategory: varchar("purchaseCategory", { length: 50 }).default("sorvete"), // "sorvete" | "guloseimas" | "outros"
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });

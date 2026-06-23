@@ -1,0 +1,1 @@
+ALTER TABLE `purchase_product_config` ADD `purchaseCategory` varchar(50) DEFAULT 'sorvete';

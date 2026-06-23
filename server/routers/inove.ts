@@ -2777,6 +2777,7 @@ export const inoveRouter = router({
       qtdMinimaEstoque: z.number().optional(),
       qtdLoteCompra: z.number().optional(),
       observacao: z.string().optional(),
+      purchaseCategory: z.enum(["sorvete", "guloseimas", "outros"]).default("sorvete"),
     }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -2796,6 +2797,7 @@ export const inoveRouter = router({
             qtdMinimaEstoque: input.qtdMinimaEstoque?.toString() ?? null,
             qtdLoteCompra: input.qtdLoteCompra?.toString() ?? null,
             observacao: input.observacao ?? null,
+            purchaseCategory: input.purchaseCategory,
             updatedAt: new Date(),
           })
           .where(eq(purchaseProductConfig.produtoId, input.produtoId));
@@ -2810,6 +2812,7 @@ export const inoveRouter = router({
           qtdMinimaEstoque: input.qtdMinimaEstoque?.toString() ?? null,
           qtdLoteCompra: input.qtdLoteCompra?.toString() ?? null,
           observacao: input.observacao ?? null,
+          purchaseCategory: input.purchaseCategory,
         });
       }
       return { success: true };
