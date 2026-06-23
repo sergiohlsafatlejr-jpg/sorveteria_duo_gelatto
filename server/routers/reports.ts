@@ -22,6 +22,7 @@ import {
   salesImports,
   salesImportItems,
   finDailyRevenue,
+  forecastSettings,
 } from "../../drizzle/schema";
 import { and, eq, sql, desc, gte, lte } from "drizzle-orm";
 import * as mssql from "mssql";
@@ -111,73 +112,92 @@ export const reportsRouter = router({
       const { month } = input;
       const [year, mon] = month.split("-").map(Number);
 
-      // ── 1. Receita real — usa finDailyRevenue (mesma base da Previsão de Faturamento) ──
-      // Fonte primária: faturamento diário real importado do INOVE via tela de Previsão
+      // ── 1. Receita — usa a Projeção da Previsão de Faturamento (médias por tipo de dia) ──
       let receitaInove = 0;
-      let fonteReceita: "previsao" | "inove" | "local" = "local";
+      let fonteReceita: "projecao" | "previsao" | "inove" | "local" = "local";
 
       const dateFrom = `${year}-${String(mon).padStart(2, "0")}-01`;
       const daysInMonth = new Date(year!, mon!, 0).getDate();
       const dateTo = `${year}-${String(mon).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
 
-      // 1a. Tenta buscar da tabela finDailyRevenue (faturamento real importado do INOVE)
-      const dailyRows = await db
-        .select({ total: sql<number>`COALESCE(SUM(${finDailyRevenue.realAmount}), 0)` })
-        .from(finDailyRevenue)
-        .where(
-          and(
-            gte(finDailyRevenue.revenueDate, dateFrom),
-            lte(finDailyRevenue.revenueDate, dateTo)
-          )
-        );
-      receitaInove = Number(dailyRows[0]?.total) || 0;
-      if (receitaInove > 0) {
-        fonteReceita = "previsao";
+      // 1a. Calcula a projeção do mês usando as médias salvas em forecastSettings
+      // (mesmo cálculo da tela Previsão de Faturamento)
+      try {
+        const settingsRows = await db.select().from(forecastSettings).limit(1);
+        const settings = settingsRows[0] ?? { avgWeekday: 2000, avgSaturday: 5300, avgSundayHoliday: 8300 };
+        const avgWeekday = Number(settings.avgWeekday) || 2000;
+        const avgSaturday = Number(settings.avgSaturday) || 5300;
+        const avgSundayHoliday = Number(settings.avgSundayHoliday) || 8300;
+
+        // Buscar feriados nacionais
+        let holidayDates = new Set<string>();
+        try {
+          const res = await fetch(`https://brasilapi.com.br/api/feriados/v1/${year}`);
+          if (res.ok) {
+            const holidays: { date: string }[] = await res.json();
+            holidayDates = new Set(holidays.map(h => h.date));
+          }
+        } catch { /* ignora */ }
+
+        // Calcular projeção somando média por tipo de dia
+        let totalProjecao = 0;
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = `${year}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const date = new Date(year!, mon! - 1, day);
+          const weekday = date.getDay(); // 0=Dom, 6=Sáb
+          const isHoliday = holidayDates.has(dateStr);
+          const isSunday = weekday === 0;
+          const isSaturday = weekday === 6;
+          if (isHoliday || isSunday) totalProjecao += avgSundayHoliday;
+          else if (isSaturday) totalProjecao += avgSaturday;
+          else totalProjecao += avgWeekday;
+        }
+        receitaInove = totalProjecao;
+        fonteReceita = "projecao";
+      } catch {
+        // fallback para faturamento real se projeção falhar
       }
 
-      // 1b. Fallback: tenta buscar direto do SQL Server INOVE
+      // 1b. Fallback: faturamento real importado do INOVE (finDailyRevenue)
+      if (receitaInove === 0) {
+        const dailyRows = await db
+          .select({ total: sql<number>`COALESCE(SUM(${finDailyRevenue.realAmount}), 0)` })
+          .from(finDailyRevenue)
+          .where(and(gte(finDailyRevenue.revenueDate, dateFrom), lte(finDailyRevenue.revenueDate, dateTo)));
+        receitaInove = Number(dailyRows[0]?.total) || 0;
+        if (receitaInove > 0) fonteReceita = "previsao";
+      }
+
+      // 1c. Fallback: SQL Server INOVE direto
       if (receitaInove === 0) {
         try {
           const connRows = await db.select().from(inoveConnectorConfig).limit(1);
           if (connRows.length && connRows[0].active) {
             const cfg = connRows[0];
             const pool = await mssql.connect({
-              server: cfg.host,
-              port: cfg.port ?? 55444,
-              database: cfg.database,
-              user: cfg.username,
-              password: cfg.password,
+              server: cfg.host, port: cfg.port ?? 55444, database: cfg.database,
+              user: cfg.username, password: cfg.password,
               options: { encrypt: false, trustServerCertificate: true },
-              connectionTimeout: 30000,
-              requestTimeout: 30000,
+              connectionTimeout: 30000, requestTimeout: 30000,
             });
             const res = await pool.request().query(`
               SELECT CAST(COALESCE(SUM(v.VEN_TOTAL), 0) as float) as total
-              FROM VENDAS v
-              WHERE v.VEN_SITUACAO = 2
-                AND YEAR(v.VEN_DATA_FIM) = ${year}
-                AND MONTH(v.VEN_DATA_FIM) = ${mon}
+              FROM VENDAS v WHERE v.VEN_SITUACAO = 2
+                AND YEAR(v.VEN_DATA_FIM) = ${year} AND MONTH(v.VEN_DATA_FIM) = ${mon}
             `);
             receitaInove = Number(res.recordset[0]?.total) || 0;
             fonteReceita = "inove";
             await pool.close();
           }
-        } catch {
-          // fallback local
-        }
+        } catch { /* ignora */ }
       }
 
-      // 1c. Fallback final: importações locais confirmadas
+      // 1d. Fallback final: importações locais confirmadas
       if (receitaInove === 0) {
         const rows = await db
           .select({ total: sql<number>`COALESCE(SUM(${salesImports.totalRevenue}), 0)` })
           .from(salesImports)
-          .where(
-            and(
-              eq(salesImports.status, "confirmed"),
-              sql`${salesImports.referenceMonth} = ${month}`
-            )
-          );
+          .where(and(eq(salesImports.status, "confirmed"), sql`${salesImports.referenceMonth} = ${month}`));
         receitaInove = Number(rows[0]?.total) || 0;
         fonteReceita = "local";
       }

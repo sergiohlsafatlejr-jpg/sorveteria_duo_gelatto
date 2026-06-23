@@ -146,8 +146,15 @@ export default function FinOtimizacao() {
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wide">Receita</p>
                     <p className="text-xl font-bold text-green-600 mt-1">{fmt(data.receitaInove)}</p>
-                    <Badge variant="outline" className="text-[10px] mt-1">
-                      {data.fonteReceita === "previsao" ? "📅 Previsão de Faturamento" : data.fonteReceita === "inove" ? "● PDV INOVE" : "⚠ Dados locais"}
+                    <Badge variant="outline" className={`text-[10px] mt-1 ${
+                      data.fonteReceita === "projecao" ? "bg-purple-500/20 text-purple-300 border-purple-500/30" :
+                      data.fonteReceita === "previsao" ? "bg-blue-500/20 text-blue-300 border-blue-500/30" :
+                      data.fonteReceita === "inove" ? "bg-green-500/20 text-green-300 border-green-500/30" :
+                      "bg-yellow-500/20 text-yellow-300 border-yellow-500/30"
+                    }`}>
+                      {data.fonteReceita === "projecao" ? "📊 Projeção de Faturamento" :
+                       data.fonteReceita === "previsao" ? "📅 Faturamento Real Importado" :
+                       data.fonteReceita === "inove" ? "● PDV INOVE" : "⚠ Dados locais"}
                     </Badge>
                   </div>
                   <TrendingUp className="w-8 h-8 text-green-500/30" />
