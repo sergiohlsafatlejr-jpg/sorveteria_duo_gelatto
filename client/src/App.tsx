@@ -26,6 +26,7 @@ import FinReceivables from "./pages/fin/FinReceivables";
 import FinBankStatements from "./pages/fin/FinBankStatements";
 import FinCosts from "./pages/fin/FinCosts";
 import FinDRE from "./pages/fin/FinDRE";
+import FinOtimizacao from "./pages/fin/FinOtimizacao";
 import FinRevenueForecast from "./pages/fin/FinRevenueForecast";
 import FinGoals from "./pages/fin/FinGoals";
 import FinSettings from "./pages/fin/FinSettings";
@@ -94,6 +95,7 @@ function Router() {
       <Route path="/fin/bank-statements">{() => <ProtectedRoute path="/fin/bank-statements"><FinBankStatements /></ProtectedRoute>}</Route>
       <Route path="/fin/costs">{() => <ProtectedRoute path="/fin/costs"><FinCosts /></ProtectedRoute>}</Route>
       <Route path="/fin/dre">{() => <ProtectedRoute path="/fin/dre"><FinDRE /></ProtectedRoute>}</Route>
+      <Route path="/fin/otimizacao">{() => <ProtectedRoute path="/fin/otimizacao"><FinOtimizacao /></ProtectedRoute>}</Route>
       <Route path="/fin/categories">{() => <ProtectedRoute path="/fin/categories"><FinCategories /></ProtectedRoute>}</Route>
       <Route path="/fin/banks">{() => <ProtectedRoute path="/fin/banks"><FinBanks /></ProtectedRoute>}</Route>
       <Route path="/fin/costs-register">{() => <ProtectedRoute path="/fin/costs-register"><FinCostsRegister /></ProtectedRoute>}</Route>

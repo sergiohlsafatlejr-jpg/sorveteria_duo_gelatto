@@ -12,6 +12,18 @@ import {
   getStockSummaryReport,
   getWeeklyStockTurnoverReport,
 } from "../db.reports";
+import { invokeLLM } from "../_core/llm";
+import { getDb } from "../db";
+import {
+  finTransactions,
+  finCategories,
+  finCosts,
+  inoveConnectorConfig,
+  salesImports,
+  salesImportItems,
+} from "../../drizzle/schema";
+import { and, eq, sql, desc } from "drizzle-orm";
+import * as mssql from "mssql";
 
 export const reportsRouter = router({
   // Meses disponíveis (com vendas confirmadas)
@@ -79,5 +91,205 @@ export const reportsRouter = router({
     .input(z.object({ weeksBack: z.number().min(2).max(12).default(6) }).optional())
     .query(async ({ input }) => {
       return getWeeklyStockTurnoverReport(input?.weeksBack ?? 6);
+    }),
+
+  // ─── Análise de Otimização Financeira com IA ─────────────────────────────
+  // Cruza receita real (INOVE) com despesas do mês, identifica onde cortar
+  // para fechar no positivo, com recomendações da IA.
+  analiseOtimizacao: protectedProcedure
+    .input(
+      z.object({
+        month: z.string(), // 'YYYY-MM'
+        orcamentoCompras: z.number().optional(), // orçamento disponível para compras
+      })
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const { month } = input;
+      const [year, mon] = month.split("-").map(Number);
+
+      // ── 1. Receita real do INOVE ──────────────────────────────────────────
+      let receitaInove = 0;
+      let fonteReceita: "inove" | "local" = "local";
+      try {
+        const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+        if (connRows.length && connRows[0].active) {
+          const cfg = connRows[0];
+          const pool = await mssql.connect({
+            server: cfg.host,
+            port: cfg.port ?? 55444,
+            database: cfg.database,
+            user: cfg.username,
+            password: cfg.password,
+            options: { encrypt: false, trustServerCertificate: true },
+            connectionTimeout: 30000,
+            requestTimeout: 30000,
+          });
+          const res = await pool.request().query(`
+            SELECT CAST(COALESCE(SUM(v.VEN_TOTAL), 0) as float) as total
+            FROM VENDAS v
+            WHERE v.VEN_SITUACAO = 2
+              AND YEAR(v.VEN_DATA_FIM) = ${year}
+              AND MONTH(v.VEN_DATA_FIM) = ${mon}
+          `);
+          receitaInove = Number(res.recordset[0]?.total) || 0;
+          fonteReceita = "inove";
+          await pool.close();
+        }
+      } catch {
+        // fallback local
+      }
+
+      if (receitaInove === 0) {
+        // Fallback: busca nas importações locais
+        const rows = await db
+          .select({ total: sql<number>`COALESCE(SUM(${salesImports.totalRevenue}), 0)` })
+          .from(salesImports)
+          .where(
+            and(
+              eq(salesImports.status, "confirmed"),
+              sql`${salesImports.referenceMonth} = ${month}`
+            )
+          );
+        receitaInove = Number(rows[0]?.total) || 0;
+        fonteReceita = "local";
+      }
+
+      // ── 2. Despesas do mês por categoria e tipo (fixo/variável) ──────────
+      const despesasRows = await db
+        .select({
+          categoryName: finCategories.name,
+          categoryId: finTransactions.categoryId,
+          totalAmount: sql<number>`COALESCE(SUM(ABS(${finTransactions.amount})), 0)`,
+          count: sql<number>`COUNT(*)`,
+          isPaid: sql<number>`SUM(CASE WHEN ${finTransactions.isPaid} = 1 THEN 1 ELSE 0 END)`,
+          isPending: sql<number>`SUM(CASE WHEN ${finTransactions.isPaid} = 0 THEN 1 ELSE 0 END)`,
+          paidAmount: sql<number>`COALESCE(SUM(CASE WHEN ${finTransactions.isPaid} = 1 THEN ABS(${finTransactions.amount}) ELSE 0 END), 0)`,
+          pendingAmount: sql<number>`COALESCE(SUM(CASE WHEN ${finTransactions.isPaid} = 0 THEN ABS(${finTransactions.amount}) ELSE 0 END), 0)`,
+        })
+        .from(finTransactions)
+        .leftJoin(finCategories, eq(finTransactions.categoryId, finCategories.id))
+        .where(
+          sql`DATE_FORMAT(${finTransactions.dueDate}, '%Y-%m') = ${month}`
+        )
+        .groupBy(finCategories.name, finTransactions.categoryId)
+        .orderBy(desc(sql`COALESCE(SUM(ABS(${finTransactions.amount})), 0)`));
+
+      // ── 3. Custos fixos cadastrados (finCosts) ────────────────────────────
+      const custosFixos = await db
+        .select({
+          name: finCosts.name,
+          type: finCosts.type,
+          costCategory: finCosts.costCategory,
+          amount: finCosts.amount,
+        })
+        .from(finCosts)
+        .orderBy(desc(finCosts.amount));
+
+      const totalCustosFixosCadastrados = custosFixos
+        .filter((c) => c.type === "fixed")
+        .reduce((s, c) => s + Number(c.amount), 0);
+
+      const totalCustosVariaveisCadastrados = custosFixos
+        .filter((c) => c.type === "variable")
+        .reduce((s, c) => s + Number(c.amount), 0);
+
+      // ── 4. Totais e cálculos ──────────────────────────────────────────────
+      const despesas = despesasRows.map((r) => ({
+        categoria: r.categoryName || "Sem categoria",
+        total: Number(r.totalAmount),
+        pago: Number(r.paidAmount),
+        pendente: Number(r.pendingAmount),
+        qtd: Number(r.count),
+      }));
+
+      const totalDespesas = despesas.reduce((s, d) => s + d.total, 0);
+      const totalPago = despesas.reduce((s, d) => s + d.pago, 0);
+      const totalPendente = despesas.reduce((s, d) => s + d.pendente, 0);
+
+      const resultado = receitaInove - totalDespesas;
+      const margemLiquida = receitaInove > 0 ? (resultado / receitaInove) * 100 : 0;
+
+      // Ponto de equilíbrio: receita necessária para cobrir todos os custos
+      const pontoEquilibrio = totalDespesas;
+      const deficitSuperavit = receitaInove - pontoEquilibrio;
+
+      // Categorias com maior potencial de corte (top 5 maiores despesas)
+      const topDespesas = [...despesas]
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 8);
+
+      // Percentual de cada categoria sobre a receita
+      const despesasComPercentual = despesas.map((d) => ({
+        ...d,
+        percentualReceita: receitaInove > 0 ? (d.total / receitaInove) * 100 : 0,
+        percentualDespesas: totalDespesas > 0 ? (d.total / totalDespesas) * 100 : 0,
+      }));
+
+      // ── 5. Análise da IA ──────────────────────────────────────────────────
+      let analiseIA = "";
+      try {
+        const prompt = `Você é um consultor financeiro especializado em sorveteria/varejo alimentar.
+
+DADOS FINANCEIROS — ${month}:
+- Receita Total (PDV): R$ ${receitaInove.toFixed(2)} (fonte: ${fonteReceita})
+- Total de Despesas: R$ ${totalDespesas.toFixed(2)}
+- Resultado: R$ ${resultado.toFixed(2)} (${resultado >= 0 ? "SUPERÁVIT" : "DÉFICIT"})
+- Margem Líquida: ${margemLiquida.toFixed(1)}%
+- Despesas Pagas: R$ ${totalPago.toFixed(2)}
+- Despesas Pendentes: R$ ${totalPendente.toFixed(2)}
+
+DESPESAS POR CATEGORIA (maiores primeiro):
+${topDespesas.map((d, i) => `${i + 1}. ${d.categoria}: R$ ${d.total.toFixed(2)} (${receitaInove > 0 ? ((d.total / receitaInove) * 100).toFixed(1) : 0}% da receita)`).join("\n")}
+
+CUSTOS FIXOS CADASTRADOS: R$ ${totalCustosFixosCadastrados.toFixed(2)}
+CUSTOS VARIÁVEIS CADASTRADOS: R$ ${totalCustosVariaveisCadastrados.toFixed(2)}
+
+${input.orcamentoCompras ? `ORÇAMENTO DISPONÍVEL PARA COMPRAS: R$ ${input.orcamentoCompras.toFixed(2)}` : ""}
+
+Analise os dados e forneça:
+1. **Diagnóstico** (2-3 frases): situação financeira atual
+2. **Top 3 cortes prioritários**: onde reduzir despesas com maior impacto (seja específico com valores)
+3. **Meta de receita**: qual receita mínima necessária para fechar no positivo
+4. **Alerta de risco**: qual categoria de despesa está mais descontrolada
+5. **Recomendação de compras**: se há orçamento, como priorizar as compras para maximizar margem
+
+Seja direto, prático e use números reais. Máximo 300 palavras.`;
+
+        const llmResp = await invokeLLM({
+          messages: [
+            { role: "system", content: "Você é um consultor financeiro especializado em sorveteria/varejo alimentar. Responda sempre em português brasileiro, de forma direta e prática." },
+            { role: "user", content: prompt },
+          ],
+        });
+        analiseIA = String(llmResp?.choices?.[0]?.message?.content ?? "");
+      } catch {
+        analiseIA = "Análise da IA temporariamente indisponível.";
+      }
+
+      return {
+        month,
+        fonteReceita,
+        receitaInove,
+        totalDespesas,
+        totalPago,
+        totalPendente,
+        resultado,
+        margemLiquida: parseFloat(margemLiquida.toFixed(2)),
+        pontoEquilibrio,
+        deficitSuperavit,
+        despesas: despesasComPercentual,
+        custosFixos: custosFixos.map((c) => ({
+          name: c.name,
+          type: c.type,
+          costCategory: c.costCategory,
+          amount: Number(c.amount),
+        })),
+        totalCustosFixosCadastrados,
+        totalCustosVariaveisCadastrados,
+        analiseIA,
+      };
     }),
 });
