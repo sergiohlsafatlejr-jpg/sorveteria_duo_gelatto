@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import BackButton from "@/components/BackButton";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,25 @@ const PRIORIDADE_CONFIG = {
   baixa: { label: "Baixa", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30", icon: CheckCircle2 },
 };
 
+// Cabeçalho de coluna ordenável
+function SortTh({ col, label, align, sortCol, sortDir, onSort }: {
+  col: string; label: string; align: "left" | "center" | "right";
+  sortCol: string; sortDir: "asc" | "desc"; onSort: (c: string) => void;
+}) {
+  const active = sortCol === col;
+  const arrow = active ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕";
+  return (
+    <th
+      className={`px-3 py-3 font-medium cursor-pointer select-none whitespace-nowrap text-${align} ${
+        active ? "text-primary" : "text-muted-foreground"
+      } hover:text-foreground transition-colors`}
+      onClick={() => onSort(col)}
+    >
+      {label}<span className="text-xs opacity-60">{arrow}</span>
+    </th>
+  );
+}
+
 export default function PurchaseSuggestion() {
   const [diasAnalise, setDiasAnalise] = useState(7);
   const [diasProjecao, setDiasProjecao] = useState(7);
@@ -42,6 +61,19 @@ export default function PurchaseSuggestion() {
   const [filtroGrupo, setFiltroGrupo] = useState(""); // subfiltro grupo INOVE
   const [filtroSubgrupo, setFiltroSubgrupo] = useState(""); // subfiltro subgrupo INOVE
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set()); // marcadores de seleção
+  const [sortCol, setSortCol] = useState<string>("necessidadeComSeguranca"); // coluna de ordenação
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc"); // direção
+
+  const handleSort = useCallback((col: string) => {
+    setSortCol(prev => {
+      if (prev === col) {
+        setSortDir(d => d === "asc" ? "desc" : "asc");
+        return col;
+      }
+      setSortDir("desc");
+      return col;
+    });
+  }, []);
 
   const { data, isLoading, error, refetch } = trpc.inove.getSugestaoCompras.useQuery(
     { diasAnalise, diasProjecao, fatorSeguranca },
@@ -66,14 +98,32 @@ export default function PurchaseSuggestion() {
     return Array.from(set).filter(Boolean).sort();
   }, [data, filtroGrupo]);
 
-  const sugestoesFiltradas = (data?.sugestoes ?? []).filter(s => {
-    if (apenasComSugestao && s.sugestaoCompra <= 0) return false;
-    if (filtroPrioridade !== "todas" && s.prioridade !== filtroPrioridade) return false;
-    if (filtroNome && !s.nome?.toLowerCase().includes(filtroNome.toLowerCase())) return false;
-    if (filtroGrupo && s.grupoNome !== filtroGrupo) return false;
-    if (filtroSubgrupo && s?.grupoNome !== filtroSubgrupo) return false;
-    return true;
-  });
+  const sugestoesFiltradas = useMemo(() => {
+    const filtered = (data?.sugestoes ?? []).filter(s => {
+      if (apenasComSugestao && s.sugestaoCompra <= 0) return false;
+      if (filtroPrioridade !== "todas" && s.prioridade !== filtroPrioridade) return false;
+      if (filtroNome && !s.nome?.toLowerCase().includes(filtroNome.toLowerCase())) return false;
+      if (filtroGrupo && s.grupoNome !== filtroGrupo) return false;
+      if (filtroSubgrupo && s?.grupoNome !== filtroSubgrupo) return false;
+      return true;
+    });
+    return [...filtered].sort((a, b) => {
+      let va: number | string = 0;
+      let vb: number | string = 0;
+      if (sortCol === "qtdVendidaSemana") { va = a.qtdVendidaSemana; vb = b.qtdVendidaSemana; }
+      else if (sortCol === "qtdVendidaMes") { va = a.qtdVendidaSemana; vb = b.qtdVendidaSemana; } // alias
+      else if (sortCol === "estoqueAtual") { va = a.estoqueAtual ?? Infinity; vb = b.estoqueAtual ?? Infinity; }
+      else if (sortCol === "necessidadeComSeguranca") { va = a.necessidadeComSeguranca; vb = b.necessidadeComSeguranca; }
+      else if (sortCol === "custoTotal") { va = a.custoTotal ?? 0; vb = b.custoTotal ?? 0; }
+      else if (sortCol === "sugestaoCompra") { va = a.sugestaoCompra; vb = b.sugestaoCompra; }
+      else if (sortCol === "mediaDiaria") { va = a.mediaDiaria; vb = b.mediaDiaria; }
+      else if (sortCol === "nome") { va = a.nome ?? ""; vb = b.nome ?? ""; }
+      if (typeof va === "string" && typeof vb === "string") {
+        return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      }
+      return sortDir === "asc" ? (va as number) - (vb as number) : (vb as number) - (va as number);
+    });
+  }, [data, apenasComSugestao, filtroPrioridade, filtroNome, filtroGrupo, filtroSubgrupo, sortCol, sortDir]);
 
   const totalCustoFiltrado = sugestoesFiltradas.reduce((s, x) => s + (x.custoTotal ?? 0), 0);
 
@@ -351,14 +401,14 @@ export default function PurchaseSuggestion() {
             <thead className="bg-muted/30 border-b border-border/50">
               <tr>
                 <th className="w-10 px-3 py-3 text-center"></th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Produto</th>
-                <th className="text-left px-3 py-3 font-medium text-muted-foreground whitespace-nowrap">Grupo / Subgrupo</th>
-                <th className="text-center px-3 py-3 font-medium text-muted-foreground">Qtd. Vendida</th>
-                <th className="text-center px-3 py-3 font-medium text-muted-foreground">Média/Dia</th>
-                <th className="text-center px-3 py-3 font-medium text-muted-foreground">Necessidade</th>
-                <th className="text-center px-3 py-3 font-medium text-muted-foreground">Estoque Atual</th>
-                <th className="text-center px-3 py-3 font-medium text-muted-foreground font-semibold text-primary">Sugestão Compra</th>
-                <th className="text-right px-3 py-3 font-medium text-muted-foreground">Custo Est.</th>
+                <SortTh col="nome" label="Produto" align="left" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <th className="text-left px-3 py-3 font-medium text-muted-foreground whitespace-nowrap">Grupo</th>
+                <SortTh col="qtdVendidaSemana" label="Qtd. Vendida" align="center" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortTh col="mediaDiaria" label="Média/Dia" align="center" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortTh col="necessidadeComSeguranca" label="Necessidade" align="center" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortTh col="estoqueAtual" label="Estoque Atual" align="center" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortTh col="sugestaoCompra" label="Sugestão Compra" align="center" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortTh col="custoTotal" label="Custo Est." align="right" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground">Prioridade</th>
               </tr>
             </thead>
