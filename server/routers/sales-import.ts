@@ -24,6 +24,7 @@ import {
   matchProductsToStock,
   importDiarioExpress,
   getSalesAverageByProduct,
+  getSalesByPeriod,
 } from "../db.sales-import";
 import { invokeLLM } from "../_core/llm";
 
@@ -992,5 +993,15 @@ Use confiança > 0.7 apenas quando tiver certeza da correspondência.`;
     .input(z.object({ months: z.number().min(1).max(24).default(6) }))
     .query(async ({ input }) => {
       return getSalesAverageByProduct(input.months);
+    }),
+
+  // ─── Vendas por Período (data início / data fim) ─────────────────────────────
+  salesByPeriod: protectedProcedure
+    .input(z.object({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }))
+    .query(async ({ input }) => {
+      return getSalesByPeriod(input.from, input.to);
     }),
 });

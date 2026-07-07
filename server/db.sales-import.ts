@@ -7,7 +7,7 @@ import {
   stockMovements,
   finDailyRevenue,
 } from "../drizzle/schema";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -985,4 +985,121 @@ export async function getSalesAverageByProduct(months = 6): Promise<ProductSales
   // Ordenar por média decrescente (mais vendidos primeiro)
   result.sort((a, b) => b.avgQty - a.avgQty);
   return result;
+}
+
+// ─── Vendas por Período (data início / data fim) ──────────────────────────────
+export interface SalesByPeriodItem {
+  externalCode: string;
+  productName: string;
+  totalQuantity: number;
+  totalRevenue: number;
+  unitPrice: number;
+  costPrice: number;
+  totalCost: number;
+  grossMargin: number; // %
+}
+
+export async function getSalesByPeriod(
+  from: string, // YYYY-MM-DD
+  to: string,   // YYYY-MM-DD
+): Promise<{
+  items: SalesByPeriodItem[];
+  totalRevenue: number;
+  totalCost: number;
+  totalQty: number;
+  grossMargin: number;
+}> {
+  // getDb e sql já estão disponíveis via importações estáticas do arquivo
+
+  const db = await getDb();
+  if (!db) return { items: [], totalRevenue: 0, totalCost: 0, totalQty: 0, grossMargin: 0 };
+
+  // Buscar importações confirmadas cujo saleDate (ou referenceMonth) está no período
+  // Para importações diárias: filtra por saleDate
+  // Para importações mensais: filtra pelo referenceMonth (YYYY-MM) dentro do período
+  const fromMonth = from.substring(0, 7); // YYYY-MM
+  const toMonth = to.substring(0, 7);     // YYYY-MM
+
+  const imports = await db
+    .select({ id: salesImports.id, importMode: salesImports.importMode, saleDate: salesImports.saleDate })
+    .from(salesImports)
+    .where(
+      and(
+        eq(salesImports.status, "confirmed"),
+        eq(salesImports.archived, false),
+        sql`(
+          (${salesImports.importMode} = 'daily' AND CAST(${salesImports.saleDate} AS DATE) >= ${from} AND CAST(${salesImports.saleDate} AS DATE) <= ${to})
+          OR
+          (${salesImports.importMode} != 'daily' AND ${salesImports.referenceMonth} >= ${fromMonth} AND ${salesImports.referenceMonth} <= ${toMonth})
+        )`
+      )
+    );
+
+  if (imports.length === 0) {
+    return { items: [], totalRevenue: 0, totalCost: 0, totalQty: 0, grossMargin: 0 };
+  }
+
+  const importIds = imports.map((i: { id: number }) => i.id);
+
+  // Buscar itens com custo do produto
+  const rows = await db
+    .select({
+      externalCode: salesImportItems.externalCode,
+      externalName: salesImportItems.externalName,
+      productName: products.name,
+      costPrice: products.costPrice,
+      quantity: salesImportItems.quantity,
+      totalPrice: salesImportItems.totalPrice,
+      unitPrice: salesImportItems.unitPrice,
+    })
+    .from(salesImportItems)
+    .leftJoin(products, eq(salesImportItems.productId, products.id))
+    .where(inArray(salesImportItems.importId, importIds));
+
+  // Agregar por produto
+  const agg: Record<string, SalesByPeriodItem> = {};
+  for (const row of rows) {
+    const key = row.externalCode;
+    const qty = Number(row.quantity) || 0;
+    const rev = Number(row.totalPrice) || 0;
+    const cost = Number(row.costPrice) || 0;
+    const unit = Number(row.unitPrice) || 0;
+
+    if (!agg[key]) {
+      agg[key] = {
+        externalCode: key,
+        productName: row.productName ?? row.externalName ?? key,
+        totalQuantity: 0,
+        totalRevenue: 0,
+        unitPrice: unit,
+        costPrice: cost,
+        totalCost: 0,
+        grossMargin: 0,
+      };
+    }
+    agg[key].totalQuantity += qty;
+    agg[key].totalRevenue += rev;
+    agg[key].totalCost += cost * qty;
+    // Atualiza custo se o produto estiver vinculado (costPrice > 0)
+    if (cost > 0) agg[key].costPrice = cost;
+  }
+
+  // Calcular margem por produto
+  const items: SalesByPeriodItem[] = Object.values(agg)
+    .map(item => ({
+      ...item,
+      grossMargin: item.totalRevenue > 0
+        ? parseFloat(((item.totalRevenue - item.totalCost) / item.totalRevenue * 100).toFixed(1))
+        : 0,
+    }))
+    .sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+  const totalRevenue = items.reduce((s, i) => s + i.totalRevenue, 0);
+  const totalCost = items.reduce((s, i) => s + i.totalCost, 0);
+  const totalQty = items.reduce((s, i) => s + i.totalQuantity, 0);
+  const grossMargin = totalRevenue > 0
+    ? parseFloat(((totalRevenue - totalCost) / totalRevenue * 100).toFixed(1))
+    : 0;
+
+  return { items, totalRevenue, totalCost, totalQty, grossMargin };
 }
