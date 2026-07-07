@@ -74,7 +74,7 @@ function VendasSemanaTab() {
   const [queryFrom, setQueryFrom] = useState(defaultDates.from);
   const [queryTo, setQueryTo] = useState(defaultDates.to);
   const [search, setSearch] = useState("");
-  const [filtroGrupo, setFiltroGrupo] = useState("");
+  const [filtroGrupo, setFiltroGrupo] = useState("__all__");
 
   const { data, isLoading, error } = trpc.inove.getSalesByPeriodInove.useQuery(
     { from: queryFrom, to: queryTo },
@@ -114,7 +114,7 @@ function VendasSemanaTab() {
 
   const filtered = useMemo(() => {
     let items = data?.itens ?? [];
-    if (filtroGrupo) items = items.filter(i => i.grupoNome === filtroGrupo);
+    if (filtroGrupo && filtroGrupo !== "__all__") items = items.filter(i => i.grupoNome === filtroGrupo);
     if (search) items = items.filter(i =>
       i.nome.toLowerCase().includes(search.toLowerCase()) ||
       (i.codPdv ?? "").includes(search)
@@ -270,7 +270,7 @@ function VendasSemanaTab() {
                   <SelectValue placeholder="Todos os grupos" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Todos os grupos</SelectItem>
+                  <SelectItem value="__all__">Todos os grupos</SelectItem>
                   {grupos.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
                 </SelectContent>
               </Select>
