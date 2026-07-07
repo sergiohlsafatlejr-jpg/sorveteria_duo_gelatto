@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,49 +62,23 @@ function VendasSemanaTab() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
-  // Buscar meses com dados confirmados
-  const { data: confirmedMonths } = trpc.salesImport.getConfirmedMonths.useQuery();
-
-  // Calcular período inicial: se há mês com dados, usa o mais recente; senão usa semana atual
-  const initialDates = useMemo(() => {
-    if (confirmedMonths && confirmedMonths.length > 0) {
-      // Pega o mês mais recente e define todo o mês como período
-      const latestMonth = confirmedMonths[0]; // já ordenado desc
-      const [y, m] = latestMonth.split("-").map(Number);
-      const first = new Date(y, m - 1, 1);
-      const last = new Date(y, m, 0);
-      return { from: toDateStr(first), to: toDateStr(last) };
-    }
-    // Fallback: semana atual
+  // Inicializar com os últimos 7 dias
+  const defaultDates = useMemo(() => {
     const today = new Date();
-    const dayOfWeek = today.getDay();
-    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const monday = new Date(today);
-    monday.setDate(today.getDate() + diffToMonday);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    return { from: toDateStr(monday), to: toDateStr(sunday) };
-  }, [confirmedMonths]);
+    const d7 = new Date(today); d7.setDate(today.getDate() - 6);
+    return { from: toDateStr(d7), to: toDateStr(today) };
+  }, []);
 
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [queryFrom, setQueryFrom] = useState("");
-  const [queryTo, setQueryTo] = useState("");
+  const [from, setFrom] = useState(defaultDates.from);
+  const [to, setTo] = useState(defaultDates.to);
+  const [queryFrom, setQueryFrom] = useState(defaultDates.from);
+  const [queryTo, setQueryTo] = useState(defaultDates.to);
   const [search, setSearch] = useState("");
-  const [initialized, setInitialized] = useState(false);
+  const [filtroGrupo, setFiltroGrupo] = useState("");
 
-  // Inicializar datas quando os meses confirmados chegarem (sem loop infinito)
-  if (!initialized && initialDates.from && !from) {
-    setFrom(initialDates.from);
-    setTo(initialDates.to);
-    setQueryFrom(initialDates.from);
-    setQueryTo(initialDates.to);
-    setInitialized(true);
-  }
-
-  const { data, isLoading, refetch } = trpc.salesImport.salesByPeriod.useQuery(
+  const { data, isLoading, error } = trpc.inove.getSalesByPeriodInove.useQuery(
     { from: queryFrom, to: queryTo },
-    { enabled: !!queryFrom && !!queryTo }
+    { enabled: !!queryFrom && !!queryTo, retry: 1 }
   );
 
   function handleBuscar() {
@@ -133,12 +107,23 @@ function VendasSemanaTab() {
     }
   }
 
-  const items = data?.items ?? [];
-  const filtered = search
-    ? items.filter(i => i.productName.toLowerCase().includes(search.toLowerCase()) || i.externalCode.includes(search))
-    : items;
+  const grupos = useMemo(() => {
+    if (!data?.itens) return [];
+    return Array.from(new Set(data.itens.map(i => i.grupoNome))).sort();
+  }, [data]);
+
+  const filtered = useMemo(() => {
+    let items = data?.itens ?? [];
+    if (filtroGrupo) items = items.filter(i => i.grupoNome === filtroGrupo);
+    if (search) items = items.filter(i =>
+      i.nome.toLowerCase().includes(search.toLowerCase()) ||
+      (i.codPdv ?? "").includes(search)
+    );
+    return items;
+  }, [data, filtroGrupo, search]);
 
   function fmtDate(s: string) {
+    if (!s) return "";
     const [y, m, d] = s.split("-");
     return `${d}/${m}/${y}`;
   }
@@ -151,14 +136,15 @@ function VendasSemanaTab() {
           name: "Vendas do Período",
           data: filtered.map((item, idx) => ({
             "#": idx + 1,
-            "Cód. PDV": item.externalCode,
-            "Produto": item.productName,
-            "Qtd. Vendida": item.totalQuantity,
-            "Preço Médio": fmtBRL(item.totalQuantity > 0 ? item.totalRevenue / item.totalQuantity : 0),
+            "Cód. PDV": item.codPdv ?? "",
+            "Produto": item.nome,
+            "Grupo": item.grupoNome,
+            "Qtd. Vendida": item.totalQty,
+            "Preço Médio": fmtBRL(item.precoMedio),
             "Faturamento": fmtBRL(item.totalRevenue),
-            "Custo Unit.": fmtBRL(item.costPrice),
-            "Custo Total": fmtBRL(item.totalCost),
-            "Margem Bruta": `${item.grossMargin}%`,
+            "Custo Unit.": item.custoProduto != null ? fmtBRL(item.custoProduto) : "",
+            "Custo Total": item.custoTotal != null ? fmtBRL(item.custoTotal) : "",
+            "Margem Bruta": item.margemBruta != null ? `${item.margemBruta}%` : "",
           }))
         },
         {
@@ -166,10 +152,10 @@ function VendasSemanaTab() {
           data: [{
             "Período": `${fmtDate(queryFrom)} a ${fmtDate(queryTo)}`,
             "Total Produtos": filtered.length,
-            "Qtd. Total Vendida": data?.totalQty ?? 0,
-            "Faturamento Total": fmtBRL(data?.totalRevenue ?? 0),
-            "Custo Total": fmtBRL(data?.totalCost ?? 0),
-            "Margem Bruta": `${data?.grossMargin ?? 0}%`,
+            "Qtd. Total Vendida": data?.resumo.totalQty ?? 0,
+            "Faturamento Total": fmtBRL(data?.resumo.totalRevenue ?? 0),
+            "Custo Total": fmtBRL(data?.resumo.totalCusto ?? 0),
+            "Margem Bruta": `${data?.resumo.margemGeral ?? 0}%`,
           }]
         }
       ],
@@ -218,37 +204,17 @@ function VendasSemanaTab() {
           <RefreshCw className="h-8 w-8 mx-auto animate-spin mb-2" />
           Buscando vendas...
         </div>
-      ) : !data || items.length === 0 ? (
+      ) : error ? (
+        <Card className="p-10 text-center">
+          <AlertCircle className="h-14 w-14 mx-auto mb-3 text-rose-400" />
+          <p className="text-muted-foreground font-medium">Erro ao buscar dados do INOVE</p>
+          <p className="text-xs text-muted-foreground mt-1">{error.message}</p>
+        </Card>
+      ) : !data || filtered.length === 0 ? (
         <Card className="p-10 text-center">
           <Package className="h-14 w-14 mx-auto mb-3 text-muted-foreground/30" />
           <p className="text-muted-foreground">Nenhuma venda encontrada para o período selecionado.</p>
-          {confirmedMonths && confirmedMonths.length > 0 ? (
-            <p className="text-xs text-muted-foreground mt-2">
-              Períodos com dados disponíveis:{" "}
-              {confirmedMonths.slice(0, 5).map(m => {
-                const [y, mo] = m.split("-");
-                const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-                return (
-                  <button
-                    key={m}
-                    className="underline text-purple-600 mx-1"
-                    onClick={() => {
-                      const [yr, mn] = m.split("-").map(Number);
-                      const first = new Date(yr, mn - 1, 1);
-                      const last = new Date(yr, mn, 0);
-                      const f = toDateStr(first);
-                      const t = toDateStr(last);
-                      setFrom(f); setTo(t); setQueryFrom(f); setQueryTo(t);
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground mt-1">Verifique se há importações confirmadas neste intervalo de datas.</p>
-          )}
+          <p className="text-xs text-muted-foreground mt-1">Verifique se há vendas no INOVE neste intervalo de datas.</p>
         </Card>
       ) : (
         <>
@@ -267,37 +233,48 @@ function VendasSemanaTab() {
                 <DollarSign className="h-3 w-3" />
                 Faturamento
               </p>
-              <p className="text-xl font-bold">{fmtBRL(data.totalRevenue)}</p>
-              <p className="text-xs text-muted-foreground">{items.length} produtos vendidos</p>
+              <p className="text-xl font-bold">{fmtBRL(data.resumo.totalRevenue)}</p>
+              <p className="text-xs text-muted-foreground">{data.itens.length} produtos vendidos</p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <ShoppingCart className="h-3 w-3" />
                 Qtd. Total
               </p>
-              <p className="text-xl font-bold">{data.totalQty.toLocaleString("pt-BR")}</p>
-              <p className="text-xs text-muted-foreground">unidades</p>
+              <p className="text-xl font-bold">{data.resumo.totalQty.toLocaleString("pt-BR")}</p>
+              <p className="text-xs text-muted-foreground">{data.resumo.totalVendas} vendas</p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <Percent className="h-3 w-3" />
                 Margem Bruta
               </p>
-              <p className={`text-xl font-bold ${data.grossMargin >= 30 ? "text-green-600" : data.grossMargin >= 15 ? "text-amber-600" : "text-rose-600"}`}>
-                {data.grossMargin}%
+              <p className={`text-xl font-bold ${data.resumo.margemGeral >= 30 ? "text-green-600" : data.resumo.margemGeral >= 15 ? "text-amber-600" : "text-rose-600"}`}>
+                {data.resumo.margemGeral}%
               </p>
-              <p className="text-xs text-muted-foreground">Custo: {fmtBRL(data.totalCost)}</p>
+              <p className="text-xs text-muted-foreground">Custo: {fmtBRL(data.resumo.totalCusto)}</p>
             </Card>
           </div>
 
-          {/* Busca + Exportar */}
-          <div className="flex items-center gap-3">
+          {/* Busca + Filtro Grupo + Exportar */}
+          <div className="flex flex-wrap items-center gap-3">
             <Input
               placeholder="Buscar produto ou código..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="max-w-xs h-8 text-sm"
             />
+            {grupos.length > 0 && (
+              <Select value={filtroGrupo} onValueChange={setFiltroGrupo}>
+                <SelectTrigger className="w-44 h-8 text-sm">
+                  <SelectValue placeholder="Todos os grupos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Todos os grupos</SelectItem>
+                  {grupos.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -330,10 +307,8 @@ function VendasSemanaTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((item, idx) => {
-                      const unitPrice = item.totalQuantity > 0 ? item.totalRevenue / item.totalQuantity : 0;
-                      return (
-                        <tr key={item.externalCode} className="border-t hover:bg-muted/20">
+                    {filtered.map((item, idx) => (
+                        <tr key={item.produtoId} className="border-t hover:bg-muted/20">
                           <td className="p-3 text-muted-foreground text-xs">
                             <span
                               className="inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-xs font-bold"
@@ -343,64 +318,64 @@ function VendasSemanaTab() {
                             </span>
                           </td>
                           <td className="p-3">
-                            <p className="font-medium">{item.productName}</p>
+                            <p className="font-medium">{item.nome}</p>
+                            <p className="text-xs text-muted-foreground">{item.grupoNome}</p>
                           </td>
-                          <td className="p-3 font-mono text-xs text-muted-foreground">{item.externalCode}</td>
+                          <td className="p-3 font-mono text-xs text-muted-foreground">{item.codPdv ?? "—"}</td>
                           <td className="p-3 text-right tabular-nums font-semibold">
-                            {item.totalQuantity.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
+                            {item.totalQty.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
                           </td>
                           <td className="p-3 text-right tabular-nums text-muted-foreground">
-                            {fmtBRL(unitPrice)}
+                            {fmtBRL(item.precoMedio)}
                           </td>
                           <td className="p-3 text-right tabular-nums font-semibold">
                             {fmtBRL(item.totalRevenue)}
                           </td>
                           <td className="p-3 text-right tabular-nums text-muted-foreground">
-                            {item.costPrice > 0 ? fmtBRL(item.costPrice) : <span className="text-xs text-muted-foreground/50">—</span>}
+                            {item.custoProduto != null ? fmtBRL(item.custoProduto) : <span className="text-xs text-muted-foreground/50">—</span>}
                           </td>
                           <td className="p-3 text-right tabular-nums">
-                            {item.totalCost > 0 ? fmtBRL(item.totalCost) : <span className="text-xs text-muted-foreground/50">—</span>}
+                            {item.custoTotal != null ? fmtBRL(item.custoTotal) : <span className="text-xs text-muted-foreground/50">—</span>}
                           </td>
                           <td className="p-3 text-right">
-                            {item.costPrice > 0 ? (
+                            {item.margemBruta != null ? (
                               <Badge
                                 className={`text-xs ${
-                                  item.grossMargin >= 40 ? "bg-green-500/15 text-green-700 border-green-500/30" :
-                                  item.grossMargin >= 20 ? "bg-amber-500/15 text-amber-700 border-amber-500/30" :
+                                  item.margemBruta >= 40 ? "bg-green-500/15 text-green-700 border-green-500/30" :
+                                  item.margemBruta >= 20 ? "bg-amber-500/15 text-amber-700 border-amber-500/30" :
                                   "bg-rose-500/15 text-rose-700 border-rose-500/30"
                                 }`}
                               >
-                                {item.grossMargin}%
+                                {item.margemBruta}%
                               </Badge>
                             ) : (
                               <span className="text-xs text-muted-foreground/50">—</span>
                             )}
                           </td>
                         </tr>
-                      );
-                    })}
+                    ))}
                   </tbody>
                   <tfoot className="bg-muted/30 border-t-2">
                     <tr>
                       <td colSpan={3} className="p-3 font-semibold text-sm">Total</td>
                       <td className="p-3 text-right tabular-nums font-semibold">
-                        {data.totalQty.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
+                        {data.resumo.totalQty.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-3"></td>
                       <td className="p-3 text-right tabular-nums font-bold text-purple-600">
-                        {fmtBRL(data.totalRevenue)}
+                        {fmtBRL(data.resumo.totalRevenue)}
                       </td>
                       <td className="p-3"></td>
                       <td className="p-3 text-right tabular-nums font-semibold">
-                        {data.totalCost > 0 ? fmtBRL(data.totalCost) : "—"}
+                        {data.resumo.totalCusto > 0 ? fmtBRL(data.resumo.totalCusto) : "—"}
                       </td>
                       <td className="p-3 text-right">
-                        {data.totalCost > 0 ? (
+                        {data.resumo.totalCusto > 0 ? (
                           <Badge className={`text-xs ${
-                            data.grossMargin >= 40 ? "bg-green-500/15 text-green-700 border-green-500/30" :
-                            data.grossMargin >= 20 ? "bg-amber-500/15 text-amber-700 border-amber-500/30" :
+                            data.resumo.margemGeral >= 40 ? "bg-green-500/15 text-green-700 border-green-500/30" :
+                            data.resumo.margemGeral >= 20 ? "bg-amber-500/15 text-amber-700 border-amber-500/30" :
                             "bg-rose-500/15 text-rose-700 border-rose-500/30"
-                          }`}>{data.grossMargin}%</Badge>
+                          }`}>{data.resumo.margemGeral}%</Badge>
                         ) : "—"}
                       </td>
                     </tr>

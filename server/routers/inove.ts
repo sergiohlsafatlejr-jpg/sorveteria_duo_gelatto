@@ -2476,17 +2476,15 @@ export const inoveRouter = router({
                WHERE PRODUTO = p.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC), 0
             ) as float) as estoqueAtual,
             CAST(ISNULL(p.PRO_CUSTO, 0) as float) as custoProduto,
-            ISNULL(g.GRU_NOME, 'Sem Grupo') as grupoNome,
-            ISNULL(sg.SGR_NOME, '') as subgrupoNome
+            ISNULL(g.GRU_NOME, 'Sem Grupo') as grupoNome
           FROM ITENS_VENDAS iv
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
-          LEFT JOIN GRUPOS_DE_PRODUTOS g ON g.GRUPO = p.GRUPO
-          LEFT JOIN SUB_GRUPOS_DE_PRODUTOS sg ON sg.SUB_GRUPO = p.SUB_GRUPO AND sg.GRUPO = p.GRUPO
+          LEFT JOIN GRUPOS_DE_PRODUTOS g ON g.GRUPO_DE_PRODUTOS = p.GRUPO_DE_PRODUTOS
           WHERE v.VEN_SITUACAO = 2
             AND CAST(v.VEN_DATA_FIM as date) >= CAST(DATEADD(day, -${input.diasAnalise}, GETDATE()) as date)
             AND CAST(v.VEN_DATA_FIM as date) < CAST(GETDATE() as date)
-          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO, g.GRU_NOME, sg.SGR_NOME
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO, g.GRU_NOME
           ORDER BY qtdTotal DESC
         `);
 
@@ -2499,7 +2497,7 @@ export const inoveRouter = router({
 
         await pool.close();
 
-        type VendaRow = { produtoId: number; nome: string; codPdv: string; qtdTotal: number; faturamentoTotal: number; diasComVenda: number; estoqueAtual: number; custoProduto: number; grupoNome: string; subgrupoNome: string };
+        type VendaRow = { produtoId: number; nome: string; codPdv: string; qtdTotal: number; faturamentoTotal: number; diasComVenda: number; estoqueAtual: number; custoProduto: number; grupoNome: string };
         const vendas = vendasRes.recordset as VendaRow[];
         const periodo = periodoRes.recordset[0] as { dataInicio: string; dataFim: string };
 
@@ -2541,7 +2539,6 @@ export const inoveRouter = router({
             nome: v.nome,
             codPdv: v.codPdv,
             grupoNome: v.grupoNome ?? 'Sem Grupo',
-            subgrupoNome: v.subgrupoNome ?? '',
             qtdVendidaSemana: Number(v.qtdTotal),
             diasComVenda: Number(v.diasComVenda),
             mediaDiaria: Math.round(mediaDiaria * 100) / 100,
@@ -2831,5 +2828,101 @@ export const inoveRouter = router({
       if (!db) throw new Error('DB unavailable');
       await db.delete(purchaseProductConfig).where(eq(purchaseProductConfig.produtoId, input.produtoId));
       return { success: true };
+    }),
+
+  // ── Vendas por Período (INOVE direto) ─────────────────────────────────────────────
+  getSalesByPeriodInove: protectedProcedure
+    .input(z.object({
+      from: z.string(), // 'YYYY-MM-DD'
+      to: z.string(),   // 'YYYY-MM-DD'
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error('DB unavailable');
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (!connRows.length || !connRows[0].active) {
+        throw new Error('Conector INOVE inativo. Configure e ative o conector INOVE nas configurações.');
+      }
+      const config = connRows[0];
+      const pool = await createInovePool(config);
+      const fromDate = input.from;
+      const toDate = input.to;
+
+      try {
+        // Itens vendidos no período com custo e grupo
+        const itensRes = await pool.request().query(`
+          SELECT
+            p.PRODUTO as produtoId,
+            p.PRO_NOME as nome,
+            p.PRO_CODIGO as codPdv,
+            ISNULL(g.GRU_NOME, 'Sem Grupo') as grupoNome,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as totalQty,
+            CAST(SUM(iv.ITE_VALOR) as float) as precoMedio,
+            CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as totalRevenue,
+            CAST(ISNULL(p.PRO_CUSTO, 0) as float) as custoProduto
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          LEFT JOIN GRUPOS_DE_PRODUTOS g ON g.GRUPO_DE_PRODUTOS = p.GRUPO_DE_PRODUTOS
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
+            AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO, g.GRU_NOME
+          ORDER BY totalRevenue DESC
+        `);
+
+        // Resumo geral do período
+        const resumoRes = await pool.request().query(`
+          SELECT
+            CAST(COALESCE(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE), 0) as float) as totalRevenue,
+            CAST(COALESCE(SUM(iv.ITE_QUANTIDADE), 0) as float) as totalQty,
+            COUNT(DISTINCT v.VENDA) as totalVendas
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          WHERE v.VEN_SITUACAO = 2
+            AND CAST(v.VEN_DATA_FIM as date) >= '${fromDate}'
+            AND CAST(v.VEN_DATA_FIM as date) <= '${toDate}'
+        `);
+
+        await pool.close();
+
+        type ItemRow = { produtoId: number; nome: string; codPdv: string; grupoNome: string; totalQty: number; precoMedio: number; totalRevenue: number; custoProduto: number };
+        const itens = (itensRes.recordset as ItemRow[]).map(r => {
+          const qty = Number(r.totalQty);
+          const revenue = Number(r.totalRevenue);
+          const custo = Number(r.custoProduto);
+          const custoTotal = custo > 0 ? Math.round(qty * custo * 100) / 100 : null;
+          const margem = custoTotal !== null && revenue > 0 ? Math.round(((revenue - custoTotal) / revenue) * 10000) / 100 : null;
+          return {
+            produtoId: Number(r.produtoId),
+            nome: r.nome,
+            codPdv: r.codPdv,
+            grupoNome: r.grupoNome ?? 'Sem Grupo',
+            totalQty: qty,
+            precoMedio: qty > 0 ? Math.round((revenue / qty) * 100) / 100 : 0,
+            totalRevenue: Math.round(revenue * 100) / 100,
+            custoProduto: custo > 0 ? custo : null,
+            custoTotal,
+            margemBruta: margem,
+          };
+        });
+
+        const resumo = resumoRes.recordset[0] as { totalRevenue: number; totalQty: number; totalVendas: number };
+        const totalRevenue = Math.round(Number(resumo?.totalRevenue) * 100) / 100;
+        const totalQty = Number(resumo?.totalQty);
+        const totalVendas = Number(resumo?.totalVendas);
+        const totalCusto = itens.reduce((s, x) => s + (x.custoTotal ?? 0), 0);
+        const margemGeral = totalRevenue > 0 ? Math.round(((totalRevenue - totalCusto) / totalRevenue) * 10000) / 100 : 0;
+
+        return {
+          itens,
+          resumo: { totalRevenue, totalQty, totalVendas, totalCusto: Math.round(totalCusto * 100) / 100, margemGeral },
+          periodo: { from: fromDate, to: toDate },
+          fonte: 'inove' as const,
+        };
+      } catch (err) {
+        await pool.close().catch(() => {});
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
     }),
 });

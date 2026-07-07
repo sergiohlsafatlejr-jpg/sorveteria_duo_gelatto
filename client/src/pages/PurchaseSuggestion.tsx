@@ -61,7 +61,7 @@ export default function PurchaseSuggestion() {
   const subgruposDisponiveis = useMemo(() => {
     const set = new Set<string>();
     (data?.sugestoes ?? []).forEach(s => {
-      if (s.subgrupoNome && (!filtroGrupo || s.grupoNome === filtroGrupo)) set.add(s.subgrupoNome);
+      if (s?.grupoNome && (!filtroGrupo || s.grupoNome === filtroGrupo)) set.add(s?.grupoNome);
     });
     return Array.from(set).filter(Boolean).sort();
   }, [data, filtroGrupo]);
@@ -71,7 +71,7 @@ export default function PurchaseSuggestion() {
     if (filtroPrioridade !== "todas" && s.prioridade !== filtroPrioridade) return false;
     if (filtroNome && !s.nome?.toLowerCase().includes(filtroNome.toLowerCase())) return false;
     if (filtroGrupo && s.grupoNome !== filtroGrupo) return false;
-    if (filtroSubgrupo && s.subgrupoNome !== filtroSubgrupo) return false;
+    if (filtroSubgrupo && s?.grupoNome !== filtroSubgrupo) return false;
     return true;
   });
 
@@ -304,7 +304,7 @@ export default function PurchaseSuggestion() {
                 const rows = totalSelecionados.map(s => ({
                   "Produto": s.nome,
                   "Grupo": s.grupoNome,
-                  "Subgrupo": s.subgrupoNome,
+                  "Subgrupo": s?.grupoNome,
                   "Sugestão Compra": s.sugestaoCompra,
                   "Custo Unit.": s.custoProduto ?? "—",
                   "Custo Total": s.custoTotal ?? "—",
@@ -403,7 +403,7 @@ export default function PurchaseSuggestion() {
                     {/* Grupo / Subgrupo */}
                     <td className="px-3 py-3">
                       <div className="text-xs font-medium text-foreground">{s.grupoNome}</div>
-                      {s.subgrupoNome && <div className="text-[10px] text-muted-foreground">{s.subgrupoNome}</div>}
+                      {s?.grupoNome && <div className="text-[10px] text-muted-foreground">{s?.grupoNome}</div>}
                     </td>
                     <td className="px-3 py-3 text-center">
                       <span className="font-semibold">{fmtNum(s.qtdVendidaSemana, 0)}</span>
