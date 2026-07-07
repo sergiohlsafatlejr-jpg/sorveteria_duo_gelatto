@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import BackButton from "@/components/BackButton";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import {
   ShoppingCart, TrendingUp, Package, AlertTriangle, CheckCircle2,
-  Download, RefreshCw, Info, BarChart3, Loader2
+  Download, RefreshCw, Info, BarChart3, Loader2, CheckSquare, Square
 } from "lucide-react";
 import { exportToExcel } from "@/lib/exportExcel";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,9 @@ export default function PurchaseSuggestion() {
   const [filtroPrioridade, setFiltroPrioridade] = useState<"todas" | "alta" | "media" | "baixa">("todas");
   const [apenasComSugestao, setApenasComSugestao] = useState(true);
   const [queryKey, setQueryKey] = useState(0); // força re-fetch
+  const [filtroGrupo, setFiltroGrupo] = useState(""); // subfiltro grupo INOVE
+  const [filtroSubgrupo, setFiltroSubgrupo] = useState(""); // subfiltro subgrupo INOVE
+  const [selecionados, setSelecionados] = useState<Set<number>>(new Set()); // marcadores de seleção
 
   const { data, isLoading, error, refetch } = trpc.inove.getSugestaoCompras.useQuery(
     { diasAnalise, diasProjecao, fatorSeguranca },
@@ -48,14 +51,45 @@ export default function PurchaseSuggestion() {
     }
   );
 
+  // Listas dinâmicas de grupos e subgrupos do INOVE
+  const gruposDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    (data?.sugestoes ?? []).forEach(s => { if (s.grupoNome) set.add(s.grupoNome); });
+    return Array.from(set).sort();
+  }, [data]);
+
+  const subgruposDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    (data?.sugestoes ?? []).forEach(s => {
+      if (s.subgrupoNome && (!filtroGrupo || s.grupoNome === filtroGrupo)) set.add(s.subgrupoNome);
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [data, filtroGrupo]);
+
   const sugestoesFiltradas = (data?.sugestoes ?? []).filter(s => {
     if (apenasComSugestao && s.sugestaoCompra <= 0) return false;
     if (filtroPrioridade !== "todas" && s.prioridade !== filtroPrioridade) return false;
     if (filtroNome && !s.nome?.toLowerCase().includes(filtroNome.toLowerCase())) return false;
+    if (filtroGrupo && s.grupoNome !== filtroGrupo) return false;
+    if (filtroSubgrupo && s.subgrupoNome !== filtroSubgrupo) return false;
     return true;
   });
 
   const totalCustoFiltrado = sugestoesFiltradas.reduce((s, x) => s + (x.custoTotal ?? 0), 0);
+
+  // Helpers de seleção
+  const toggleSelecionado = (id: number) => {
+    setSelecionados(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selecionarTodos = () => setSelecionados(new Set(sugestoesFiltradas.map(s => s.produtoId)));
+  const deselecionarTodos = () => setSelecionados(new Set());
+  const totalSelecionados = sugestoesFiltradas.filter(s => selecionados.has(s.produtoId));
+  const custoSelecionados = totalSelecionados.reduce((s, x) => s + (x.custoTotal ?? 0), 0);
+  const unidadesSelecionadas = totalSelecionados.reduce((s, x) => s + x.sugestaoCompra, 0);
 
   const handleExport = () => {
     if (!data) return;
@@ -203,32 +237,90 @@ export default function PurchaseSuggestion() {
       )}
 
       {/* Filtros da tabela */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <Input
-          placeholder="Buscar produto..."
-          value={filtroNome}
-          onChange={e => setFiltroNome(e.target.value)}
-          className="max-w-xs h-8 text-sm"
-        />
-        <div className="flex gap-2">
-          {(["todas", "alta", "media", "baixa"] as const).map(p => (
-            <button
-              key={p}
-              onClick={() => setFiltroPrioridade(p)}
-              className={cn(
-                "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
-                filtroPrioridade === p
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "border-border/50 text-muted-foreground hover:border-primary/50"
-              )}
-            >
-              {p === "todas" ? "Todas" : PRIORIDADE_CONFIG[p].label}
-            </button>
-          ))}
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-3 items-center">
+          <Input
+            placeholder="Buscar produto..."
+            value={filtroNome}
+            onChange={e => setFiltroNome(e.target.value)}
+            className="max-w-xs h-8 text-sm"
+          />
+          {/* Subfiltro Grupo INOVE */}
+          {gruposDisponiveis.length > 0 && (
+            <Select value={filtroGrupo || "_todos"} onValueChange={v => { setFiltroGrupo(v === "_todos" ? "" : v); setFiltroSubgrupo(""); }}>
+              <SelectTrigger className="h-8 text-sm w-44">
+                <SelectValue placeholder="Grupo INOVE" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_todos">Todos os grupos</SelectItem>
+                {gruposDisponiveis.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {/* Subfiltro Subgrupo INOVE */}
+          {subgruposDisponiveis.length > 0 && (
+            <Select value={filtroSubgrupo || "_todos"} onValueChange={v => setFiltroSubgrupo(v === "_todos" ? "" : v)}>
+              <SelectTrigger className="h-8 text-sm w-44">
+                <SelectValue placeholder="Subgrupo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_todos">Todos os subgrupos</SelectItem>
+                {subgruposDisponiveis.map(sg => <SelectItem key={sg} value={sg}>{sg}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          <div className="flex gap-2">
+            {(["todas", "alta", "media", "baixa"] as const).map(p => (
+              <button
+                key={p}
+                onClick={() => setFiltroPrioridade(p)}
+                className={cn(
+                  "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+                  filtroPrioridade === p
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border/50 text-muted-foreground hover:border-primary/50"
+                )}
+              >
+                {p === "todas" ? "Todas" : PRIORIDADE_CONFIG[p].label}
+              </button>
+            ))}
+          </div>
+          {sugestoesFiltradas.length > 0 && totalCustoFiltrado > 0 && (
+            <div className="ml-auto text-sm font-semibold text-emerald-600">
+              Total filtrado: {fmtBRL(totalCustoFiltrado)}
+            </div>
+          )}
         </div>
-        {sugestoesFiltradas.length > 0 && totalCustoFiltrado > 0 && (
-          <div className="ml-auto text-sm font-semibold text-emerald-600">
-            Total filtrado: {fmtBRL(totalCustoFiltrado)}
+        {/* Barra de selecionados */}
+        {selecionados.size > 0 && (
+          <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2">
+            <CheckSquare className="w-4 h-4 text-primary flex-shrink-0" />
+            <span className="text-sm font-semibold text-primary">{selecionados.size} selecionados</span>
+            <span className="text-sm text-muted-foreground">· {unidadesSelecionadas} un. · {fmtBRL(custoSelecionados)}</span>
+            <div className="ml-auto flex gap-2">
+              <button onClick={selecionarTodos} className="text-xs text-primary underline">Selecionar todos</button>
+              <button onClick={deselecionarTodos} className="text-xs text-muted-foreground underline">Limpar</button>
+              <Button size="sm" className="h-7 text-xs gap-1" onClick={() => {
+                const rows = totalSelecionados.map(s => ({
+                  "Produto": s.nome,
+                  "Grupo": s.grupoNome,
+                  "Subgrupo": s.subgrupoNome,
+                  "Sugestão Compra": s.sugestaoCompra,
+                  "Custo Unit.": s.custoProduto ?? "—",
+                  "Custo Total": s.custoTotal ?? "—",
+                  "Prioridade": PRIORIDADE_CONFIG[s.prioridade].label,
+                }));
+                exportToExcel(rows, `Compras_Selecionados_${new Date().toISOString().slice(0,10)}`, "Compras");
+                toast.success("Exportado!");
+              }}>
+                <Download className="w-3 h-3" /> Exportar selecionados
+              </Button>
+            </div>
+          </div>
+        )}
+        {selecionados.size === 0 && sugestoesFiltradas.length > 0 && (
+          <div className="flex gap-2">
+            <button onClick={selecionarTodos} className="text-xs text-primary underline">Selecionar todos</button>
           </div>
         )}
       </div>
@@ -258,7 +350,9 @@ export default function PurchaseSuggestion() {
           <table className="w-full text-sm">
             <thead className="bg-muted/30 border-b border-border/50">
               <tr>
+                <th className="w-10 px-3 py-3 text-center"></th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Produto</th>
+                <th className="text-left px-3 py-3 font-medium text-muted-foreground whitespace-nowrap">Grupo / Subgrupo</th>
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground">Qtd. Vendida</th>
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground">Média/Dia</th>
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground">Necessidade</th>
@@ -271,7 +365,7 @@ export default function PurchaseSuggestion() {
             <tbody className="divide-y divide-border/30">
               {sugestoesFiltradas.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-muted-foreground">
+                  <td colSpan={10} className="text-center py-12 text-muted-foreground">
                     <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
                     <p>Nenhum produto encontrado com os filtros aplicados</p>
                   </td>
@@ -279,15 +373,22 @@ export default function PurchaseSuggestion() {
               ) : sugestoesFiltradas.map((s, i) => {
                 const cfg = PRIORIDADE_CONFIG[s.prioridade];
                 const Icon = cfg.icon;
+                const isSel = selecionados.has(s.produtoId);
                 return (
                   <tr
                     key={s.produtoId}
                     className={cn(
-                      "hover:bg-muted/20 transition-colors",
-                      s.prioridade === "alta" && "bg-red-500/5",
-                      i % 2 === 0 && s.prioridade !== "alta" && "bg-muted/5"
+                      "hover:bg-muted/20 transition-colors cursor-pointer",
+                      isSel ? "bg-primary/5" : s.prioridade === "alta" ? "bg-red-500/5" : i % 2 === 0 ? "bg-muted/5" : ""
                     )}
+                    onClick={() => toggleSelecionado(s.produtoId)}
                   >
+                    {/* Checkbox */}
+                    <td className="px-3 py-3 text-center" onClick={e => { e.stopPropagation(); toggleSelecionado(s.produtoId); }}>
+                      {isSel
+                        ? <CheckSquare className="w-4 h-4 text-primary mx-auto" />
+                        : <Square className="w-4 h-4 text-muted-foreground mx-auto" />}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="font-medium">{s.nome}</div>
                       <div className="text-xs text-muted-foreground">
@@ -298,6 +399,11 @@ export default function PurchaseSuggestion() {
                           </span>
                         )}
                       </div>
+                    </td>
+                    {/* Grupo / Subgrupo */}
+                    <td className="px-3 py-3">
+                      <div className="text-xs font-medium text-foreground">{s.grupoNome}</div>
+                      {s.subgrupoNome && <div className="text-[10px] text-muted-foreground">{s.subgrupoNome}</div>}
                     </td>
                     <td className="px-3 py-3 text-center">
                       <span className="font-semibold">{fmtNum(s.qtdVendidaSemana, 0)}</span>
@@ -356,7 +462,7 @@ export default function PurchaseSuggestion() {
             {sugestoesFiltradas.length > 0 && (
               <tfoot className="bg-muted/20 border-t border-border/50">
                 <tr>
-                  <td className="px-4 py-3 font-semibold text-sm" colSpan={5}>
+                  <td className="px-4 py-3 font-semibold text-sm" colSpan={7}>
                     Total ({sugestoesFiltradas.length} produtos)
                   </td>
                   <td className="px-3 py-3 text-center font-bold text-primary">

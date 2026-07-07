@@ -76,6 +76,16 @@ export default function SmartPurchasePlanner() {
   const [configCategoria, setConfigCategoria] = useState<"sorvete" | "guloseimas" | "outros">("sorvete");
   const [abaAtiva, setAbaAtiva] = useState<"sorvete" | "guloseimas" | "outros" | "todos">("sorvete");
 
+  // Filtros numéricos por coluna (col = coluna da tabela)
+  const [colVendaMin, setColVendaMin] = useState("");
+  const [colVendaMax, setColVendaMax] = useState("");
+  const [colEstoqueMin, setColEstoqueMin] = useState("");
+  const [colEstoqueMax, setColEstoqueMax] = useState("");
+  const [colNecessidadeMin, setColNecessidadeMin] = useState("");
+  const [colNecessidadeMax, setColNecessidadeMax] = useState("");
+  const [colCustoMin, setColCustoMin] = useState("");
+  const [colCustoMax, setColCustoMax] = useState("");
+
   const utils = trpc.useUtils();
   const { data: configs } = trpc.inove.getPurchaseProductConfigs.useQuery();
   const configMap = useMemo(() => {
@@ -150,6 +160,11 @@ export default function SmartPurchasePlanner() {
 
   // Filtrar itens
   const itensFiltrados = useMemo(() => {
+    const parseNum = (s: string) => { const n = parseFloat(s.replace(",", ".")); return isNaN(n) ? null : n; };
+    const vMin = parseNum(colVendaMin); const vMax = parseNum(colVendaMax);
+    const eMin = parseNum(colEstoqueMin); const eMax = parseNum(colEstoqueMax);
+    const nMin = parseNum(colNecessidadeMin); const nMax = parseNum(colNecessidadeMax);
+    const cMin = parseNum(colCustoMin); const cMax = parseNum(colCustoMax);
     return itens.filter(item => {
       const cfg = configMap.get(item.produtoId);
       const isIgnorado = cfg?.ignorar === true;
@@ -162,12 +177,22 @@ export default function SmartPurchasePlanner() {
       }
       // Filtro por aba de categoria
       if (abaAtiva !== "todos") {
-        const cat = cfg?.purchaseCategory ?? "sorvete"; // padrão sorvete se não configurado
+        const cat = cfg?.purchaseCategory ?? "sorvete";
         if (cat !== abaAtiva) return false;
       }
+      // Filtros numéricos
+      if (vMin !== null && item.qtdSemana < vMin) return false;
+      if (vMax !== null && item.qtdSemana > vMax) return false;
+      if (eMin !== null && item.estoqueAtual < eMin) return false;
+      if (eMax !== null && item.estoqueAtual > eMax) return false;
+      if (nMin !== null && item.necessidadeComSeguranca < nMin) return false;
+      if (nMax !== null && item.necessidadeComSeguranca > nMax) return false;
+      if (cMin !== null && item.custoProduto < cMin) return false;
+      if (cMax !== null && item.custoProduto > cMax) return false;
       return true;
     });
-  }, [itens, filtro, filtroPrioridade, mostrarSoComSugestao, configMap, mostrarIgnorados, abaAtiva]);
+  }, [itens, filtro, filtroPrioridade, mostrarSoComSugestao, configMap, mostrarIgnorados, abaAtiva,
+      colVendaMin, colVendaMax, colEstoqueMin, colEstoqueMax, colNecessidadeMin, colNecessidadeMax, colCustoMin, colCustoMax]);
 
   // Totais dos itens selecionados
   const totais = useMemo(() => {
@@ -631,6 +656,61 @@ export default function SmartPurchasePlanner() {
                     <th className="p-3 text-right font-medium text-primary whitespace-nowrap">Custo<br/><span className="text-[10px]">total</span></th>
                     <th className="p-3 text-center font-medium text-muted-foreground">Prior.</th>
                     <th className="w-10 p-3 text-center"></th>
+                  </tr>
+                  {/* Linha de filtros numéricos */}
+                  <tr className="bg-muted/10 border-b border-border/30">
+                    <td></td>
+                    <td className="px-3 py-1.5">
+                      <span className="text-[10px] text-muted-foreground">Filtros ativos</span>
+                    </td>
+                    {/* Venda semana */}
+                    <td className="px-2 py-1.5">
+                      <div className="flex gap-1">
+                        <input type="number" placeholder="min" value={colVendaMin} onChange={e => setColVendaMin(e.target.value)}
+                          className="w-14 h-6 text-[10px] px-1.5 rounded border border-border/50 bg-background text-center" />
+                        <input type="number" placeholder="max" value={colVendaMax} onChange={e => setColVendaMax(e.target.value)}
+                          className="w-14 h-6 text-[10px] px-1.5 rounded border border-border/50 bg-background text-center" />
+                      </div>
+                    </td>
+                    {/* Venda mês — sem filtro */}
+                    <td></td>
+                    {/* Estoque */}
+                    <td className="px-2 py-1.5">
+                      <div className="flex gap-1">
+                        <input type="number" placeholder="min" value={colEstoqueMin} onChange={e => setColEstoqueMin(e.target.value)}
+                          className="w-14 h-6 text-[10px] px-1.5 rounded border border-border/50 bg-background text-center" />
+                        <input type="number" placeholder="max" value={colEstoqueMax} onChange={e => setColEstoqueMax(e.target.value)}
+                          className="w-14 h-6 text-[10px] px-1.5 rounded border border-border/50 bg-background text-center" />
+                      </div>
+                    </td>
+                    {/* Necessidade */}
+                    <td className="px-2 py-1.5">
+                      <div className="flex gap-1">
+                        <input type="number" placeholder="min" value={colNecessidadeMin} onChange={e => setColNecessidadeMin(e.target.value)}
+                          className="w-14 h-6 text-[10px] px-1.5 rounded border border-border/50 bg-background text-center" />
+                        <input type="number" placeholder="max" value={colNecessidadeMax} onChange={e => setColNecessidadeMax(e.target.value)}
+                          className="w-14 h-6 text-[10px] px-1.5 rounded border border-border/50 bg-background text-center" />
+                      </div>
+                    </td>
+                    {/* Custo unit. */}
+                    <td className="px-2 py-1.5">
+                      <div className="flex gap-1">
+                        <input type="number" placeholder="min" value={colCustoMin} onChange={e => setColCustoMin(e.target.value)}
+                          className="w-14 h-6 text-[10px] px-1.5 rounded border border-border/50 bg-background text-center" />
+                        <input type="number" placeholder="max" value={colCustoMax} onChange={e => setColCustoMax(e.target.value)}
+                          className="w-14 h-6 text-[10px] px-1.5 rounded border border-border/50 bg-background text-center" />
+                      </div>
+                    </td>
+                    {/* Qtd. comprar, Custo total, Prior., Ações */}
+                    <td></td><td></td><td></td>
+                    <td className="px-2 py-1.5">
+                      {(colVendaMin || colVendaMax || colEstoqueMin || colEstoqueMax || colNecessidadeMin || colNecessidadeMax || colCustoMin || colCustoMax) && (
+                        <button
+                          onClick={() => { setColVendaMin(""); setColVendaMax(""); setColEstoqueMin(""); setColEstoqueMax(""); setColNecessidadeMin(""); setColNecessidadeMax(""); setColCustoMin(""); setColCustoMax(""); }}
+                          className="text-[10px] text-destructive underline whitespace-nowrap"
+                        >Limpar</button>
+                      )}
+                    </td>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/20">

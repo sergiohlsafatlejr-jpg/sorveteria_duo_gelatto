@@ -58,24 +58,49 @@ const COLORS = [
 
 // ─── Aba: Vendas da Semana ────────────────────────────────────────────────────
 function VendasSemanaTab() {
-  // Calcular semana atual (segunda a domingo)
-  const today = new Date();
-  const dayOfWeek = today.getDay(); // 0=dom, 1=seg...
-  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + diffToMonday);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
   function toDateStr(d: Date) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
-  const [from, setFrom] = useState(toDateStr(monday));
-  const [to, setTo] = useState(toDateStr(sunday));
-  const [queryFrom, setQueryFrom] = useState(toDateStr(monday));
-  const [queryTo, setQueryTo] = useState(toDateStr(sunday));
+  // Buscar meses com dados confirmados
+  const { data: confirmedMonths } = trpc.salesImport.getConfirmedMonths.useQuery();
+
+  // Calcular período inicial: se há mês com dados, usa o mais recente; senão usa semana atual
+  const initialDates = useMemo(() => {
+    if (confirmedMonths && confirmedMonths.length > 0) {
+      // Pega o mês mais recente e define todo o mês como período
+      const latestMonth = confirmedMonths[0]; // já ordenado desc
+      const [y, m] = latestMonth.split("-").map(Number);
+      const first = new Date(y, m - 1, 1);
+      const last = new Date(y, m, 0);
+      return { from: toDateStr(first), to: toDateStr(last) };
+    }
+    // Fallback: semana atual
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return { from: toDateStr(monday), to: toDateStr(sunday) };
+  }, [confirmedMonths]);
+
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [queryFrom, setQueryFrom] = useState("");
+  const [queryTo, setQueryTo] = useState("");
   const [search, setSearch] = useState("");
+  const [initialized, setInitialized] = useState(false);
+
+  // Inicializar datas quando os meses confirmados chegarem (sem loop infinito)
+  if (!initialized && initialDates.from && !from) {
+    setFrom(initialDates.from);
+    setTo(initialDates.to);
+    setQueryFrom(initialDates.from);
+    setQueryTo(initialDates.to);
+    setInitialized(true);
+  }
 
   const { data, isLoading, refetch } = trpc.salesImport.salesByPeriod.useQuery(
     { from: queryFrom, to: queryTo },
@@ -197,7 +222,33 @@ function VendasSemanaTab() {
         <Card className="p-10 text-center">
           <Package className="h-14 w-14 mx-auto mb-3 text-muted-foreground/30" />
           <p className="text-muted-foreground">Nenhuma venda encontrada para o período selecionado.</p>
-          <p className="text-xs text-muted-foreground mt-1">Verifique se há importações confirmadas neste intervalo de datas.</p>
+          {confirmedMonths && confirmedMonths.length > 0 ? (
+            <p className="text-xs text-muted-foreground mt-2">
+              Períodos com dados disponíveis:{" "}
+              {confirmedMonths.slice(0, 5).map(m => {
+                const [y, mo] = m.split("-");
+                const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+                return (
+                  <button
+                    key={m}
+                    className="underline text-purple-600 mx-1"
+                    onClick={() => {
+                      const [yr, mn] = m.split("-").map(Number);
+                      const first = new Date(yr, mn - 1, 1);
+                      const last = new Date(yr, mn, 0);
+                      const f = toDateStr(first);
+                      const t = toDateStr(last);
+                      setFrom(f); setTo(t); setQueryFrom(f); setQueryTo(t);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-1">Verifique se há importações confirmadas neste intervalo de datas.</p>
+          )}
         </Card>
       ) : (
         <>
