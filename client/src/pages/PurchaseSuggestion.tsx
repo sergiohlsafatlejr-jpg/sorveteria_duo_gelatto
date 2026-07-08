@@ -37,15 +37,14 @@ function SortTh({ col, label, align, sortCol, sortDir, onSort }: {
   sortCol: string; sortDir: "asc" | "desc"; onSort: (c: string) => void;
 }) {
   const active = sortCol === col;
-  const arrow = active ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕";
   return (
     <th
       className={`px-3 py-3 font-medium cursor-pointer select-none whitespace-nowrap text-${align} ${
-        active ? "text-primary" : "text-muted-foreground"
-      } hover:text-foreground transition-colors`}
+        active ? "text-primary" : "text-muted-foreground hover:text-foreground"
+      } transition-colors`}
       onClick={() => onSort(col)}
     >
-      {label}<span className="text-xs opacity-60">{arrow}</span>
+      {label}{active && <span className="ml-1 text-xs">{sortDir === "asc" ? "↑" : "↓"}</span>}
     </th>
   );
 }
