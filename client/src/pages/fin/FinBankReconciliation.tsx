@@ -8,16 +8,16 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
   CheckCircle2, AlertTriangle, XCircle, HelpCircle,
-  RefreshCw, Download, Search, SlidersHorizontal
+  RefreshCw, Download, Search, SlidersHorizontal, ChevronDown, ChevronRight
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
-const fmtDate = (d: Date | string) => {
-  const dt = typeof d === "string" ? new Date(d + (d.length === 10 ? "T12:00:00" : "")) : d;
-  return dt.toLocaleDateString("pt-BR");
+const fmtDateStr = (s: string) => {
+  const [y, m, d] = s.split("-");
+  return `${d}/${m}/${y}`;
 };
 
 type Status = "conciliado" | "divergente" | "sem_venda" | "sem_inove";
@@ -47,7 +47,7 @@ const STATUS_CONFIG: Record<Status, { label: string; color: string; icon: React.
 
 function getWeekRange(offset = 0) {
   const now = new Date();
-  const day = now.getDay(); // 0=dom
+  const day = now.getDay();
   const mon = new Date(now);
   mon.setDate(now.getDate() - ((day + 6) % 7) + offset * 7);
   const sun = new Date(mon);
@@ -74,6 +74,7 @@ export default function FinBankReconciliation() {
   const [filterStatus, setFilterStatus] = useState<Status | "all">("all");
   const [search, setSearch] = useState("");
   const [enabled, setEnabled] = useState(false);
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
 
   const { data, isLoading, refetch } = trpc.inove.reconcileWithBank.useQuery(
     { dateFrom, dateTo, tolerance },
@@ -85,15 +86,24 @@ export default function FinBankReconciliation() {
     else refetch();
   };
 
+  const toggleDay = (dia: string) => {
+    setExpandedDays(prev => {
+      const next = new Set(prev);
+      if (next.has(dia)) next.delete(dia);
+      else next.add(dia);
+      return next;
+    });
+  };
+
   const filtered = useMemo(() => {
     if (!data) return [];
-    return data.items.filter(item => {
+    return data.items.filter((item: { dia: string; status: string; bankEntries: Array<{ description: string }> }) => {
       if (filterStatus !== "all" && item.status !== filterStatus) return false;
       if (search) {
         const q = search.toLowerCase();
-        const desc = item.bankEntry.description.toLowerCase();
-        const dia = fmtDate(item.bankEntry.date);
-        if (!desc.includes(q) && !dia.includes(q)) return false;
+        const dia = fmtDateStr(item.dia);
+        const hasDesc = item.bankEntries.some((e: { description: string }) => e.description.toLowerCase().includes(q));
+        if (!dia.includes(q) && !hasDesc) return false;
       }
       return true;
     });
@@ -101,17 +111,34 @@ export default function FinBankReconciliation() {
 
   const exportExcel = () => {
     if (!data) return;
-    const rows = data.items.map(item => ({
-      Data: fmtDate(item.bankEntry.date),
-      "Descrição Banco": item.bankEntry.description,
-      "Valor Banco (R$)": item.bankEntry.amount,
-      "Tipo": item.bankEntry.type === "credit" ? "Crédito" : "Débito",
-      "Forma Pagto": item.bankEntry.paymentMethod ?? "",
-      "Vendas INOVE (R$)": item.inoveSales?.total ?? "",
-      "Qtd Vendas INOVE": item.inoveSales?.vendas ?? "",
-      "Diferença (R$)": item.diff ?? "",
-      "Status": STATUS_CONFIG[item.status as Status]?.label ?? item.status,
-    }));
+    const rows: Record<string, unknown>[] = [];
+    for (const item of data.items as Array<{
+      dia: string; bankTotal: number; bankEntries: Array<{ description: string; amount: number; type: string; paymentMethod: string | null }>;
+      inoveSales: { total: number; vendas: number } | null; diff: number | null; status: string;
+    }>) {
+      // Linha de resumo do dia
+      rows.push({
+        Data: fmtDateStr(item.dia),
+        "Descrição": `TOTAL DO DIA (${item.bankEntries.length} lançamentos)`,
+        "Total Banco (R$)": item.bankTotal,
+        "Vendas INOVE (R$)": item.inoveSales?.total ?? "",
+        "Qtd Vendas INOVE": item.inoveSales?.vendas ?? "",
+        "Diferença (R$)": item.diff ?? "",
+        "Status": STATUS_CONFIG[item.status as Status]?.label ?? item.status,
+      });
+      // Linhas de detalhe
+      for (const e of item.bankEntries) {
+        rows.push({
+          Data: "",
+          "Descrição": `  └ ${e.description}`,
+          "Total Banco (R$)": e.type === "credit" ? e.amount : -e.amount,
+          "Vendas INOVE (R$)": "",
+          "Qtd Vendas INOVE": "",
+          "Diferença (R$)": "",
+          "Status": "",
+        });
+      }
+    }
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Conciliação");
@@ -164,7 +191,6 @@ export default function FinBankReconciliation() {
             Conciliar
           </Button>
         </div>
-        {/* Presets */}
         <div className="flex flex-wrap gap-2">
           {[
             { label: "Esta semana", fn: () => { const r = getWeekRange(); setDateFrom(r.from); setDateTo(r.to); } },
@@ -188,7 +214,7 @@ export default function FinBankReconciliation() {
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Total", value: summary.total, color: "text-foreground" },
+            { label: "Total de dias", value: summary.total, color: "text-foreground" },
             { label: "✅ Conciliados", value: summary.conciliado, color: "text-emerald-600" },
             { label: "⚠️ Divergentes", value: summary.divergente, color: "text-amber-600" },
             { label: "❌ Sem venda INOVE", value: (summary as Record<string, number>).sem_venda ?? 0, color: "text-red-600" },
@@ -204,12 +230,11 @@ export default function FinBankReconciliation() {
       {/* Tabela */}
       {data && (
         <div className="rounded-xl border bg-card overflow-hidden">
-          {/* Barra de busca e filtros */}
           <div className="flex flex-wrap gap-3 items-center p-4 border-b">
             <div className="relative flex-1 min-w-48">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar por descrição ou data..."
+                placeholder="Buscar por data ou descrição..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="pl-9"
@@ -247,70 +272,103 @@ export default function FinBankReconciliation() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/30">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-8"></th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Data</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Descrição Banco</th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">Valor Banco</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Lançamentos</th>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">Total Banco</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Vendas INOVE</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Diferença</th>
                     <th className="px-4 py-3 text-center font-medium text-muted-foreground">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((item, idx) => {
+                  {(filtered as Array<{
+                    dia: string; bankTotal: number;
+                    bankEntries: Array<{ id: number; description: string; amount: number; type: string; paymentMethod: string | null }>;
+                    inoveSales: { total: number; qtd: number; vendas: number } | null;
+                    status: string; diff: number | null;
+                  }>).map((item) => {
                     const cfg = STATUS_CONFIG[item.status as Status];
+                    const isExpanded = expandedDays.has(item.dia);
                     const rowBg =
                       item.status === "conciliado" ? "hover:bg-emerald-50/30" :
                       item.status === "divergente" ? "hover:bg-amber-50/30" :
                       item.status === "sem_venda" ? "hover:bg-red-50/30" :
                       "hover:bg-muted/30";
                     return (
-                      <tr key={idx} className={`border-b last:border-0 transition-colors ${rowBg}`}>
-                        <td className="px-4 py-3 whitespace-nowrap font-mono text-xs">
-                          {fmtDate(item.bankEntry.date)}
-                        </td>
-                        <td className="px-4 py-3 max-w-xs">
-                          <div className="truncate">{item.bankEntry.description}</div>
-                          {item.bankEntry.paymentMethod && (
-                            <span className="text-xs text-muted-foreground uppercase">
-                              {item.bankEntry.paymentMethod}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium whitespace-nowrap">
-                          {item.bankEntry.amount > 0 ? (
-                            <span className={item.bankEntry.type === "credit" ? "text-emerald-600" : "text-red-600"}>
-                              {item.bankEntry.type === "debit" ? "- " : ""}{fmtBRL(item.bankEntry.amount)}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground text-xs italic">sem lançamento</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          {item.inoveSales ? (
-                            <div>
-                              <div className="font-medium">{fmtBRL(item.inoveSales.total)}</div>
-                              <div className="text-xs text-muted-foreground">{item.inoveSales.vendas} vendas</div>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground text-xs italic">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          {item.diff !== null ? (
-                            <span className={Math.abs(item.diff) < 0.01 ? "text-emerald-600" : item.diff > 0 ? "text-blue-600" : "text-red-600"}>
-                              {item.diff > 0 ? "+" : ""}{fmtBRL(item.diff)}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground text-xs">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <Badge className={`gap-1 text-xs ${cfg?.color}`} variant="outline">
-                            {cfg?.icon}
-                            {cfg?.label}
-                          </Badge>
-                        </td>
-                      </tr>
+                      <>
+                        {/* Linha resumo do dia */}
+                        <tr
+                          key={item.dia}
+                          className={`border-b transition-colors cursor-pointer ${rowBg}`}
+                          onClick={() => item.bankEntries.length > 0 && toggleDay(item.dia)}
+                        >
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {item.bankEntries.length > 0 && (
+                              isExpanded
+                                ? <ChevronDown className="w-4 h-4" />
+                                : <ChevronRight className="w-4 h-4" />
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs font-medium whitespace-nowrap">
+                            {fmtDateStr(item.dia)}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">
+                            {item.bankEntries.length > 0
+                              ? `${item.bankEntries.length} lançamento${item.bankEntries.length > 1 ? "s" : ""}`
+                              : <span className="italic">sem lançamento bancário</span>
+                            }
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold whitespace-nowrap">
+                            {item.bankTotal > 0
+                              ? <span className="text-emerald-600">{fmtBRL(item.bankTotal)}</span>
+                              : <span className="text-muted-foreground text-xs italic">—</span>
+                            }
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {item.inoveSales ? (
+                              <div>
+                                <div className="font-semibold">{fmtBRL(item.inoveSales.total)}</div>
+                                <div className="text-xs text-muted-foreground">{item.inoveSales.vendas} vendas</div>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground text-xs italic">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {item.diff !== null ? (
+                              <span className={Math.abs(item.diff) < 0.01 ? "text-emerald-600" : item.diff > 0 ? "text-blue-600" : "text-red-600"}>
+                                {item.diff > 0 ? "+" : ""}{fmtBRL(item.diff)}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Badge className={`gap-1 text-xs ${cfg?.color}`} variant="outline">
+                              {cfg?.icon}
+                              {cfg?.label}
+                            </Badge>
+                          </td>
+                        </tr>
+                        {/* Linhas de detalhe dos lançamentos */}
+                        {isExpanded && item.bankEntries.map((e, ei) => (
+                          <tr key={`${item.dia}-${ei}`} className="border-b bg-muted/10 text-xs">
+                            <td className="px-4 py-2"></td>
+                            <td className="px-4 py-2 text-muted-foreground pl-8">└</td>
+                            <td className="px-4 py-2 text-muted-foreground max-w-xs truncate" colSpan={2}>
+                              {e.description}
+                              {e.paymentMethod && <span className="ml-2 uppercase text-muted-foreground/60">{e.paymentMethod}</span>}
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <span className={e.type === "credit" ? "text-emerald-600" : "text-red-600"}>
+                                {e.type === "debit" ? "- " : ""}{fmtBRL(e.amount)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2" colSpan={2}></td>
+                          </tr>
+                        ))}
+                      </>
                     );
                   })}
                 </tbody>

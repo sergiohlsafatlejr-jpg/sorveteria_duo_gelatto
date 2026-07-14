@@ -2958,23 +2958,25 @@ export const inoveRouter = router({
       // 2. Buscar vendas do INOVE agrupadas por dia
       const rows = await db.select().from(inoveConnectorConfig).limit(1);
       if (rows.length === 0 || !rows[0].active) {
-        // Retornar apenas os lançamentos bancários sem dados INOVE
+        // Agrupar por dia mesmo sem INOVE
+        const byDay: Record<string, typeof bankEntries> = {};
+        for (const e of bankEntries) {
+          const dia = e.date instanceof Date ? e.date.toISOString().split("T")[0] : String(e.date).split("T")[0];
+          if (!dia) continue;
+          if (!byDay[dia]) byDay[dia] = [];
+          byDay[dia].push(e);
+        }
+        const items = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b)).map(([dia, entries]) => ({
+          dia,
+          bankTotal: entries.filter(e => e.type === "credit").reduce((s, e) => s + Number(e.amount), 0),
+          bankEntries: entries.map(e => ({ id: e.id, description: e.description, amount: Number(e.amount), type: e.type, paymentMethod: e.paymentMethod ?? null })),
+          inoveSales: null,
+          status: "sem_inove" as const,
+          diff: null,
+        }));
         return {
-          items: bankEntries.map(e => ({
-            bankEntry: {
-              id: e.id,
-              date: e.date,
-              description: e.description,
-              amount: Number(e.amount),
-              type: e.type,
-              reconciled: e.reconciled,
-              paymentMethod: e.paymentMethod,
-            },
-            inoveSales: null,
-            status: "sem_inove" as const,
-            diff: null,
-          })),
-          summary: { total: bankEntries.length, conciliado: 0, divergente: 0, sem_inove: bankEntries.length },
+          items,
+          summary: { total: items.length, conciliado: 0, divergente: 0, sem_venda: 0, sem_inove: items.length },
         };
       }
 
@@ -3005,66 +3007,75 @@ export const inoveRouter = router({
         // INOVE indisponível — retornar sem dados INOVE
       }
 
-      // 3. Cruzar: para cada lançamento bancário, buscar vendas INOVE do mesmo dia
+      // 3. Agrupar lançamentos bancários por dia (somar créditos do mesmo dia)
       const toleranceFactor = input.tolerance / 100;
-      const items = bankEntries.map(e => {
+      const bankByDay: Record<string, { totalCredito: number; totalDebito: number; entries: typeof bankEntries }> = {};
+      for (const e of bankEntries) {
         const dia = e.date instanceof Date
           ? e.date.toISOString().split("T")[0]
           : String(e.date).split("T")[0];
-        const inoveDia = dia ? inoveSalesByDay[dia] : undefined;
-        const bankAmt = Number(e.amount);
+        if (!dia) continue;
+        if (!bankByDay[dia]) bankByDay[dia] = { totalCredito: 0, totalDebito: 0, entries: [] };
+        const amt = Number(e.amount);
+        if (e.type === "credit") bankByDay[dia].totalCredito += amt;
+        else bankByDay[dia].totalDebito += amt;
+        bankByDay[dia].entries.push(e);
+      }
+
+      // 4. Cruzar por dia: total bancário do dia vs total INOVE do dia
+      const items: Array<{
+        dia: string;
+        bankTotal: number;
+        bankEntries: Array<{ id: number; description: string; amount: number; type: string; paymentMethod: string | null }>;
+        inoveSales: { total: number; qtd: number; vendas: number } | null;
+        status: "conciliado" | "divergente" | "sem_venda" | "sem_inove";
+        diff: number | null;
+      }> = [];
+
+      // Dias com lançamentos bancários
+      const allDays = new Set([...Object.keys(bankByDay), ...Object.keys(inoveSalesByDay)]);
+      const noInove = Object.keys(inoveSalesByDay).length === 0;
+
+      for (const dia of Array.from(allDays).sort()) {
+        const bank = bankByDay[dia];
+        const inove = inoveSalesByDay[dia];
+        const bankTotal = bank ? bank.totalCredito : 0;
 
         let status: "conciliado" | "divergente" | "sem_venda" | "sem_inove";
         let diff: number | null = null;
 
-        if (!inoveDia) {
-          status = Object.keys(inoveSalesByDay).length === 0 ? "sem_inove" : "sem_venda";
-        } else {
-          diff = bankAmt - inoveDia.total;
-          const pct = inoveDia.total > 0 ? Math.abs(diff) / inoveDia.total : Math.abs(diff) > 0 ? 1 : 0;
+        if (noInove) {
+          status = "sem_inove";
+        } else if (!inove && bankTotal > 0) {
+          status = "sem_venda";
+        } else if (!bank && inove) {
+          status = "sem_venda";
+          diff = -inove.total;
+        } else if (inove) {
+          diff = bankTotal - inove.total;
+          const pct = inove.total > 0 ? Math.abs(diff) / inove.total : Math.abs(diff) > 0 ? 1 : 0;
           status = pct <= toleranceFactor ? "conciliado" : "divergente";
+        } else {
+          status = "sem_venda";
         }
 
-        return {
-          bankEntry: {
+        items.push({
+          dia,
+          bankTotal,
+          bankEntries: (bank?.entries ?? []).map(e => ({
             id: e.id,
-            date: e.date,
             description: e.description,
-            amount: bankAmt,
+            amount: Number(e.amount),
             type: e.type,
-            reconciled: e.reconciled,
-            paymentMethod: e.paymentMethod,
-          },
-          inoveSales: inoveDia ?? null,
+            paymentMethod: e.paymentMethod ?? null,
+          })),
+          inoveSales: inove ?? null,
           status,
           diff,
-        };
-      });
-
-      // 4. Adicionar dias do INOVE que não têm lançamento bancário
-      const bankDays = new Set(items.map(i => {
-        const d = i.bankEntry.date instanceof Date
-          ? i.bankEntry.date.toISOString().split("T")[0]
-          : String(i.bankEntry.date).split("T")[0];
-        return d;
-      }));
-      for (const [dia, sales] of Object.entries(inoveSalesByDay)) {
-        if (!bankDays.has(dia)) {
-          items.push({
-            bankEntry: { id: 0, date: new Date(dia + "T12:00:00"), description: "(sem lançamento bancário)", amount: 0, type: "credit" as const, reconciled: false, paymentMethod: null },
-            inoveSales: sales,
-            status: "sem_venda" as const,
-            diff: -sales.total,
-          });
-        }
+        });
       }
 
-      // Ordenar por data
-      items.sort((a, b) => {
-        const da = a.bankEntry.date instanceof Date ? a.bankEntry.date.getTime() : new Date(a.bankEntry.date).getTime();
-        const db2 = b.bankEntry.date instanceof Date ? b.bankEntry.date.getTime() : new Date(b.bankEntry.date).getTime();
-        return da - db2;
-      });
+      // Já ordenado pelo loop de allDays.sort()
 
       const summary = {
         total: items.length,
