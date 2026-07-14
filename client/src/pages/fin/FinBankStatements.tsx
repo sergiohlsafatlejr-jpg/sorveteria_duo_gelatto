@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowDownCircle, ArrowUpCircle, Edit2, Plus, Trash2 } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, Edit2, Plus, Trash2, Upload, FileUp, CheckCircle2, AlertCircle, X } from "lucide-react";
+import { useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -53,6 +54,116 @@ export default function FinBankStatements() {
   const [form, setForm] = useState<StatementForm>(emptyForm());
   const setField = (k: string, v: string | boolean) => setForm(f => ({ ...f, [k]: v }));
 
+  // Import modal
+  const [importOpen, setImportOpen] = useState(false);
+  const [importDragging, setImportDragging] = useState(false);
+  const [importPreview, setImportPreview] = useState<Array<{
+    date: string; description: string; amount: number; type: "credit" | "debit";
+  }>>([]);
+  const [importBankId, setImportBankId] = useState("");
+  const [importError, setImportError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── OFX Parser ──────────────────────────────────────────────────────────
+  function parseOFX(text: string) {
+    const entries: typeof importPreview = [];
+    const stmttrns = text.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) ?? [];
+    for (const block of stmttrns) {
+      const get = (tag: string) => {
+        const m = block.match(new RegExp(`<${tag}>([^<\r\n]+)`, "i"));
+        return m ? m[1]!.trim() : "";
+      };
+      const trntype = get("TRNTYPE").toUpperCase();
+      const dtposted = get("DTPOSTED").replace(/(\d{4})(\d{2})(\d{2}).*/,"$1-$2-$3");
+      const amt = parseFloat(get("TRNAMT").replace(",","."));
+      const memo = get("MEMO") || get("NAME") || "Lançamento OFX";
+      if (!dtposted || isNaN(amt)) continue;
+      entries.push({
+        date: dtposted,
+        description: memo,
+        amount: Math.abs(amt),
+        type: amt >= 0 ? "credit" : "debit",
+      });
+    }
+    return entries;
+  }
+
+  // ── CSV Parser ──────────────────────────────────────────────────────────
+  function parseCSV(text: string) {
+    const entries: typeof importPreview = [];
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    // Detect separator
+    const sep = lines[0]?.includes(";") ? ";" : ",";
+    const header = lines[0]?.split(sep).map(h => h.trim().toLowerCase().replace(/["']/g, "")) ?? [];
+    const idx = (keys: string[]) => keys.reduce((f, k) => f >= 0 ? f : header.indexOf(k), -1);
+    const dateIdx = idx(["data","date","dt","data_lancamento","data lancamento"]);
+    const descIdx = idx(["descricao","descrição","description","historico","histórico","memo","complemento"]);
+    const amtIdx = idx(["valor","amount","value","vlr","vl"]);
+    const typeIdx = idx(["tipo","type","trntype","natureza"]);
+    if (dateIdx < 0 || amtIdx < 0) return null; // invalid CSV
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i]!.split(sep).map(c => c.trim().replace(/^["']|["']$/g,""));
+      const rawDate = cols[dateIdx] ?? "";
+      const rawAmt = (cols[amtIdx] ?? "").replace(/[R$\s]/g,"").replace(",",".");
+      const rawDesc = descIdx >= 0 ? (cols[descIdx] ?? "") : "Lançamento CSV";
+      const rawType = typeIdx >= 0 ? (cols[typeIdx] ?? "").toLowerCase() : "";
+      // Parse date: dd/mm/yyyy or yyyy-mm-dd
+      let isoDate = "";
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(rawDate)) {
+        const [d,m,y] = rawDate.split("/");
+        isoDate = `${y}-${m}-${d}`;
+      } else if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+        isoDate = rawDate.slice(0,10);
+      }
+      const amt = parseFloat(rawAmt);
+      if (!isoDate || isNaN(amt)) continue;
+      const isDebit = rawType.includes("deb") || rawType.includes("saida") || rawType.includes("saída") || rawType.includes("d") || amt < 0;
+      entries.push({
+        date: isoDate,
+        description: rawDesc || "Lançamento CSV",
+        amount: Math.abs(amt),
+        type: isDebit ? "debit" : "credit",
+      });
+    }
+    return entries;
+  }
+
+  const processFile = useCallback((file: File) => {
+    setImportError("");
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      let entries: typeof importPreview | null = null;
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      if (ext === "ofx" || ext === "qfx") {
+        entries = parseOFX(text);
+        if (!entries.length) setImportError("Nenhuma transação encontrada no arquivo OFX.");
+      } else if (ext === "csv") {
+        entries = parseCSV(text);
+        if (!entries) { setImportError("CSV inválido: colunas 'data' e 'valor' são obrigatórias."); return; }
+        if (!entries.length) setImportError("Nenhuma linha válida encontrada no CSV.");
+      } else {
+        setImportError("Formato não suportado. Use .OFX ou .CSV");
+        return;
+      }
+      setImportPreview(entries ?? []);
+    };
+    reader.readAsText(file, "latin1");
+  }, []);
+
+  const handleImportDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setImportDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }, [processFile]);
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+    e.target.value = "";
+  };
+
   const utils = trpc.useUtils();
   const { data: banks = [] } = trpc.fin.banks.list.useQuery();
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
@@ -67,6 +178,29 @@ export default function FinBankStatements() {
     if (filters.search) return s.description.toLowerCase().includes(filters.search.toLowerCase());
     return true;
   });
+
+  const createBatchMut = trpc.fin.bankStatements.createBatch.useMutation({
+    onSuccess: (res) => {
+      utils.fin.bankStatements.list.invalidate();
+      toast.success(`${Array.isArray(res) ? res.length : importPreview.length} lançamentos importados!`);
+      setImportOpen(false);
+      setImportPreview([]);
+      setImportBankId("");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleImportSave = () => {
+    if (!importPreview.length) { toast.error("Nenhum lançamento para importar"); return; }
+    createBatchMut.mutate(importPreview.map(e => ({
+      date: new Date(e.date + "T12:00:00"),
+      description: e.description,
+      amount: e.amount,
+      type: e.type,
+      reconciled: false,
+      bankId: importBankId ? Number(importBankId) : undefined,
+    })));
+  };
 
   const createMut = trpc.fin.bankStatements.create.useMutation({
     onSuccess: () => { utils.fin.bankStatements.list.invalidate(); toast.success("Lançamento criado!"); setModalOpen(false); },
@@ -130,9 +264,14 @@ export default function FinBankStatements() {
           <h1 className="text-2xl font-bold">Extratos Bancários</h1>
           <p className="text-sm text-muted-foreground">Controle de movimentações bancárias</p>
         </div>
-        <Button onClick={openCreate} className="gap-2">
-          <Plus className="h-4 w-4" /> Novo Lançamento
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => { setImportPreview([]); setImportError(""); setImportOpen(true); }} className="gap-2">
+            <FileUp className="h-4 w-4" /> Importar OFX/CSV
+          </Button>
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="h-4 w-4" /> Novo Lançamento
+          </Button>
+        </div>
       </div>
 
       {/* Summary */}
@@ -247,6 +386,117 @@ export default function FinBankStatements() {
           </tbody>
         </table>
       </div>
+
+      {/* ── Import Modal ── */}
+      <Dialog open={importOpen} onOpenChange={v => { setImportOpen(v); if (!v) { setImportPreview([]); setImportError(""); } }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Upload className="w-5 h-5" /> Importar Extrato Bancário</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Drop zone */}
+            {!importPreview.length && (
+              <div
+                onDragOver={e => { e.preventDefault(); setImportDragging(true); }}
+                onDragLeave={() => setImportDragging(false)}
+                onDrop={handleImportDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={cn(
+                  "border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors",
+                  importDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"
+                )}
+              >
+                <Upload className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+                <p className="font-medium">Arraste o arquivo aqui ou clique para selecionar</p>
+                <p className="text-sm text-muted-foreground mt-1">Formatos suportados: <strong>.OFX</strong> (todos os bancos) · <strong>.CSV</strong></p>
+                <input ref={fileInputRef} type="file" accept=".ofx,.qfx,.csv" className="hidden" onChange={handleImportFile} />
+              </div>
+            )}
+
+            {importError && (
+              <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-lg p-3">
+                <AlertCircle className="w-4 h-4 shrink-0" />{importError}
+              </div>
+            )}
+
+            {importPreview.length > 0 && (
+              <>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm text-emerald-600">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <strong>{importPreview.length} lançamentos</strong> encontrados
+                  </div>
+                  <button onClick={() => { setImportPreview([]); setImportError(""); }} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                    <X className="w-3 h-3" /> Trocar arquivo
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Banco (opcional)</Label>
+                  <Select value={importBankId || "none"} onValueChange={v => setImportBankId(v === "none" ? "" : v)}>
+                    <SelectTrigger><SelectValue placeholder="Selecione o banco" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sem banco</SelectItem>
+                      {banks.map(b => <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="rounded-lg border overflow-hidden">
+                  <div className="max-h-64 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Data</th>
+                          <th className="px-3 py-2 text-left">Descrição</th>
+                          <th className="px-3 py-2 text-right">Valor</th>
+                          <th className="px-3 py-2 text-center">Tipo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreview.slice(0, 100).map((e, i) => (
+                          <tr key={i} className="border-t">
+                            <td className="px-3 py-1.5 font-mono">{e.date.split("-").reverse().join("/")}</td>
+                            <td className="px-3 py-1.5 max-w-xs truncate">{e.description}</td>
+                            <td className={cn("px-3 py-1.5 text-right font-medium", e.type === "credit" ? "text-emerald-600" : "text-red-600")}>
+                              {fmtBRL(e.amount)}
+                            </td>
+                            <td className="px-3 py-1.5 text-center">
+                              <span className={cn("text-xs px-1.5 py-0.5 rounded", e.type === "credit" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>
+                                {e.type === "credit" ? "Entrada" : "Saída"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {importPreview.length > 100 && (
+                          <tr><td colSpan={4} className="px-3 py-2 text-center text-muted-foreground">... e mais {importPreview.length - 100} lançamentos</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <Button variant="outline" onClick={() => setImportOpen(false)} className="flex-1">Cancelar</Button>
+                  <Button onClick={handleImportSave} disabled={createBatchMut.isPending} className="flex-1 gap-2">
+                    {createBatchMut.isPending ? <Upload className="w-4 h-4 animate-pulse" /> : <CheckCircle2 className="w-4 h-4" />}
+                    Importar {importPreview.length} lançamentos
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {!importPreview.length && !importError && (
+              <div className="text-xs text-muted-foreground space-y-1 bg-muted/30 rounded-lg p-3">
+                <p className="font-medium">Como exportar o extrato do seu banco:</p>
+                <p>• <strong>Itaú/Bradesco/BB/Caixa/Santander:</strong> Internet Banking → Extrato → Exportar OFX</p>
+                <p>• <strong>Nubank/Inter:</strong> App → Extrato → Exportar → OFX</p>
+                <p>• <strong>Sicoob/Sicredi:</strong> Internet Banking → Extrato → Formato OFX</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={modalOpen} onOpenChange={v => { setModalOpen(v); if (!v) setEditItem(null); }}>
         <DialogContent className="max-w-lg">
