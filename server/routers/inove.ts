@@ -2988,11 +2988,9 @@ export const inoveRouter = router({
         const result = await pool.request().query(`
           SELECT
             CONVERT(varchar(10), v.VEN_DATA_FIM, 23) as dia,
-            COUNT(DISTINCT v.VENDA) as qtdVendas,
-            COUNT(i.ITEM_VENDA) as qtdItens,
+            COUNT(v.VENDA) as qtdVendas,
             CAST(SUM(v.VEN_TOTAL) as float) as totalVendas
           FROM VENDAS v
-          LEFT JOIN ITENS_VENDAS i ON v.VENDA = i.VENDA
           WHERE v.VEN_SITUACAO = 2
             AND v.VEN_DATA_FIM >= '${input.dateFrom}'
             AND v.VEN_DATA_FIM <= '${input.dateTo} 23:59:59'
@@ -3000,8 +2998,8 @@ export const inoveRouter = router({
           ORDER BY dia
         `);
         await pool.close();
-        for (const row of result.recordset as Array<{ dia: string; qtdVendas: number; qtdItens: number; totalVendas: number }>) {
-          inoveSalesByDay[row.dia] = { total: Number(row.totalVendas), qtd: Number(row.qtdItens), vendas: Number(row.qtdVendas) };
+        for (const row of result.recordset as Array<{ dia: string; qtdVendas: number; totalVendas: number }>) {
+          inoveSalesByDay[row.dia] = { total: Number(row.totalVendas), qtd: Number(row.qtdVendas), vendas: Number(row.qtdVendas) };
         }
       } catch {
         // INOVE indisponível — retornar sem dados INOVE
