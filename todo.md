@@ -800,3 +800,9 @@
 - [x] Corrigir lógica: inclui ajuste climático (Open-Meteo Goiânia) igual à tela Previsão de Faturamento
 - [x] Corrigir lógica: fallback para qualquer registro de forecastSettings se usuário não tiver configurações próprias
 - [x] TypeScript 0 erros após todas as correções
+
+## Conciliação Bancária Automática
+- [ ] Criar endpoint backend inove.reconcileWithBank: cruzar lançamentos bancários com vendas INOVE por data e valor
+- [ ] Criar tela /fin/bank-reconciliation com status visual (conciliado, divergente, sem correspondência)
+- [ ] Permitir conciliação manual de lançamentos não encontrados automaticamente
+- [ ] Exportar relatório de conciliação para Excel

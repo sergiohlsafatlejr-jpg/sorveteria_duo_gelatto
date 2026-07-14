@@ -35,6 +35,7 @@ import FinBanks from "./pages/fin/FinBanks";
 import FinCostsRegister from "./pages/fin/FinCostsRegister";
 import FinCashflow from "./pages/fin/FinCashflow";
 import FinMonthlyComparison from "./pages/fin/FinMonthlyComparison";
+import FinBankReconciliation from "./pages/fin/FinBankReconciliation";
 import WhatsApp from "./pages/WhatsApp";
 import InstagramPage from "./pages/Instagram";
 import ProductsRegister from "./pages/ProductsRegister";
@@ -105,6 +106,7 @@ function Router() {
       <Route path="/fin/forecast">{() => <ProtectedRoute path="/fin/forecast"><FinRevenueForecast /></ProtectedRoute>}</Route>
       <Route path="/fin/goals">{() => <ProtectedRoute path="/fin/goals"><FinGoals /></ProtectedRoute>}</Route>
       <Route path="/fin/monthly-comparison">{() => <ProtectedRoute path="/fin/monthly-comparison"><FinMonthlyComparison /></ProtectedRoute>}</Route>
+      <Route path="/fin/bank-reconciliation">{() => <ProtectedRoute path="/fin/bank-reconciliation"><FinBankReconciliation /></ProtectedRoute>}</Route>
       {/* Administração — admin only */}
       <Route path="/users">{() => <ProtectedRoute path="/users"><Users /></ProtectedRoute>}</Route>
       <Route path="/connector">{() => <ProtectedRoute path="/connector"><Connector /></ProtectedRoute>}</Route>

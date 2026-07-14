@@ -2925,4 +2925,155 @@ export const inoveRouter = router({
         throw new Error(err instanceof Error ? err.message : String(err));
       }
     }),
+
+  // ── Conciliação Bancária: cruzar lançamentos do banco com vendas INOVE ────────
+  reconcileWithBank: protectedProcedure
+    .input(z.object({
+      dateFrom: z.string(), // YYYY-MM-DD
+      dateTo: z.string(),   // YYYY-MM-DD
+      tolerance: z.number().min(0).max(100).default(5), // % de tolerância na diferença de valor
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      // 1. Buscar lançamentos bancários do período (apenas créditos)
+      const { finBankStatements } = await import("../../drizzle/schema");
+      const { gte, lte, and: drizzleAnd, eq: drizzleEq } = await import("drizzle-orm");
+      const dateFromTs = new Date(input.dateFrom + "T00:00:00");
+      const dateToTs = new Date(input.dateTo + "T23:59:59");
+
+      const bankEntries = await db
+        .select()
+        .from(finBankStatements)
+        .where(
+          drizzleAnd(
+            drizzleEq(finBankStatements.userId, ctx.user.id),
+            gte(finBankStatements.date, dateFromTs),
+            lte(finBankStatements.date, dateToTs)
+          )
+        )
+        .orderBy(finBankStatements.date);
+
+      // 2. Buscar vendas do INOVE agrupadas por dia
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) {
+        // Retornar apenas os lançamentos bancários sem dados INOVE
+        return {
+          items: bankEntries.map(e => ({
+            bankEntry: {
+              id: e.id,
+              date: e.date,
+              description: e.description,
+              amount: Number(e.amount),
+              type: e.type,
+              reconciled: e.reconciled,
+              paymentMethod: e.paymentMethod,
+            },
+            inoveSales: null,
+            status: "sem_inove" as const,
+            diff: null,
+          })),
+          summary: { total: bankEntries.length, conciliado: 0, divergente: 0, sem_inove: bankEntries.length },
+        };
+      }
+
+      const config = rows[0];
+      let inoveSalesByDay: Record<string, { total: number; qtd: number; vendas: number }> = {};
+
+      try {
+        const pool = await createInovePool(config);
+        const result = await pool.request().query(`
+          SELECT
+            CONVERT(varchar(10), v.VEN_DATA_FIM, 23) as dia,
+            COUNT(DISTINCT v.VENDA) as qtdVendas,
+            COUNT(i.ITEM_VENDA) as qtdItens,
+            CAST(SUM(v.VEN_TOTAL) as float) as totalVendas
+          FROM VENDAS v
+          LEFT JOIN ITENS_VENDAS i ON v.VENDA = i.VENDA
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= '${input.dateFrom}'
+            AND v.VEN_DATA_FIM <= '${input.dateTo} 23:59:59'
+          GROUP BY CONVERT(varchar(10), v.VEN_DATA_FIM, 23)
+          ORDER BY dia
+        `);
+        await pool.close();
+        for (const row of result.recordset as Array<{ dia: string; qtdVendas: number; qtdItens: number; totalVendas: number }>) {
+          inoveSalesByDay[row.dia] = { total: Number(row.totalVendas), qtd: Number(row.qtdItens), vendas: Number(row.qtdVendas) };
+        }
+      } catch {
+        // INOVE indisponível — retornar sem dados INOVE
+      }
+
+      // 3. Cruzar: para cada lançamento bancário, buscar vendas INOVE do mesmo dia
+      const toleranceFactor = input.tolerance / 100;
+      const items = bankEntries.map(e => {
+        const dia = e.date instanceof Date
+          ? e.date.toISOString().split("T")[0]
+          : String(e.date).split("T")[0];
+        const inoveDia = dia ? inoveSalesByDay[dia] : undefined;
+        const bankAmt = Number(e.amount);
+
+        let status: "conciliado" | "divergente" | "sem_venda" | "sem_inove";
+        let diff: number | null = null;
+
+        if (!inoveDia) {
+          status = Object.keys(inoveSalesByDay).length === 0 ? "sem_inove" : "sem_venda";
+        } else {
+          diff = bankAmt - inoveDia.total;
+          const pct = inoveDia.total > 0 ? Math.abs(diff) / inoveDia.total : Math.abs(diff) > 0 ? 1 : 0;
+          status = pct <= toleranceFactor ? "conciliado" : "divergente";
+        }
+
+        return {
+          bankEntry: {
+            id: e.id,
+            date: e.date,
+            description: e.description,
+            amount: bankAmt,
+            type: e.type,
+            reconciled: e.reconciled,
+            paymentMethod: e.paymentMethod,
+          },
+          inoveSales: inoveDia ?? null,
+          status,
+          diff,
+        };
+      });
+
+      // 4. Adicionar dias do INOVE que não têm lançamento bancário
+      const bankDays = new Set(items.map(i => {
+        const d = i.bankEntry.date instanceof Date
+          ? i.bankEntry.date.toISOString().split("T")[0]
+          : String(i.bankEntry.date).split("T")[0];
+        return d;
+      }));
+      for (const [dia, sales] of Object.entries(inoveSalesByDay)) {
+        if (!bankDays.has(dia)) {
+          items.push({
+            bankEntry: { id: 0, date: new Date(dia + "T12:00:00"), description: "(sem lançamento bancário)", amount: 0, type: "credit" as const, reconciled: false, paymentMethod: null },
+            inoveSales: sales,
+            status: "sem_venda" as const,
+            diff: -sales.total,
+          });
+        }
+      }
+
+      // Ordenar por data
+      items.sort((a, b) => {
+        const da = a.bankEntry.date instanceof Date ? a.bankEntry.date.getTime() : new Date(a.bankEntry.date).getTime();
+        const db2 = b.bankEntry.date instanceof Date ? b.bankEntry.date.getTime() : new Date(b.bankEntry.date).getTime();
+        return da - db2;
+      });
+
+      const summary = {
+        total: items.length,
+        conciliado: items.filter(i => i.status === "conciliado").length,
+        divergente: items.filter(i => i.status === "divergente").length,
+        sem_venda: items.filter(i => i.status === "sem_venda").length,
+        sem_inove: items.filter(i => i.status === "sem_inove").length,
+      };
+
+      return { items, summary };
+    }),
 });

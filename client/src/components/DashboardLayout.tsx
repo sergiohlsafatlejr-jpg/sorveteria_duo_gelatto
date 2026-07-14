@@ -64,6 +64,7 @@ import {
   Search,
   FileText,
   Clock,
+  GitMerge,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -130,6 +131,7 @@ const menuGroups: MenuGroup[] = [
       { icon: BarChart3, label: "Relatório Semanal (Pagar)", path: "/fin/weekday-report" },
       { icon: Wallet, label: "Contas a Receber", path: "/fin/receivables", badgeKey: "overdueReceivables" },
       { icon: Building2, label: "Extratos Bancários", path: "/fin/bank-statements" },
+      { icon: GitMerge, label: "Conciliação Bancária", path: "/fin/bank-reconciliation" },
       { icon: PiggyBank, label: "Custos", path: "/fin/costs" },
       { icon: BookOpen, label: "DRE", path: "/fin/dre" },
       { icon: Scissors, label: "Otimização Financeira", path: "/fin/otimizacao" },
