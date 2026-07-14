@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   CheckCircle2, AlertTriangle, XCircle, HelpCircle,
@@ -66,6 +67,118 @@ function getMonthRange(offset = 0) {
   return { from: fmt(first), to: fmt(last) };
 }
 
+type GroupItem = {
+  key: string;
+  label: string;
+  bankTotal: number;
+  inoveTotal: number;
+  qtdVendas: number;
+  dias: string[];
+  status: string;
+  diff: number;
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const cfg = STATUS_CONFIG[status as Status];
+  if (!cfg) return <span className="text-xs text-muted-foreground">{status}</span>;
+  return (
+    <Badge className={`gap-1 text-xs ${cfg.color}`} variant="outline">
+      {cfg.icon}
+      {cfg.label}
+    </Badge>
+  );
+}
+
+function GroupTable({ rows, title }: { rows: GroupItem[]; title: string }) {
+  if (rows.length === 0) return (
+    <div className="py-12 text-center text-muted-foreground">
+      <CheckCircle2 className="w-10 h-10 mx-auto mb-2 opacity-20" />
+      <p className="text-sm">Nenhum dado para exibir. Clique em <strong>Conciliar</strong>.</p>
+    </div>
+  );
+
+  const totalBanco = rows.reduce((s, r) => s + r.bankTotal, 0);
+  const totalInove = rows.reduce((s, r) => s + r.inoveTotal, 0);
+  const totalDiff = totalBanco - totalInove;
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b bg-muted/30">
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">{title}</th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+              <div>Total Créditos</div>
+              <div className="text-xs font-normal opacity-60">(banco)</div>
+            </th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+              <div>Total Vendas</div>
+              <div className="text-xs font-normal opacity-60">(INOVE)</div>
+            </th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Diferença</th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Qtd. Vendas</th>
+            <th className="px-4 py-3 text-center font-medium text-muted-foreground">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => {
+            const rowBg =
+              row.status === "conciliado" ? "hover:bg-emerald-50/30" :
+              row.status === "divergente" ? "hover:bg-amber-50/30" :
+              row.status === "sem_venda" ? "hover:bg-red-50/30" :
+              "hover:bg-muted/30";
+            return (
+              <tr key={row.key} className={`border-b transition-colors ${rowBg}`}>
+                <td className="px-4 py-3 font-medium">{row.label}</td>
+                <td className="px-4 py-3 text-right font-semibold">
+                  {row.bankTotal > 0
+                    ? <span className="text-emerald-600">{fmtBRL(row.bankTotal)}</span>
+                    : <span className="text-muted-foreground text-xs italic">—</span>
+                  }
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {row.inoveTotal > 0
+                    ? <div>
+                        <div className="font-semibold">{fmtBRL(row.inoveTotal)}</div>
+                        <div className="text-xs text-muted-foreground">{row.qtdVendas} vendas</div>
+                      </div>
+                    : <span className="text-muted-foreground text-xs italic">—</span>
+                  }
+                </td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <span className={Math.abs(row.diff) < 0.01 ? "text-emerald-600" : row.diff > 0 ? "text-blue-600" : "text-red-600"}>
+                    {row.diff > 0 ? "+" : ""}{fmtBRL(row.diff)}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right text-muted-foreground text-xs">
+                  {row.dias.length} dia{row.dias.length > 1 ? "s" : ""}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <StatusBadge status={row.status} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="border-t-2 bg-muted/20 font-semibold">
+            <td className="px-4 py-3 text-sm">TOTAL</td>
+            <td className="px-4 py-3 text-right text-emerald-600">{fmtBRL(totalBanco)}</td>
+            <td className="px-4 py-3 text-right">{fmtBRL(totalInove)}</td>
+            <td className="px-4 py-3 text-right">
+              <span className={Math.abs(totalDiff) < 0.01 ? "text-emerald-600" : totalDiff > 0 ? "text-blue-600" : "text-red-600"}>
+                {totalDiff > 0 ? "+" : ""}{fmtBRL(totalDiff)}
+              </span>
+            </td>
+            <td className="px-4 py-3"></td>
+            <td className="px-4 py-3"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 export default function FinBankReconciliation() {
   const today = new Date().toISOString().split("T")[0]!;
   const [dateFrom, setDateFrom] = useState(() => getWeekRange().from);
@@ -111,39 +224,56 @@ export default function FinBankReconciliation() {
 
   const exportExcel = () => {
     if (!data) return;
-    const rows: Record<string, unknown>[] = [];
+    const wb = XLSX.utils.book_new();
+
+    // Aba Diário
+    const rowsDia: Record<string, unknown>[] = [];
     for (const item of data.items as Array<{
       dia: string; bankTotal: number; bankEntries: Array<{ description: string; amount: number; type: string; paymentMethod: string | null }>;
       inoveSales: { total: number; vendas: number } | null; diff: number | null; status: string;
     }>) {
-      // Linha de resumo do dia
-      rows.push({
+      rowsDia.push({
         Data: fmtDateStr(item.dia),
-        "Descrição": `TOTAL DO DIA (${item.bankEntries.length} lançamentos)`,
-        "Total Banco (R$)": item.bankTotal,
+        "Lançamentos banco": item.bankEntries.length,
+        "Total Créditos Banco (R$)": item.bankTotal,
         "Vendas INOVE (R$)": item.inoveSales?.total ?? "",
         "Qtd Vendas INOVE": item.inoveSales?.vendas ?? "",
         "Diferença (R$)": item.diff ?? "",
         "Status": STATUS_CONFIG[item.status as Status]?.label ?? item.status,
       });
-      // Linhas de detalhe
-      for (const e of item.bankEntries) {
-        rows.push({
-          Data: "",
-          "Descrição": `  └ ${e.description}`,
-          "Total Banco (R$)": e.type === "credit" ? e.amount : -e.amount,
-          "Vendas INOVE (R$)": "",
-          "Qtd Vendas INOVE": "",
-          "Diferença (R$)": "",
-          "Status": "",
-        });
-      }
     }
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Conciliação");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rowsDia), "Diário");
+
+    // Aba Semanal
+    if (data.weeks) {
+      const rowsSem = (data.weeks as GroupItem[]).map(w => ({
+        Semana: w.label,
+        "Total Créditos Banco (R$)": w.bankTotal,
+        "Vendas INOVE (R$)": w.inoveTotal,
+        "Qtd Vendas INOVE": w.qtdVendas,
+        "Diferença (R$)": w.diff,
+        "Dias": w.dias.length,
+        "Status": STATUS_CONFIG[w.status as Status]?.label ?? w.status,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rowsSem), "Semanal");
+    }
+
+    // Aba Mensal
+    if (data.months) {
+      const rowsMes = (data.months as GroupItem[]).map(m => ({
+        Mês: m.label,
+        "Total Créditos Banco (R$)": m.bankTotal,
+        "Vendas INOVE (R$)": m.inoveTotal,
+        "Qtd Vendas INOVE": m.qtdVendas,
+        "Diferença (R$)": m.diff,
+        "Dias": m.dias.length,
+        "Status": STATUS_CONFIG[m.status as Status]?.label ?? m.status,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rowsMes), "Mensal");
+    }
+
     XLSX.writeFile(wb, `conciliacao_${dateFrom}_${dateTo}.xlsx`);
-    toast.success("Excel exportado!");
+    toast.success("Excel exportado com 3 abas!");
   };
 
   const summary = data?.summary;
@@ -158,7 +288,7 @@ export default function FinBankReconciliation() {
             Conciliação Bancária
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Cruza lançamentos bancários com as vendas do INOVE por data e valor
+            Cruza lançamentos bancários com as vendas do INOVE — visão diária, semanal e mensal
           </p>
         </div>
       </div>
@@ -227,169 +357,202 @@ export default function FinBankReconciliation() {
         </div>
       )}
 
-      {/* Tabela */}
-      {data && (
-        <div className="rounded-xl border bg-card overflow-hidden">
-          <div className="flex flex-wrap gap-3 items-center p-4 border-b">
-            <div className="relative flex-1 min-w-48">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por data ou descrição..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {(["all", "conciliado", "divergente", "sem_venda", "sem_inove"] as const).map(s => (
-                <button
-                  key={s}
-                  onClick={() => setFilterStatus(s)}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                    filterStatus === s
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "border-border hover:bg-muted"
-                  }`}
-                >
-                  {s === "all" ? "Todos" : STATUS_CONFIG[s].label}
-                </button>
-              ))}
-            </div>
-            <Button variant="outline" size="sm" onClick={exportExcel} className="gap-2 ml-auto">
+      {/* Abas Diário / Semanal / Mensal */}
+      {data ? (
+        <Tabs defaultValue="semanal" className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <TabsList>
+              <TabsTrigger value="diario">📅 Diário</TabsTrigger>
+              <TabsTrigger value="semanal">📆 Semanal</TabsTrigger>
+              <TabsTrigger value="mensal">🗓️ Mensal</TabsTrigger>
+            </TabsList>
+            <Button variant="outline" size="sm" onClick={exportExcel} className="gap-2">
               <Download className="w-4 h-4" />
-              Excel
+              Exportar Excel (3 abas)
             </Button>
           </div>
 
-          {filtered.length === 0 ? (
-            <div className="py-16 text-center text-muted-foreground">
-              <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-20" />
-              <p className="font-medium">Nenhum item encontrado</p>
-              <p className="text-sm mt-1">Ajuste os filtros ou clique em "Conciliar" para iniciar.</p>
+          {/* Aba Diário */}
+          <TabsContent value="diario">
+            <div className="rounded-xl border bg-card overflow-hidden">
+              <div className="flex flex-wrap gap-3 items-center p-4 border-b">
+                <div className="relative flex-1 min-w-48">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por data ou descrição..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {(["all", "conciliado", "divergente", "sem_venda", "sem_inove"] as const).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setFilterStatus(s)}
+                      className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                        filterStatus === s
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "border-border hover:bg-muted"
+                      }`}
+                    >
+                      {s === "all" ? "Todos" : STATUS_CONFIG[s].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {filtered.length === 0 ? (
+                <div className="py-16 text-center text-muted-foreground">
+                  <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                  <p className="font-medium">Nenhum item encontrado</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground w-8"></th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Data</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Lançamentos banco</th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                          <div>Total Créditos</div>
+                          <div className="text-xs font-normal opacity-60">(banco)</div>
+                        </th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                          <div>Total Vendas</div>
+                          <div className="text-xs font-normal opacity-60">(INOVE)</div>
+                        </th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Diferença</th>
+                        <th className="px-4 py-3 text-center font-medium text-muted-foreground">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(filtered as Array<{
+                        dia: string; bankTotal: number;
+                        bankEntries: Array<{ id: number; description: string; amount: number; type: string; paymentMethod: string | null }>;
+                        inoveSales: { total: number; qtd: number; vendas: number } | null;
+                        status: string; diff: number | null;
+                      }>).map((item) => {
+                        const cfg = STATUS_CONFIG[item.status as Status];
+                        const isExpanded = expandedDays.has(item.dia);
+                        const rowBg =
+                          item.status === "conciliado" ? "hover:bg-emerald-50/30" :
+                          item.status === "divergente" ? "hover:bg-amber-50/30" :
+                          item.status === "sem_venda" ? "hover:bg-red-50/30" :
+                          "hover:bg-muted/30";
+                        return (
+                          <>
+                            <tr
+                              key={item.dia}
+                              className={`border-b transition-colors cursor-pointer ${rowBg}`}
+                              onClick={() => item.bankEntries.length > 0 && toggleDay(item.dia)}
+                            >
+                              <td className="px-4 py-3 text-muted-foreground">
+                                {item.bankEntries.length > 0 && (
+                                  isExpanded
+                                    ? <ChevronDown className="w-4 h-4" />
+                                    : <ChevronRight className="w-4 h-4" />
+                                )}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-xs font-medium whitespace-nowrap">
+                                {fmtDateStr(item.dia)}
+                              </td>
+                              <td className="px-4 py-3 text-muted-foreground text-xs">
+                                {item.bankEntries.length > 0
+                                  ? `${item.bankEntries.length} lançamento${item.bankEntries.length > 1 ? "s" : ""}`
+                                  : <span className="italic">sem lançamento bancário</span>
+                                }
+                              </td>
+                              <td className="px-4 py-3 text-right font-semibold whitespace-nowrap">
+                                {item.bankTotal > 0
+                                  ? <span className="text-emerald-600">{fmtBRL(item.bankTotal)}</span>
+                                  : <span className="text-muted-foreground text-xs italic">—</span>
+                                }
+                              </td>
+                              <td className="px-4 py-3 text-right whitespace-nowrap">
+                                {item.inoveSales ? (
+                                  <div>
+                                    <div className="font-semibold">{fmtBRL(item.inoveSales.total)}</div>
+                                    <div className="text-xs text-muted-foreground">{item.inoveSales.vendas} vendas</div>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs italic">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-right whitespace-nowrap">
+                                {item.diff !== null ? (
+                                  <span className={Math.abs(item.diff) < 0.01 ? "text-emerald-600" : item.diff > 0 ? "text-blue-600" : "text-red-600"}>
+                                    {item.diff > 0 ? "+" : ""}{fmtBRL(item.diff)}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <Badge className={`gap-1 text-xs ${cfg?.color}`} variant="outline">
+                                  {cfg?.icon}
+                                  {cfg?.label}
+                                </Badge>
+                              </td>
+                            </tr>
+                            {isExpanded && item.bankEntries.map((e, ei) => (
+                              <tr key={`${item.dia}-${ei}`} className="border-b bg-muted/10 text-xs">
+                                <td className="px-4 py-2"></td>
+                                <td className="px-4 py-2 text-muted-foreground pl-8">└</td>
+                                <td className="px-4 py-2 text-muted-foreground max-w-xs truncate" colSpan={2}>
+                                  {e.description}
+                                  {e.paymentMethod && <span className="ml-2 uppercase text-muted-foreground/60">{e.paymentMethod}</span>}
+                                </td>
+                                <td className="px-4 py-2 text-right">
+                                  <span className={e.type === "credit" ? "text-emerald-600" : "text-red-600"}>
+                                    {e.type === "debit" ? "- " : ""}{fmtBRL(e.amount)}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2" colSpan={2}></td>
+                              </tr>
+                            ))}
+                          </>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/30">
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-8"></th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Data</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Lançamentos banco</th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                      <div>Total Créditos</div>
-                      <div className="text-xs font-normal text-muted-foreground/60">(banco)</div>
-                    </th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                      <div>Total Vendas</div>
-                      <div className="text-xs font-normal text-muted-foreground/60">(INOVE)</div>
-                    </th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">Diferença</th>
-                    <th className="px-4 py-3 text-center font-medium text-muted-foreground">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(filtered as Array<{
-                    dia: string; bankTotal: number;
-                    bankEntries: Array<{ id: number; description: string; amount: number; type: string; paymentMethod: string | null }>;
-                    inoveSales: { total: number; qtd: number; vendas: number } | null;
-                    status: string; diff: number | null;
-                  }>).map((item) => {
-                    const cfg = STATUS_CONFIG[item.status as Status];
-                    const isExpanded = expandedDays.has(item.dia);
-                    const rowBg =
-                      item.status === "conciliado" ? "hover:bg-emerald-50/30" :
-                      item.status === "divergente" ? "hover:bg-amber-50/30" :
-                      item.status === "sem_venda" ? "hover:bg-red-50/30" :
-                      "hover:bg-muted/30";
-                    return (
-                      <>
-                        {/* Linha resumo do dia */}
-                        <tr
-                          key={item.dia}
-                          className={`border-b transition-colors cursor-pointer ${rowBg}`}
-                          onClick={() => item.bankEntries.length > 0 && toggleDay(item.dia)}
-                        >
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {item.bankEntries.length > 0 && (
-                              isExpanded
-                                ? <ChevronDown className="w-4 h-4" />
-                                : <ChevronRight className="w-4 h-4" />
-                            )}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs font-medium whitespace-nowrap">
-                            {fmtDateStr(item.dia)}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground text-xs">
-                            {item.bankEntries.length > 0
-                              ? `${item.bankEntries.length} lançamento${item.bankEntries.length > 1 ? "s" : ""}`
-                              : <span className="italic">sem lançamento bancário</span>
-                            }
-                          </td>
-                          <td className="px-4 py-3 text-right font-semibold whitespace-nowrap">
-                            {item.bankTotal > 0
-                              ? <span className="text-emerald-600">{fmtBRL(item.bankTotal)}</span>
-                              : <span className="text-muted-foreground text-xs italic">—</span>
-                            }
-                          </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
-                            {item.inoveSales ? (
-                              <div>
-                                <div className="font-semibold">{fmtBRL(item.inoveSales.total)}</div>
-                                <div className="text-xs text-muted-foreground">{item.inoveSales.vendas} vendas</div>
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground text-xs italic">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
-                            {item.diff !== null ? (
-                              <span className={Math.abs(item.diff) < 0.01 ? "text-emerald-600" : item.diff > 0 ? "text-blue-600" : "text-red-600"}>
-                                {item.diff > 0 ? "+" : ""}{fmtBRL(item.diff)}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground text-xs">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <Badge className={`gap-1 text-xs ${cfg?.color}`} variant="outline">
-                              {cfg?.icon}
-                              {cfg?.label}
-                            </Badge>
-                          </td>
-                        </tr>
-                        {/* Linhas de detalhe dos lançamentos */}
-                        {isExpanded && item.bankEntries.map((e, ei) => (
-                          <tr key={`${item.dia}-${ei}`} className="border-b bg-muted/10 text-xs">
-                            <td className="px-4 py-2"></td>
-                            <td className="px-4 py-2 text-muted-foreground pl-8">└</td>
-                            <td className="px-4 py-2 text-muted-foreground max-w-xs truncate" colSpan={2}>
-                              {e.description}
-                              {e.paymentMethod && <span className="ml-2 uppercase text-muted-foreground/60">{e.paymentMethod}</span>}
-                            </td>
-                            <td className="px-4 py-2 text-right">
-                              <span className={e.type === "credit" ? "text-emerald-600" : "text-red-600"}>
-                                {e.type === "debit" ? "- " : ""}{fmtBRL(e.amount)}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2" colSpan={2}></td>
-                          </tr>
-                        ))}
-                      </>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+          </TabsContent>
 
-      {!data && !isLoading && (
-        <div className="py-16 text-center text-muted-foreground rounded-xl border bg-card">
-          <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-20" />
-          <p className="font-medium">Pronto para conciliar</p>
-          <p className="text-sm mt-1">Selecione o período e clique em <strong>Conciliar</strong> para cruzar os dados.</p>
-        </div>
+          {/* Aba Semanal */}
+          <TabsContent value="semanal">
+            <div className="rounded-xl border bg-card overflow-hidden">
+              <div className="px-4 py-3 border-b bg-muted/20">
+                <p className="text-xs text-muted-foreground">
+                  💡 <strong>Dica:</strong> A visão semanal é mais precisa para maquininha (D+1/D+2) — os créditos da semana no banco tendem a bater com as vendas da semana no INOVE.
+                </p>
+              </div>
+              <GroupTable rows={(data.weeks ?? []) as GroupItem[]} title="Semana" />
+            </div>
+          </TabsContent>
+
+          {/* Aba Mensal */}
+          <TabsContent value="mensal">
+            <div className="rounded-xl border bg-card overflow-hidden">
+              <div className="px-4 py-3 border-b bg-muted/20">
+                <p className="text-xs text-muted-foreground">
+                  💡 <strong>Dica:</strong> A visão mensal é a mais precisa — no fechamento do mês todos os recebimentos de maquininha já foram liquidados.
+                </p>
+              </div>
+              <GroupTable rows={(data.months ?? []) as GroupItem[]} title="Mês" />
+            </div>
+          </TabsContent>
+        </Tabs>
+      ) : (
+        !isLoading && (
+          <div className="py-16 text-center text-muted-foreground rounded-xl border bg-card">
+            <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-20" />
+            <p className="font-medium">Pronto para conciliar</p>
+            <p className="text-sm mt-1">Selecione o período e clique em <strong>Conciliar</strong> para cruzar os dados.</p>
+          </div>
+        )
       )}
     </div>
   );

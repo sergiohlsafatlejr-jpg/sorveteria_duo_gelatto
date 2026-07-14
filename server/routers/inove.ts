@@ -3092,6 +3092,56 @@ export const inoveRouter = router({
         sem_inove: items.filter(i => i.status === "sem_inove").length,
       };
 
-      return { items, summary };
+      // ── Agrupamento Semanal ──────────────────────────────────────────────────
+      // Semana ISO: segunda-feira como primeiro dia
+      const getWeekKey = (dia: string) => {
+        const d = new Date(dia + "T12:00:00");
+        const day = d.getDay(); // 0=dom, 1=seg...
+        const diff = (day === 0 ? -6 : 1 - day); // ajuste para segunda
+        const monday = new Date(d);
+        monday.setDate(d.getDate() + diff);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        const fmt = (dt: Date) => dt.toISOString().split("T")[0]!;
+        return { key: fmt(monday), label: `${fmt(monday)} a ${fmt(sunday)}` };
+      };
+
+      const weekMap: Record<string, { key: string; label: string; bankTotal: number; inoveTotal: number; qtdVendas: number; dias: string[]; status: string; diff: number }> = {};
+      for (const item of items) {
+        const { key, label } = getWeekKey(item.dia);
+        if (!weekMap[key]) weekMap[key] = { key, label, bankTotal: 0, inoveTotal: 0, qtdVendas: 0, dias: [], status: "sem_inove", diff: 0 };
+        weekMap[key]!.bankTotal += item.bankTotal;
+        weekMap[key]!.inoveTotal += item.inoveSales?.total ?? 0;
+        weekMap[key]!.qtdVendas += item.inoveSales?.vendas ?? 0;
+        weekMap[key]!.dias.push(item.dia);
+      }
+      const weeks = Object.values(weekMap).sort((a, b) => a.key.localeCompare(b.key)).map(w => {
+        const diff = w.bankTotal - w.inoveTotal;
+        const pct = w.inoveTotal > 0 ? Math.abs(diff) / w.inoveTotal : Math.abs(diff) > 0 ? 1 : 0;
+        const status = noInove ? "sem_inove" : w.inoveTotal === 0 && w.bankTotal > 0 ? "sem_venda" : pct <= toleranceFactor ? "conciliado" : "divergente";
+        return { ...w, diff, status };
+      });
+
+      // ── Agrupamento Mensal ───────────────────────────────────────────────────
+      const monthMap: Record<string, { key: string; label: string; bankTotal: number; inoveTotal: number; qtdVendas: number; dias: string[]; status: string; diff: number }> = {};
+      for (const item of items) {
+        const key = item.dia.substring(0, 7); // YYYY-MM
+        const [y, m] = key.split("-");
+        const monthNames = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+        const label = `${monthNames[parseInt(m ?? "1") - 1]}/${y}`;
+        if (!monthMap[key]) monthMap[key] = { key, label, bankTotal: 0, inoveTotal: 0, qtdVendas: 0, dias: [], status: "sem_inove", diff: 0 };
+        monthMap[key]!.bankTotal += item.bankTotal;
+        monthMap[key]!.inoveTotal += item.inoveSales?.total ?? 0;
+        monthMap[key]!.qtdVendas += item.inoveSales?.vendas ?? 0;
+        monthMap[key]!.dias.push(item.dia);
+      }
+      const months = Object.values(monthMap).sort((a, b) => a.key.localeCompare(b.key)).map(mo => {
+        const diff = mo.bankTotal - mo.inoveTotal;
+        const pct = mo.inoveTotal > 0 ? Math.abs(diff) / mo.inoveTotal : Math.abs(diff) > 0 ? 1 : 0;
+        const status = noInove ? "sem_inove" : mo.inoveTotal === 0 && mo.bankTotal > 0 ? "sem_venda" : pct <= toleranceFactor ? "conciliado" : "divergente";
+        return { ...mo, diff, status };
+      });
+
+      return { items, summary, weeks, months };
     }),
 });
