@@ -3008,12 +3008,19 @@ export const inoveRouter = router({
       }
 
       // 3. Agrupar lançamentos bancários por dia (somar créditos do mesmo dia)
+      // Usa fuso horário de Brasília (UTC-3) para extrair a data
+      const toBrasiliaDate = (d: Date | string): string => {
+        const dt = d instanceof Date ? d : new Date(d);
+        // Ajusta para UTC-3 (Brasília)
+        const offset = -3 * 60; // minutos
+        const local = new Date(dt.getTime() + (offset - dt.getTimezoneOffset()) * 60000);
+        return local.toISOString().split("T")[0]!;
+      };
+
       const toleranceFactor = input.tolerance / 100;
       const bankByDay: Record<string, { totalCredito: number; totalDebito: number; entries: typeof bankEntries }> = {};
       for (const e of bankEntries) {
-        const dia = e.date instanceof Date
-          ? e.date.toISOString().split("T")[0]
-          : String(e.date).split("T")[0];
+        const dia = toBrasiliaDate(e.date);
         if (!dia) continue;
         if (!bankByDay[dia]) bankByDay[dia] = { totalCredito: 0, totalDebito: 0, entries: [] };
         const amt = Number(e.amount);

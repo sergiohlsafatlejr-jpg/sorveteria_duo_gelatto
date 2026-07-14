@@ -274,9 +274,15 @@ export default function FinBankReconciliation() {
                   <tr className="border-b bg-muted/30">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground w-8"></th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Data</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Lançamentos</th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">Total Banco</th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">Vendas INOVE</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Lançamentos banco</th>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                      <div>Total Créditos</div>
+                      <div className="text-xs font-normal text-muted-foreground/60">(banco)</div>
+                    </th>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                      <div>Total Vendas</div>
+                      <div className="text-xs font-normal text-muted-foreground/60">(INOVE)</div>
+                    </th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Diferença</th>
                     <th className="px-4 py-3 text-center font-medium text-muted-foreground">Status</th>
                   </tr>
