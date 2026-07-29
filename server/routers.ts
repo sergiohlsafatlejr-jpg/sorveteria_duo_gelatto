@@ -14,6 +14,7 @@ import { reportsRouter } from "./routers/reports";
 import { metaAdsRouter } from "./routers/meta-ads";
 import { adLibraryRouter } from "./routers/ad-library";
 import { inoveRouter } from "./routers/inove";
+import { redeRouter } from "./routers/rede";
 import { syncDailyRevenue, syncSalesCache } from "./cron";
 import { cronJobLog } from "../drizzle/schema";
 import { desc } from "drizzle-orm";
@@ -980,6 +981,7 @@ export const appRouter = router({
   metaAds: metaAdsRouter,
   adLibrary: adLibraryRouter,
   inove: inoveRouter,
+  rede: redeRouter,
   cron: router({
     // Listar últimas execuções dos cron jobs
     getLogs: protectedProcedure

@@ -732,3 +732,121 @@ export const purchaseProductConfig = mysqlTable("purchase_product_config", {
 });
 export type PurchaseProductConfig = typeof purchaseProductConfig.$inferSelect;
 export type InsertPurchaseProductConfig = typeof purchaseProductConfig.$inferInsert;
+
+// ── Importação de Vendas Rede (Adquirente) ────────────────────────────────────
+export const redeSalesImport = mysqlTable("rede_sales_import", {
+  id: int("id").autoincrement().primaryKey(),
+  
+  // Dados da venda
+  dataDaVenda: date("dataDaVenda").notNull(),
+  horaDaVenda: varchar("horaDaVenda", { length: 20 }),
+  statusDaVenda: varchar("statusDaVenda", { length: 50 }).notNull(), // "pago", "aprovada", "cancelada"
+  
+  // Valores
+  valorDaVendaOriginal: decimal("valorDaVendaOriginal", { precision: 10, scale: 2 }).notNull(),
+  valorDaVendaAtualizado: decimal("valorDaVendaAtualizado", { precision: 10, scale: 2 }),
+  
+  // Forma de pagamento
+  modalidade: varchar("modalidade", { length: 50 }).notNull(), // "pix", "débito", "crédito"
+  tipo: varchar("tipo", { length: 100 }), // "pix não parcelado", "à vista", "parcelado"
+  bandeira: varchar("bandeira", { length: 50 }), // "Mastercard", "Visa", "Elo", "Amex"
+  numeroDeParcelas: int("numeroDeParcelas"),
+  
+  // Taxas
+  taxaMDR: decimal("taxaMDR", { precision: 5, scale: 2 }),
+  valorMDR: decimal("valorMDR", { precision: 10, scale: 2 }),
+  taxaRecebimentoAutomatico: decimal("taxaRecebimentoAutomatico", { precision: 5, scale: 2 }),
+  valorTaxaRecebimentoAutomatico: decimal("valorTaxaRecebimentoAutomatico", { precision: 10, scale: 2 }),
+  valorTotalTaxas: decimal("valorTotalTaxas", { precision: 10, scale: 2 }),
+  valorLiquido: decimal("valorLiquido", { precision: 10, scale: 2 }),
+  
+  // Identificadores
+  nsuCV: varchar("nsuCV", { length: 50 }).notNull(), // NSU/CV único
+  idTransacao: varchar("idTransacao", { length: 100 }),
+  numeroAutorizacao: varchar("numeroAutorizacao", { length: 50 }),
+  
+  // Recebimento
+  prazoDeRecebimento: varchar("prazoDeRecebimento", { length: 50 }), // "no mesmo dia", "disponível em D+1", "disponível em D+30"
+  
+  // Estabelecimento
+  numeroDoEstabelecimento: varchar("numeroDoEstabelecimento", { length: 50 }).notNull(),
+  nomeDoEstabelecimento: varchar("nomeDoEstabelecimento", { length: 200 }),
+  cnpj: varchar("cnpj", { length: 20 }),
+  
+  // Cartão
+  numeroDoCartao: varchar("numeroDoCartao", { length: 50 }),
+  
+  // Maquininha
+  codigoDaMaquininha: varchar("codigoDaMaquininha", { length: 50 }),
+  tipoDeMaquininha: varchar("tipoDeMaquininha", { length: 50 }),
+  
+  // Cancelamento
+  canceladaPeloEstabelecimento: boolean("canceladaPeloEstabelecimento").default(false),
+  dataDoCancelamento: date("dataDoCancelamento"),
+  valorCancelado: decimal("valorCancelado", { precision: 10, scale: 2 }),
+  
+  // Chargeback
+  emDisputaDeChargeback: boolean("emDisputaDeChargeback").default(false),
+  dataQueEntrouEmDisputaDeChargeback: date("dataQueEntrouEmDisputaDeChargeback"),
+  resolucaoDoChargeback: varchar("resolucaoDoChargeback", { length: 100 }),
+  
+  // Metadata
+  importFileId: int("importFileId"), // referência ao arquivo importado
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type RedeSalesImport = typeof redeSalesImport.$inferSelect;
+export type InsertRedeSalesImport = typeof redeSalesImport.$inferInsert;
+
+// ── Arquivo de Importação Rede ────────────────────────────────────────────────
+export const redeImportFiles = mysqlTable("rede_import_files", {
+  id: int("id").autoincrement().primaryKey(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  fileUrl: text("fileUrl").notNull(), // URL do arquivo no S3
+  periodStart: date("periodStart").notNull(),
+  periodEnd: date("periodEnd").notNull(),
+  totalRecords: int("totalRecords").notNull(),
+  totalValue: decimal("totalValue", { precision: 15, scale: 2 }).notNull(),
+  importedBy: int("importedBy").notNull(), // userId
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type RedeImportFile = typeof redeImportFiles.$inferSelect;
+export type InsertRedeImportFile = typeof redeImportFiles.$inferInsert;
+
+// ── Conciliação Rede x INOVE ──────────────────────────────────────────────────
+export const redeInoveReconciliation = mysqlTable("rede_inove_reconciliation", {
+  id: int("id").autoincrement().primaryKey(),
+  
+  // Venda Rede
+  redeSaleId: int("redeSaleId").notNull(),
+  redeDate: date("redeDate").notNull(),
+  redeValue: decimal("redeValue", { precision: 10, scale: 2 }).notNull(),
+  redeModalidade: varchar("redeModalidade", { length: 50 }),
+  redeBandeira: varchar("redeBandeira", { length: 50 }),
+  
+  // Venda INOVE
+  inoveSaleId: int("inoveSaleId"),
+  inoveDate: date("inoveDate"),
+  inoveValue: decimal("inoveValue", { precision: 10, scale: 2 }),
+  
+  // Status da conciliação
+  status: mysqlEnum("status", ["matched", "unmatched_rede", "unmatched_inove", "divergent"]).notNull(),
+  divergenceReason: varchar("divergenceReason", { length: 255 }), // ex: "valor diferente", "data diferente"
+  divergenceAmount: decimal("divergenceAmount", { precision: 10, scale: 2 }), // diferença de valor
+  
+  // Crédito bancário
+  bankStatementId: int("bankStatementId"),
+  bankCreditDate: date("bankCreditDate"),
+  bankCreditValue: decimal("bankCreditValue", { precision: 10, scale: 2 }),
+  
+  // Metadata
+  reconciliationDate: date("reconciliationDate").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type RedeInoveReconciliation = typeof redeInoveReconciliation.$inferSelect;
+export type InsertRedeInoveReconciliation = typeof redeInoveReconciliation.$inferInsert;
