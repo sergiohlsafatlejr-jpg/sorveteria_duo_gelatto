@@ -9,7 +9,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   CheckCircle2, AlertTriangle, XCircle, HelpCircle,
-  RefreshCw, Download, Search, SlidersHorizontal, ChevronDown, ChevronRight
+  RefreshCw, Download, Search, SlidersHorizontal, ChevronDown, ChevronRight,
+  Upload, File, Loader
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -365,6 +366,7 @@ export default function FinBankReconciliation() {
               <TabsTrigger value="diario">📅 Diário</TabsTrigger>
               <TabsTrigger value="semanal">📆 Semanal</TabsTrigger>
               <TabsTrigger value="mensal">🗓️ Mensal</TabsTrigger>
+              <TabsTrigger value="rede">🏦 Rede</TabsTrigger>
             </TabsList>
             <Button variant="outline" size="sm" onClick={exportExcel} className="gap-2">
               <Download className="w-4 h-4" />
@@ -544,6 +546,10 @@ export default function FinBankReconciliation() {
               <GroupTable rows={(data.months ?? []) as GroupItem[]} title="Mês" />
             </div>
           </TabsContent>
+                  {/* Aba Rede */}
+          <TabsContent value="rede">
+            <RedeTab />
+          </TabsContent>
         </Tabs>
       ) : (
         !isLoading && (
@@ -553,6 +559,217 @@ export default function FinBankReconciliation() {
             <p className="text-sm mt-1">Selecione o período e clique em <strong>Conciliar</strong> para cruzar os dados.</p>
           </div>
         )
+      )}
+    </div>
+  );
+}
+
+// ─── Componente RedeTab ───────────────────────────────────────────────────────
+
+function RedeTab() {
+  const [file, setFile] = useState<File | null>(null);
+  const [periodStart, setPeriodStart] = useState<string>("");
+  const [periodEnd, setPeriodEnd] = useState<string>("");
+  const [importFileId, setImportFileId] = useState<number | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isReconciling, setIsReconciling] = useState(false);
+
+  const importMutation = trpc.rede.importFile.useMutation();
+  const reconcileMutation = trpc.rede.reconcile.useMutation();
+  const listImports = trpc.rede.listImports.useQuery(undefined);
+  const listReconciliations = trpc.rede.listReconciliations.useQuery(undefined);
+  const stats = trpc.rede.getStats.useQuery(undefined);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) {
+      setFile(e.target.files[0]);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!file || !periodStart || !periodEnd) {
+      toast.error("Selecione arquivo e período");
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const result = await importMutation.mutateAsync({
+        fileBuffer: new Uint8Array(buffer) as any,
+        fileName: file.name,
+        periodStart: new Date(periodStart),
+        periodEnd: new Date(periodEnd),
+      });
+
+      setImportFileId(result.importFileId);
+      setFile(null);
+      toast.success(`${result.totalRecords} vendas importadas`);
+      listImports.refetch();
+    } catch (error) {
+      toast.error(`Erro ao importar: ${error instanceof Error ? error.message : "Desconhecido"}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleReconcile = async () => {
+    if (!importFileId) {
+      toast.error("Nenhuma importação selecionada");
+      return;
+    }
+
+    setIsReconciling(true);
+    try {
+      const result = await reconcileMutation.mutateAsync({
+        importFileId,
+        toleranceAmount: 0.01,
+      });
+
+      toast.success(`Conciliação concluída: ${result.matchPercentage}% de match`);
+      listReconciliations.refetch();
+      stats.refetch();
+    } catch (error) {
+      toast.error(`Erro ao conciliar: ${error instanceof Error ? error.message : "Desconhecido"}`);
+    } finally {
+      setIsReconciling(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Upload Section */}
+      <div className="rounded-xl border bg-card p-6">
+        <h3 className="font-semibold mb-4">Importar Relatório Rede</h3>
+
+        <div className="space-y-4">
+          {/* Drag and Drop */}
+          <div
+            className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const f = e.dataTransfer.files[0];
+              if (f) setFile(f);
+            }}
+          >
+            <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm font-medium">Arraste o arquivo Excel aqui ou clique para selecionar</p>
+            <p className="text-xs text-muted-foreground mt-1">Formato: .xlsx (Rede Relatório de Vendas)</p>
+            <input
+              type="file"
+              accept=".xlsx"
+              onChange={handleFileChange}
+              className="hidden"
+              id="rede-file-input"
+            />
+            <label htmlFor="rede-file-input" className="cursor-pointer">
+              <span className="sr-only">Selecionar arquivo</span>
+            </label>
+          </div>
+
+          {file && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+              <File className="w-4 h-4 text-emerald-600" />
+              <span className="text-sm text-emerald-900">{file.name}</span>
+            </div>
+          )}
+
+          {/* Period Selection */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs">Data Início</Label>
+              <Input
+                type="date"
+                value={periodStart}
+                onChange={(e) => setPeriodStart(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Data Fim</Label>
+              <Input
+                type="date"
+                value={periodEnd}
+                onChange={(e) => setPeriodEnd(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Import Button */}
+          <Button
+            onClick={handleImport}
+            disabled={!file || !periodStart || !periodEnd || isImporting}
+            className="w-full gap-2"
+          >
+            {isImporting ? <Loader className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {isImporting ? "Importando..." : "Importar"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats Section */}
+      {stats.data && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: "✅ Conciliados", value: stats.data.matched.count, color: "text-emerald-600" },
+            { label: "❌ Sem INOVE", value: stats.data.unmatchedRede.count, color: "text-red-600" },
+            { label: "⚠️ Divergentes", value: stats.data.divergent.count, color: "text-amber-600" },
+            { label: "Total", value: stats.data.matched.count + stats.data.unmatchedRede.count + stats.data.divergent.count, color: "text-foreground" },
+          ].map(k => (
+            <div key={k.label} className="rounded-xl border bg-card p-4 text-center">
+              <div className={`text-2xl font-bold ${k.color}`}>{k.value}</div>
+              <div className="text-xs text-muted-foreground mt-1">{k.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Reconcile Button */}
+      {importFileId && (
+        <Button
+          onClick={handleReconcile}
+          disabled={isReconciling}
+          className="w-full gap-2"
+          variant="default"
+        >
+          {isReconciling ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {isReconciling ? "Conciliando..." : "Conciliar com INOVE"}
+        </Button>
+      )}
+
+      {/* Reconciliations Table */}
+      {listReconciliations.data && listReconciliations.data.length > 0 && (
+        <div className="rounded-xl border bg-card overflow-hidden">
+          <div className="px-4 py-3 border-b bg-muted/20">
+            <p className="text-sm font-medium">Últimas Conciliações</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/50">
+                <tr>
+                  <th className="px-4 py-2 text-left">Data Rede</th>
+                  <th className="px-4 py-2 text-right">Valor Rede</th>
+                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-4 py-2 text-left">Bandeira</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listReconciliations.data.map((rec: any) => (
+                  <tr key={rec.id} className="border-b hover:bg-muted/50">
+                    <td className="px-4 py-2">{new Date(rec.redeDate).toLocaleDateString("pt-BR")}</td>
+                    <td className="px-4 py-2 text-right font-mono">{fmtBRL(parseFloat(rec.redeValue))}</td>
+                    <td className="px-4 py-2">
+                      <Badge className={rec.status === "matched" ? "bg-emerald-500/10 text-emerald-700" : "bg-red-500/10 text-red-700"}>
+                        {rec.status === "matched" ? "✅ Conciliado" : "❌ Não encontrado"}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">{rec.redeBandeira || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );
