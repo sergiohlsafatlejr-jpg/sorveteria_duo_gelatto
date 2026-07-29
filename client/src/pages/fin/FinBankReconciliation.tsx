@@ -358,9 +358,24 @@ export default function FinBankReconciliation() {
         </div>
       )}
 
-      {/* Abas Diário / Semanal / Mensal */}
-      {data ? (
-        <Tabs defaultValue="semanal" className="space-y-4">
+      {/* Abas Rede (sempre visível) */}
+      <Tabs defaultValue="rede" className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <TabsList>
+            <TabsTrigger value="rede">🏦 Rede</TabsTrigger>
+            <TabsTrigger value="banco">🏦 Banco</TabsTrigger>
+          </TabsList>
+        </div>
+
+        {/* Aba Rede */}
+        <TabsContent value="rede">
+          <RedeTab />
+        </TabsContent>
+
+        {/* Aba Banco - Diário / Semanal / Mensal */}
+        <TabsContent value="banco">
+          {data ? (
+            <Tabs defaultValue="semanal" className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <TabsList>
               <TabsTrigger value="diario">📅 Diário</TabsTrigger>
@@ -546,20 +561,18 @@ export default function FinBankReconciliation() {
               <GroupTable rows={(data.months ?? []) as GroupItem[]} title="Mês" />
             </div>
           </TabsContent>
-                  {/* Aba Rede */}
-          <TabsContent value="rede">
-            <RedeTab />
-          </TabsContent>
-        </Tabs>
-      ) : (
-        !isLoading && (
-          <div className="py-16 text-center text-muted-foreground rounded-xl border bg-card">
-            <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-20" />
-            <p className="font-medium">Pronto para conciliar</p>
-            <p className="text-sm mt-1">Selecione o período e clique em <strong>Conciliar</strong> para cruzar os dados.</p>
-          </div>
-        )
-      )}
+            </Tabs>
+          ) : (
+            !isLoading && (
+              <div className="py-16 text-center text-muted-foreground rounded-xl border bg-card">
+                <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                <p className="font-medium">Pronto para conciliar</p>
+                <p className="text-sm mt-1">Selecione o período e clique em <strong>Conciliar</strong> para cruzar os dados.</p>
+              </div>
+            )
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
