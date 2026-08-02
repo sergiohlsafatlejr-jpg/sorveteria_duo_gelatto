@@ -6,6 +6,9 @@ import {
   redeImportFiles, 
   redeInoveReconciliation,
   salesImports,
+  finBankStatements,
+  sales,
+  inoveConnectorConfig,
 } from "../../drizzle/schema";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import * as XLSX from "xlsx";
@@ -83,6 +86,36 @@ async function parseRedeExcel(buffer: Buffer) {
   return sales;
 }
 
+/**
+ * Estima a data de pagamento do lançamento no banco
+ */
+export function estimatePaymentDate(saleDate: Date, modalidade: string, prazo: string | null, isAnticipated: boolean): Date {
+  const date = new Date(saleDate);
+  const m = modalidade.toLowerCase();
+  const p = (prazo || "").toLowerCase();
+
+  // Pix é na hora/mesmo dia
+  if (m.includes("pix") || p.includes("mesmo dia")) {
+    return date;
+  }
+
+  // Débito ou Crédito Antecipado liquida em D+1
+  if (m.includes("deb") || m.includes("dêb") || p.includes("d+1") || isAnticipated) {
+    date.setDate(date.getDate() + 1);
+    return date;
+  }
+
+  // Crédito convencional liquida em D+30
+  if (m.includes("cred") || m.includes("créd") || p.includes("d+30")) {
+    date.setDate(date.getDate() + 30);
+    return date;
+  }
+
+  // Padrão D+1
+  date.setDate(date.getDate() + 1);
+  return date;
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export const redeRouter = router({
@@ -90,7 +123,7 @@ export const redeRouter = router({
   importFile: protectedProcedure
     .input(
       z.object({
-        fileBuffer: z.instanceof(Buffer),
+        fileBuffer: z.any(),
         fileName: z.string(),
         periodStart: z.date(),
         periodEnd: z.date(),
@@ -101,13 +134,17 @@ export const redeRouter = router({
       if (!db) throw new Error("Database not available");
 
       try {
+        const buffer = Buffer.isBuffer(input.fileBuffer)
+          ? input.fileBuffer
+          : Buffer.from(input.fileBuffer);
+
         // Parse do arquivo
-        const sales = await parseRedeExcel(input.fileBuffer);
+        const sales = await parseRedeExcel(buffer);
         if (sales.length === 0) throw new Error("Nenhuma venda encontrada no arquivo");
 
         // Upload do arquivo para S3
         const fileKey = `rede-imports/${ctx.user.id}/${Date.now()}-${input.fileName}`;
-        const { url: fileUrl } = await storagePut(fileKey, input.fileBuffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        const { url: fileUrl } = await storagePut(fileKey, buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
         // Calcular totais
         const totalValue = sales.reduce((sum, s) => sum + s.valorDaVendaOriginal, 0);
@@ -206,34 +243,82 @@ export const redeRouter = router({
           .select()
           .from(redeSalesImport)
           .where(eq(redeSalesImport.importFileId, input.importFileId));
-
         if (redeSales.length === 0) throw new Error("Nenhuma venda encontrada para conciliação");
 
         // Buscar vendas INOVE no período
         const periodStart = redeSales[0].dataDaVenda;
         const periodEnd = redeSales[redeSales.length - 1].dataDaVenda;
+        const periodStartStr = periodStart.toISOString().split("T")[0];
+        const periodEndStr = periodEnd.toISOString().split("T")[0];
 
-        const inoveImports = await db
-          .select()
-          .from(salesImports)
-          .where(
-            and(
-              gte(salesImports.saleDate, periodStart),
-              lte(salesImports.saleDate, periodEnd),
-              eq(salesImports.status, "confirmed")
-            )
-          );
+        // Tentar obter vendas individuais de cartão do banco de dados INOVE (SQL Server)
+        let inovePayments: Array<{ vendaId: number; dataHoraVenda: string; valor: number; formaPagamento: string }> = [];
+        const connConfig = await db.select().from(inoveConnectorConfig).limit(1);
 
-        // Mapear vendas INOVE por data e valor
-        const inoveByDateValue = new Map<string, any[]>();
-        for (const imp of inoveImports) {
-          if (!imp.saleDate) continue;
-          const totalAmount = parseFloat(imp.totalRevenue);
-          const key = `${imp.saleDate.toISOString().split("T")[0]}_${totalAmount}`;
-          if (!inoveByDateValue.has(key)) {
-            inoveByDateValue.set(key, []);
+        if (connConfig.length > 0 && connConfig[0].active) {
+          try {
+            const { createInovePool } = await import("./inove");
+            const pool = await createInovePool(connConfig[0]);
+
+            const queryResult = await pool.request().query(`
+              SELECT 
+                v.VENDA as vendaId, 
+                CONVERT(varchar(19), v.VEN_DATA_FIM, 120) as dataHoraVenda,
+                CAST(pv.PAG_VALOR as float) as valor,
+                fp.PAG_NOME as formaPagamento
+              FROM PAGAMENTOS_VENDAS pv
+              JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+              JOIN VENDAS v ON v.VENDA = pv.VENDA
+              WHERE v.VEN_SITUACAO = 2
+                AND v.VEN_DATA_FIM >= '${periodStartStr} 00:00:00'
+                AND v.VEN_DATA_FIM <= '${periodEndStr} 23:59:59'
+                AND (fp.PAG_NOME LIKE '%CART%' OR fp.PAG_NOME LIKE '%CRED%' OR fp.PAG_NOME LIKE '%DEB%' OR fp.PAG_NOME LIKE '%REDE%')
+            `);
+
+            await pool.close();
+
+            inovePayments = (queryResult.recordset as any[]).map(row => ({
+              vendaId: Number(row.vendaId),
+              dataHoraVenda: row.dataHoraVenda,
+              valor: Number(row.valor),
+              formaPagamento: String(row.formaPagamento),
+            }));
+          } catch (err) {
+            console.error("Erro ao buscar pagamentos do INOVE, usando fallback local:", err);
           }
-          inoveByDateValue.get(key)!.push(imp);
+        }
+
+        if (inovePayments.length === 0) {
+          // Fallback: buscar vendas locais de cartão
+          const localSales = await db
+            .select()
+            .from(sales)
+            .where(
+              and(
+                gte(sales.createdAt, new Date(periodStartStr + "T00:00:00")),
+                lte(sales.createdAt, new Date(periodEndStr + "T23:59:59")),
+                eq(sales.status, "completed")
+              )
+            );
+
+          inovePayments = localSales
+            .filter(s => s.paymentMethod === "credit_card" || s.paymentMethod === "debit_card")
+            .map(s => ({
+              vendaId: s.id,
+              dataHoraVenda: s.createdAt.toISOString().replace("T", " ").slice(0, 19),
+              valor: parseFloat(s.finalTotal),
+              formaPagamento: s.paymentMethod === "credit_card" ? "Crédito" : "Débito",
+            }));
+        }
+
+        // Mapear inovePayments por valor para busca rápida
+        const inoveByValue = new Map<string, typeof inovePayments>();
+        for (const payment of inovePayments) {
+          const valKey = payment.valor.toFixed(2);
+          if (!inoveByValue.has(valKey)) {
+            inoveByValue.set(valKey, []);
+          }
+          inoveByValue.get(valKey)!.push(payment);
         }
 
         // Fazer conciliação
@@ -241,35 +326,46 @@ export const redeRouter = router({
         const matchedInoveIds = new Set<number>();
 
         for (const redeSale of redeSales) {
-          const saleDate = redeSale.dataDaVenda.toISOString().split("T")[0];
+          const redeDateStr = redeSale.dataDaVenda.toISOString().split("T")[0];
           const amount = parseFloat(redeSale.valorDaVendaOriginal);
+          const valKey = amount.toFixed(2);
 
-          // Procurar match exato
-          let matched = false;
-          const key = `${saleDate}_${amount}`;
-          const candidates = inoveByDateValue.get(key) || [];
+          // Buscar candidatos com o mesmo valor
+          const candidates = inoveByValue.get(valKey) || [];
 
-          for (const inove of candidates) {
-            if (!matchedInoveIds.has(inove.id)) {
-              matchedInoveIds.add(inove.id);
-              reconciliations.push({
-                redeSaleId: redeSale.id,
-                redeDate: redeSale.dataDaVenda,
-                redeValue: String(amount),
-                redeModalidade: redeSale.modalidade,
-                redeBandeira: redeSale.bandeira,
-                inoveSaleId: inove.id,
-                inoveDate: inove.saleDate || new Date(),
-                inoveValue: String(parseFloat(inove.totalRevenue)),
-                status: "matched" as const,
-                reconciliationDate: new Date(),
-              });
-              matched = true;
-              break;
+          // Encontrar o melhor candidato por aproximação de data (tolerância de até 2 dias)
+          let bestMatch: typeof inovePayments[0] | null = null;
+          let bestDiffDays = 999;
+
+          for (const cand of candidates) {
+            if (matchedInoveIds.has(cand.vendaId)) continue;
+
+            const candDateStr = cand.dataHoraVenda.split(" ")[0];
+            const diffDays = Math.abs(
+              (new Date(candDateStr).getTime() - new Date(redeDateStr).getTime()) / (1000 * 60 * 60 * 24)
+            );
+
+            if (diffDays <= 2 && diffDays < bestDiffDays) {
+              bestDiffDays = diffDays;
+              bestMatch = cand;
             }
           }
 
-          if (!matched) {
+          if (bestMatch) {
+            matchedInoveIds.add(bestMatch.vendaId);
+            reconciliations.push({
+              redeSaleId: redeSale.id,
+              redeDate: redeSale.dataDaVenda,
+              redeValue: String(amount),
+              redeModalidade: redeSale.modalidade,
+              redeBandeira: redeSale.bandeira,
+              inoveSaleId: bestMatch.vendaId,
+              inoveDate: new Date(bestMatch.dataHoraVenda),
+              inoveValue: String(bestMatch.valor),
+              status: "matched" as const,
+              reconciliationDate: new Date(),
+            });
+          } else {
             reconciliations.push({
               redeSaleId: redeSale.id,
               redeDate: redeSale.dataDaVenda,
@@ -280,9 +376,23 @@ export const redeRouter = router({
               inoveDate: null,
               inoveValue: null,
               status: "unmatched_rede" as const,
-              divergenceReason: "Venda não encontrada no INOVE",
+              divergenceReason: "Venda não encontrada no INOVE/Local",
               reconciliationDate: new Date(),
             });
+          }
+        }
+
+        // Remover reconciliações antigas deste arquivo para não duplicar
+        const oldRecs = await db
+          .select({ id: redeInoveReconciliation.id })
+          .from(redeInoveReconciliation)
+          .innerJoin(redeSalesImport, eq(redeInoveReconciliation.redeSaleId, redeSalesImport.id))
+          .where(eq(redeSalesImport.importFileId, input.importFileId));
+
+        if (oldRecs.length > 0) {
+          const ids = oldRecs.map(r => r.id);
+          for (const id of ids) {
+            await db.delete(redeInoveReconciliation).where(eq(redeInoveReconciliation.id, id));
           }
         }
 
@@ -305,6 +415,173 @@ export const redeRouter = router({
       }
     }),
 
+  // Fazer conciliação bancária Rede x Extrato Bancário
+  reconcileWithBank: protectedProcedure
+    .input(
+      z.object({
+        importFileId: z.number(),
+        tolerancePercent: z.number().min(0).max(100).default(5),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database not available");
+
+      try {
+        // 1. Buscar vendas Rede importadas
+        const redeSales = await db
+          .select()
+          .from(redeSalesImport)
+          .where(eq(redeSalesImport.importFileId, input.importFileId));
+
+        if (redeSales.length === 0) throw new Error("Nenhuma venda encontrada para conciliação");
+
+        // 2. Estimar datas de pagamento e agrupar valores líquidos por data
+        const expectedPaymentsByDay = new Map<string, { total: number; ids: number[] }>();
+        for (const sale of redeSales) {
+          const isAnticipated = parseFloat(sale.valorTaxaRecebimentoAutomatico || "0") > 0;
+          const estDate = estimatePaymentDate(sale.dataDaVenda, sale.modalidade, sale.prazoDeRecebimento, isAnticipated);
+          const dateKey = estDate.toISOString().split("T")[0];
+          
+          if (!expectedPaymentsByDay.has(dateKey)) {
+            expectedPaymentsByDay.set(dateKey, { total: 0, ids: [] });
+          }
+          const dayData = expectedPaymentsByDay.get(dateKey)!;
+          dayData.total += parseFloat(sale.valorLiquido || "0");
+          dayData.ids.push(sale.id);
+        }
+
+        // 3. Buscar lançamentos bancários correspondentes ao período
+        const dates = Array.from(expectedPaymentsByDay.keys()).sort();
+        const minDate = new Date(dates[0]);
+        const maxDate = new Date(dates[dates.length - 1]);
+        
+        const bankEntries = await db
+          .select()
+          .from(finBankStatements)
+          .where(
+            and(
+              eq(finBankStatements.userId, ctx.user.id),
+              gte(finBankStatements.date, minDate),
+              lte(finBankStatements.date, maxDate)
+            )
+          );
+
+        // Agrupar créditos bancários da Rede por dia
+        const bankCreditsByDay = new Map<string, { total: number; entries: any[] }>();
+        for (const entry of bankEntries) {
+          if (entry.type !== "credit") continue;
+          
+          const descStr = entry.description.toUpperCase();
+          const isRede = descStr.includes("REDE") || descStr.includes("RD CARD") || descStr.includes("REDECENTRAL");
+          if (!isRede) continue;
+
+          const dateKey = entry.date.toISOString().split("T")[0];
+          if (!bankCreditsByDay.has(dateKey)) {
+            bankCreditsByDay.set(dateKey, { total: 0, entries: [] });
+          }
+          const data = bankCreditsByDay.get(dateKey)!;
+          data.total += parseFloat(entry.amount);
+          data.entries.push(entry);
+        }
+
+        // 4. Cruzar dados por dia e atualizar banco
+        const results: any[] = [];
+        let matchedCount = 0;
+        let divergentCount = 0;
+        let unmatchedCount = 0;
+
+        for (const [dateKey, data] of Array.from(expectedPaymentsByDay.entries())) {
+          const bankData = bankCreditsByDay.get(dateKey);
+          const bankTotal = bankData ? bankData.total : 0;
+          
+          let status: "matched" | "divergent" | "unmatched_rede";
+          const diff = bankTotal - data.total;
+          const absDiff = Math.abs(diff);
+          
+          const toleranceAmount = data.total * (input.tolerancePercent / 100);
+
+          if (bankTotal === 0) {
+            status = "unmatched_rede";
+            unmatchedCount++;
+          } else if (absDiff <= Math.max(toleranceAmount, 0.05)) {
+            status = "matched";
+            matchedCount++;
+          } else {
+            status = "divergent";
+            divergentCount++;
+          }
+
+          // Atualizar registros de conciliação associados a estas vendas da Rede
+          for (const saleId of data.ids) {
+            const existing = await db
+              .select({ id: redeInoveReconciliation.id })
+              .from(redeInoveReconciliation)
+              .where(eq(redeInoveReconciliation.redeSaleId, saleId))
+              .limit(1);
+
+            const bankFields = bankData && bankData.entries[0] ? {
+              bankStatementId: bankData.entries[0].id,
+              bankCreditDate: bankData.entries[0].date,
+              bankCreditValue: String(bankTotal),
+            } : {};
+
+            if (existing.length > 0) {
+              await db
+                .update(redeInoveReconciliation)
+                .set({
+                  status: status,
+                  divergenceReason: status === "divergent" ? "Divergência de valor no extrato" : null,
+                  divergenceAmount: status === "divergent" ? String(diff) : null,
+                  ...bankFields,
+                  reconciliationDate: new Date(),
+                })
+                .where(eq(redeInoveReconciliation.id, existing[0].id));
+            } else {
+              // Buscar dados da venda Rede para inserir
+              const [sale] = await db.select().from(redeSalesImport).where(eq(redeSalesImport.id, saleId)).limit(1);
+              if (sale) {
+                await db.insert(redeInoveReconciliation).values({
+                  redeSaleId: saleId,
+                  redeDate: sale.dataDaVenda,
+                  redeValue: sale.valorLiquido || "0",
+                  redeModalidade: sale.modalidade,
+                  redeBandeira: sale.bandeira,
+                  status: status,
+                  divergenceReason: status === "divergent" ? "Divergência de valor no extrato" : null,
+                  divergenceAmount: status === "divergent" ? String(diff) : null,
+                  ...bankFields,
+                  reconciliationDate: new Date(),
+                });
+              }
+            }
+          }
+
+          results.push({
+            date: dateKey,
+            expectedTotal: data.total,
+            bankTotal,
+            diff,
+            status,
+            bankDescription: bankData && bankData.entries[0] ? bankData.entries[0].description : null,
+          });
+        }
+
+        return {
+          success: true,
+          results: results.sort((a, b) => b.date.localeCompare(a.date)),
+          summary: {
+            matchedCount,
+            divergentCount,
+            unmatchedCount,
+            totalCount: results.length,
+          }
+        };
+      } catch (error) {
+        throw new Error(`Erro ao fazer conciliação bancária: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }),
+
   // Listar conciliações
   listReconciliations: protectedProcedure
     .input(
@@ -319,16 +596,40 @@ export const redeRouter = router({
       const db = await getDb();
       if (!db) return [];
 
+      let query = db.select({
+        id: redeInoveReconciliation.id,
+        redeSaleId: redeInoveReconciliation.redeSaleId,
+        redeDate: redeInoveReconciliation.redeDate,
+        redeValue: redeInoveReconciliation.redeValue,
+        redeModalidade: redeInoveReconciliation.redeModalidade,
+        redeBandeira: redeInoveReconciliation.redeBandeira,
+        inoveSaleId: redeInoveReconciliation.inoveSaleId,
+        inoveDate: redeInoveReconciliation.inoveDate,
+        inoveValue: redeInoveReconciliation.inoveValue,
+        bankStatementId: redeInoveReconciliation.bankStatementId,
+        bankCreditDate: redeInoveReconciliation.bankCreditDate,
+        bankCreditValue: redeInoveReconciliation.bankCreditValue,
+        status: redeInoveReconciliation.status,
+        divergenceReason: redeInoveReconciliation.divergenceReason,
+        divergenceAmount: redeInoveReconciliation.divergenceAmount,
+        reconciliationDate: redeInoveReconciliation.reconciliationDate,
+      }).from(redeInoveReconciliation);
+
       const conditions: any[] = [];
       if (input?.status) {
         conditions.push(eq(redeInoveReconciliation.status, input.status));
       }
+      if (input?.importFileId) {
+        query = query.innerJoin(
+          redeSalesImport,
+          eq(redeInoveReconciliation.redeSaleId, redeSalesImport.id)
+        ) as any;
+        conditions.push(eq(redeSalesImport.importFileId, input.importFileId));
+      }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-      return db
-        .select()
-        .from(redeInoveReconciliation)
+      return query
         .where(whereClause)
         .orderBy(desc(redeInoveReconciliation.reconciliationDate))
         .limit(input?.limit ?? 50)
@@ -342,9 +643,20 @@ export const redeRouter = router({
       const db = await getDb();
       if (!db) return null;
 
-      const allReconciliations = await db
-        .select()
-        .from(redeInoveReconciliation);
+      let query = db.select({
+        id: redeInoveReconciliation.id,
+        redeValue: redeInoveReconciliation.redeValue,
+        status: redeInoveReconciliation.status,
+      }).from(redeInoveReconciliation);
+
+      if (input?.importFileId) {
+        query = query.innerJoin(
+          redeSalesImport,
+          eq(redeInoveReconciliation.redeSaleId, redeSalesImport.id)
+        ).where(eq(redeSalesImport.importFileId, input.importFileId)) as any;
+      }
+
+      const allReconciliations = await query;
 
       const stats = {
         matched: { count: 0, totalValue: 0 },

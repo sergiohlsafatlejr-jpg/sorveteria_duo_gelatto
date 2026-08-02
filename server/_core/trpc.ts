@@ -27,19 +27,23 @@ const requireUser = t.middleware(async opts => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
-export const adminProcedure = t.procedure.use(
-  t.middleware(async opts => {
-    const { ctx, next } = opts;
+export function requireRole(role: "admin" | "manager", userRole: string) {
+  const hierarchy = { admin: 3, manager: 2, attendant: 1, user: 0 };
+  const userLevel = hierarchy[userRole as keyof typeof hierarchy] ?? 0;
+  const required = hierarchy[role];
+  if (userLevel < required) throw new TRPCError({ code: "FORBIDDEN", message: "Acesso negado" });
+}
 
-    if (!ctx.user || ctx.user.role !== 'admin') {
-      throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
-    }
+export const managerProcedure = protectedProcedure.use(({ ctx, next }) => {
+  requireRole("manager", ctx.user.role);
+  return next({ ctx });
+});
 
-    return next({
-      ctx: {
-        ...ctx,
-        user: ctx.user,
-      },
-    });
-  }),
-);
+export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== 'admin') {
+    throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+  }
+  return next({ ctx });
+});
+
+

@@ -48,14 +48,14 @@ interface MssqlConfig {
 }
 
 // Tipo do pool mssql
-type MssqlPool = {
+export type MssqlPool = {
   request: () => { query: (sql: string) => Promise<{ recordset: Record<string, unknown>[] }> };
   close: () => Promise<void>;
 };
 
 // Helper: criar conexão com o banco INOVE (SQL Server)
 // Usa ConnectionPool diretamente para evitar cache global de pool que fica abortado após restart
-async function createInovePool(config: {
+export async function createInovePool(config: {
   host: string;
   port: number;
   username: string;

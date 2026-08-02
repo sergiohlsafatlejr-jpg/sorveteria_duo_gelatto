@@ -32,7 +32,7 @@ import { invokeLLM } from "../_core/llm";
 const upload = multer({ dest: "/tmp/sales-uploads/" });
 
 // ─── Parser de Caixa (vendas por forma de pagamento) ─────────────────────────
-function parseCaixaXls(filePath: string) {
+export function parseCaixaXls(filePath: string) {
   try {
     const workbook = XLSX.readFile(filePath);
     const sheetName = workbook.SheetNames[0];

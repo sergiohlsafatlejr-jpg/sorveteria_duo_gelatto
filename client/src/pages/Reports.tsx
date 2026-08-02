@@ -2,6 +2,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import BackButton from "@/components/BackButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -30,7 +31,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart2, Download, Package, Search, ShoppingCart, Target, TrendingUp, Users } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart2, Download, Package, Search, ShoppingCart, Target, TrendingUp, Users, Sun, CloudRain, ShoppingBag, AlertCircle, Sparkles, Award, Activity } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
@@ -305,6 +306,477 @@ function CostMarginTab() {
   );
 }
 
+// ── Aba: Inteligência de Negócios (BI) ────────────────────────────────────────
+function BITab() {
+  const [activeBiTab, setActiveBiTab] = useState("abc");
+
+  // Querying BI backend endpoints
+  const { data: climateData, isLoading: lClimate } = trpc.reports.climateCorrelation.useQuery();
+  const { data: loyaltyData, isLoading: lLoyalty } = trpc.reports.loyaltyCohort.useQuery();
+  const { data: abcData, isLoading: lAbc } = trpc.reports.abcMatrix.useQuery();
+  const { data: purchaseData, isLoading: lPurchase } = trpc.reports.predictivePurchasePlanning.useQuery();
+  const { data: channelData, isLoading: lChannel } = trpc.reports.dreByChannel.useQuery({});
+
+  const climate = (climateData || { averages: {}, history: [] }) as any;
+  const loyalty = (loyaltyData || { matrix: [], churnRisk: [] }) as any;
+  const abc = (abcData || { products: [], counts: {} }) as any;
+  const purchase = (purchaseData || { suggestions: [], climateInfo: {} }) as any;
+  const channel = (channelData || { delivery: {}, balcao: {} }) as any;
+
+  const formatBRL = (v: number) =>
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex border-b overflow-x-auto gap-2 pb-1">
+        {[
+          { id: "abc", label: "Matriz ABC (Cardápio)", icon: <Sparkles className="h-4 w-4" /> },
+          { id: "climate", label: "Clima x Vendas", icon: <Sun className="h-4 w-4" /> },
+          { id: "loyalty", label: "Fidelidade & Churn", icon: <Award className="h-4 w-4" /> },
+          { id: "purchase", label: "Compras Preditivas", icon: <ShoppingBag className="h-4 w-4" /> },
+          { id: "channel", label: "Delivery vs Balcão", icon: <Activity className="h-4 w-4" /> },
+        ].map((t) => (
+          <Button
+            key={t.id}
+            variant={activeBiTab === t.id ? "default" : "ghost"}
+            size="sm"
+            className="flex items-center gap-1.5 shrink-0"
+            onClick={() => setActiveBiTab(t.id)}
+          >
+            {t.icon}
+            {t.label}
+          </Button>
+        ))}
+      </div>
+
+      {/* ────────────────── MATRIZ ABC ────────────────── */}
+      {activeBiTab === "abc" && (
+        <div className="space-y-6">
+          {lAbc ? (
+            <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Carregando dados da Matriz ABC...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: "Estrelas (Foco/Marketing)", count: abc.counts?.estrela ?? 0, color: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30" },
+                  { label: "Cavalos de Batalha (Giro Alto)", count: abc.counts?.cavalo_batalha ?? 0, color: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30" },
+                  { label: "Quebra-Cabeças (Promover)", count: abc.counts?.quebra_cabeca ?? 0, color: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30" },
+                  { label: "Abacaxis (Revisar Cardápio)", count: abc.counts?.abacaxi ?? 0, color: "bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/30" },
+                ].map((c) => (
+                  <Card key={c.label} className={c.color}>
+                    <CardContent className="p-4 text-center">
+                      <p className="text-3xl font-bold">{c.count}</p>
+                      <p className="text-xs font-semibold mt-1 opacity-90">{c.label}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-violet-600" />
+                    Classificação de Produtos (Curva ABC + Margem)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr className="border-b">
+                          <th className="text-left p-3 font-semibold">Produto</th>
+                          <th className="text-right p-3 font-semibold">Qtd. Vendida</th>
+                          <th className="text-right p-3 font-semibold">Receita Acumulada</th>
+                          <th className="text-right p-3 font-semibold">Margem de Lucro</th>
+                          <th className="text-center p-3 font-semibold">Classificação BI</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {abc.products?.slice(0, 100).map((p: any) => (
+                          <tr key={p.id} className="border-t hover:bg-muted/20">
+                            <td className="p-3 font-medium">{p.name}</td>
+                            <td className="p-3 text-right">{p.qtySold}</td>
+                            <td className="p-3 text-right font-medium text-emerald-600">{formatBRL(p.revenue)}</td>
+                            <td className="p-3 text-right">
+                              <span className={cn(
+                                "font-semibold",
+                                p.marginPct >= 40 ? "text-green-600" : p.marginPct >= 20 ? "text-amber-500" : "text-red-500"
+                              )}>
+                                {p.marginPct}%
+                              </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "font-bold uppercase text-[10px]",
+                                  p.matrixCategory === "estrela" ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/20 dark:text-emerald-400" :
+                                  p.matrixCategory === "cavalo_batalha" ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/20 dark:text-blue-400" :
+                                  p.matrixCategory === "quebra_cabeca" ? "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/20 dark:text-amber-400" :
+                                  "bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/20 dark:text-rose-400"
+                                )}
+                              >
+                                {p.matrixCategory.replace("_", " ")}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ────────────────── CLIMA X VENDAS ────────────────── */}
+      {activeBiTab === "climate" && (
+        <div className="space-y-6">
+          {lClimate ? (
+            <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Carregando dados climáticos...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                {[
+                  { label: "Calor Extremo (>30°C)", val: climate.averages?.calor_extremo, icon: <Sun className="h-4 w-4 text-amber-500" /> },
+                  { label: "Quente (26-30°C)", val: climate.averages?.quente, icon: <Sun className="h-4 w-4 text-orange-400" /> },
+                  { label: "Ameno (22-26°C)", val: climate.averages?.ameno, icon: <CloudRain className="h-4 w-4 text-cyan-400" /> },
+                  { label: "Frio (<22°C)", val: climate.averages?.frio, icon: <AlertTriangle className="h-4 w-4 text-blue-500" /> },
+                  { label: "Dias Limpos", val: climate.averages?.limpo, icon: <Sun className="h-4 w-4 text-amber-400" /> },
+                  { label: "Dias Chuvosos", val: climate.averages?.chuvoso, icon: <CloudRain className="h-4 w-4 text-blue-400" /> },
+                ].map((item) => (
+                  <Card key={item.label}>
+                    <CardContent className="p-4 flex flex-col items-center">
+                      {item.icon}
+                      <p className="text-xs text-muted-foreground mt-2 text-center h-8 flex items-center justify-center">{item.label}</p>
+                      <p className="text-lg font-bold text-violet-700 mt-1">{formatBRL(item.val ?? 0)}</p>
+                      <span className="text-[10px] text-muted-foreground">média diária</span>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Sun className="h-4 w-4 text-amber-500" />
+                    Médias de Vendas por Faixa de Temperatura
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={[
+                      { name: "Frio (<22°C)", media: climate.averages?.frio ?? 0 },
+                      { name: "Ameno (22-26°C)", media: climate.averages?.ameno ?? 0 },
+                      { name: "Quente (26-30°C)", media: climate.averages?.quente ?? 0 },
+                      { name: "Calor (>30°C)", media: climate.averages?.calor_extremo ?? 0 },
+                      { name: "Limpo (Sem Chuva)", media: climate.averages?.limpo ?? 0 },
+                      { name: "Chuvoso (>1mm)", media: climate.averages?.chuvoso ?? 0 },
+                    ]}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `R$${(v/1000).toFixed(1)}k`} />
+                      <Tooltip formatter={(v: number) => formatBRL(v)} />
+                      <Bar dataKey="media" name="Média de Faturamento" fill="#8b5cf6" radius={[4, 4, 0, 0]}>
+                        <Cell fill="#60a5fa" />
+                        <Cell fill="#22d3ee" />
+                        <Cell fill="#fb923c" />
+                        <Cell fill="#f87171" />
+                        <Cell fill="#fbbf24" />
+                        <Cell fill="#3b82f6" />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ────────────────── FIDELIDADE E CHURN (COHORTS) ────────────────── */}
+      {activeBiTab === "loyalty" && (
+        <div className="space-y-6">
+          {lLoyalty ? (
+            <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Carregando análise de retenção...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Cohort Matrix */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Award className="h-4 w-4 text-violet-600" />
+                      Matriz de Retenção de Clientes (Cohorts)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/50">
+                        <tr className="border-b">
+                          <th className="text-left p-2 font-semibold">Mês de Entrada</th>
+                          <th className="text-center p-2 font-semibold">Membros</th>
+                          <th className="text-center p-2 font-semibold">Mês 0</th>
+                          <th className="text-center p-2 font-semibold">Mês 1</th>
+                          <th className="text-center p-2 font-semibold">Mês 2</th>
+                          <th className="text-center p-2 font-semibold">Mês 3</th>
+                          <th className="text-center p-2 font-semibold">Mês 4</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loyalty.matrix?.map((row: any) => (
+                          <tr key={row.cohortMonth} className="border-t">
+                            <td className="p-2 font-bold">{row.cohortMonth}</td>
+                            <td className="p-2 text-center font-semibold text-muted-foreground">{row.size}</td>
+                            {Array.from({ length: 5 }).map((_, i) => {
+                              const r = row.retention?.find((item: any) => item.monthIndex === i);
+                              const pct = r?.percentage ?? null;
+                              return (
+                                <td
+                                  key={i}
+                                  className="p-2 text-center"
+                                  style={{
+                                    backgroundColor: pct !== null ? `rgba(139, 92, 246, ${pct / 120})` : "transparent",
+                                    color: pct !== null && pct > 40 ? "#fff" : "inherit",
+                                    fontWeight: pct !== null ? "bold" : "normal",
+                                  }}
+                                >
+                                  {pct !== null ? `${pct}%` : "—"}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+
+                {/* Churn Risk */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-rose-500" />
+                      Clientes em Risco de Churn (Inativos &gt;30 dias)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {!loyalty.churnRisk?.length ? (
+                      <p className="text-center text-muted-foreground py-8">Nenhum cliente inativo em risco.</p>
+                    ) : (
+                      <div className="overflow-y-auto max-h-[350px] space-y-3 pr-2">
+                        {loyalty.churnRisk.map((c: any) => (
+                          <div key={c.customerId} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg hover:bg-muted/50 border border-border/40">
+                            <div>
+                              <p className="font-bold text-sm">{c.fullName}</p>
+                              <p className="text-xs text-muted-foreground">{c.phone || "Sem telefone"} • Pontos: {c.totalPoints}</p>
+                              <p className="text-xs text-rose-600 font-semibold mt-1">Inativo há {c.daysInactive} dias</p>
+                            </div>
+                            {c.phone && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100 flex items-center gap-1"
+                                onClick={() => {
+                                  const text = encodeURIComponent(`Olá ${c.fullName}! Tudo bem? Sentimos sua falta aqui na Duo Gelatto! Que tal vir nos visitar e resgatar uma oferta especial? Você tem ${c.totalPoints} pontos acumulados!`);
+                                  window.open(`https://wa.me/55${c.phone.replace(/\D/g, "")}?text=${text}`, "_blank");
+                                }}
+                              >
+                                Reativar
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ────────────────── COMPRAS PREDITIVAS ────────────────── */}
+      {activeBiTab === "purchase" && (
+        <div className="space-y-6">
+          {lPurchase ? (
+            <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Carregando sugestões de compras...</div>
+          ) : (
+            <>
+              {purchase.climateInfo && (
+                <Card className={cn(
+                  "border-0 shadow-sm",
+                  purchase.climateInfo.multiplier > 1.0 ? "bg-amber-50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200" :
+                  purchase.climateInfo.multiplier < 1.0 ? "bg-blue-50 dark:bg-blue-950/20 text-blue-900 dark:text-blue-200" :
+                  "bg-muted/40"
+                )}>
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="p-2 bg-white/80 dark:bg-black/20 rounded-full">
+                      {purchase.climateInfo.multiplier > 1.0 ? <Sun className="h-5 w-5 text-amber-500" /> : <CloudRain className="h-5 w-5 text-blue-500" />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">Previsão Climática & Demanda Preditiva</p>
+                      <p className="text-xs opacity-90 mt-0.5">{purchase.climateInfo.notes}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <ShoppingBag className="h-4 w-4 text-violet-600" />
+                    Sugestões de Compra Inteligentes para os Próximos 14 Dias
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {!purchase.suggestions?.length ? (
+                    <p className="text-center text-muted-foreground py-8">Estoque totalmente seguro. Nenhuma compra necessária.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50">
+                          <tr className="border-b">
+                            <th className="text-left p-3 font-semibold">Insumo / Produto</th>
+                            <th className="text-right p-3 font-semibold">Estoque Físico</th>
+                            <th className="text-right p-3 font-semibold">Giro Semanal (Projetado)</th>
+                            <th className="text-right p-3 font-semibold">Cobertura (Dias)</th>
+                            <th className="text-right p-3 font-semibold text-violet-600">Sugestão de Compra</th>
+                            <th className="text-right p-3 font-semibold">Custo Estimado</th>
+                            <th className="text-center p-3 font-semibold">Prioridade</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {purchase.suggestions.map((s: any) => (
+                            <tr key={s.productId} className="border-t hover:bg-muted/20">
+                              <td className="p-3 font-medium">{s.productName}</td>
+                              <td className="p-3 text-right">{s.currentStock}</td>
+                              <td className="p-3 text-right">{s.projectedWeeklySales}</td>
+                              <td className={cn(
+                                "p-3 text-right font-semibold",
+                                s.coverageDays <= 3 ? "text-red-500" : s.coverageDays <= 7 ? "text-amber-500" : "text-green-600"
+                              )}>
+                                {s.coverageDays} dias
+                              </td>
+                              <td className="p-3 text-right font-bold text-violet-700 text-base">{s.suggestedQty}</td>
+                              <td className="p-3 text-right font-medium text-emerald-600">{formatBRL(s.estimatedCost)}</td>
+                              <td className="p-3 text-center">
+                                <Badge
+                                  className={cn(
+                                    "uppercase text-[9px] font-bold",
+                                    s.status === "crítico" ? "bg-red-100 text-red-700 border-red-300 hover:bg-red-200" : "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200"
+                                  )}
+                                >
+                                  {s.status}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ────────────────── DELIVERY VS BALCÃO ────────────────── */}
+      {activeBiTab === "channel" && (
+        <div className="space-y-6">
+          {lChannel ? (
+            <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">Carregando canais de vendas...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle className="text-base">DRE Comparativo por Canal</CardTitle>
+                  </CardHeader>
+                  <CardContent className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr className="border-b">
+                          <th className="text-left p-3 font-semibold">Indicador Financeiro</th>
+                          <th className="text-right p-3 font-semibold text-violet-700">Loja Física (Balcão)</th>
+                          <th className="text-right p-3 font-semibold text-pink-700">Delivery (iFood/Z-API)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-t">
+                          <td className="p-3 font-medium">Receita Bruta (Vendas)</td>
+                          <td className="p-3 text-right font-semibold">{formatBRL(channel.balcao?.revenue ?? 0)} ({channel.balcao?.pct}%)</td>
+                          <td className="p-3 text-right font-semibold">{formatBRL(channel.delivery?.revenue ?? 0)} ({channel.delivery?.pct}%)</td>
+                        </tr>
+                        <tr className="border-t">
+                          <td className="p-3 font-medium text-muted-foreground">(-) CMV Estimado</td>
+                          <td className="p-3 text-right text-red-500">-{formatBRL(channel.balcao?.cmv ?? 0)}</td>
+                          <td className="p-3 text-right text-red-500">-{formatBRL(channel.delivery?.cmv ?? 0)}</td>
+                        </tr>
+                        <tr className="border-t">
+                          <td className="p-3 font-medium text-muted-foreground">(-) Taxas de Cartão/Intermediação (Rede)</td>
+                          <td className="p-3 text-right text-red-500">-{formatBRL(channel.balcao?.fees ?? 0)}</td>
+                          <td className="p-3 text-right text-red-500">-{formatBRL(channel.delivery?.fees ?? 0)}</td>
+                        </tr>
+                        <tr className="border-t bg-muted/20 font-bold">
+                          <td className="p-3">(=) Lucro Bruto Operacional</td>
+                          <td className="p-3 text-right text-emerald-600">{formatBRL(channel.balcao?.grossProfit ?? 0)}</td>
+                          <td className="p-3 text-right text-emerald-600">{formatBRL(channel.delivery?.grossProfit ?? 0)}</td>
+                        </tr>
+                        <tr className="border-t font-semibold">
+                          <td className="p-3">Margem Operacional do Canal</td>
+                          <td className="p-3 text-right text-violet-700">{channel.balcao?.margin}%</td>
+                          <td className="p-3 text-right text-pink-700">{channel.delivery?.margin}%</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+
+                {/* Pizza Chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base text-center">Faturamento por Canal</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex justify-center items-center h-[220px]">
+                    <ResponsiveContainer width="100%" height={200}>
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: "Balcão", value: channel.balcao?.revenue ?? 0 },
+                            { name: "Delivery", value: channel.delivery?.revenue ?? 0 },
+                          ]}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={70}
+                          label={({ name, percent }: { name: string; percent: number }) =>
+                            `${name} ${(percent * 100).toFixed(0)}%`
+                          }
+                        >
+                          <Cell fill="#7c3aed" />
+                          <Cell fill="#ec4899" />
+                        </Pie>
+                        <Tooltip formatter={(v: number) => formatBRL(v)} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const COLORS = ["#7c3aed", "#ec4899", "#f97316", "#06b6d4", "#10b981", "#f59e0b"];
 
 const formatCurrency = (v: number) =>
@@ -420,6 +892,7 @@ export default function Reports() {
         <Tabs defaultValue="inove">
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="inove" className="flex items-center gap-1.5"><ShoppingCart className="h-3.5 w-3.5" />INOVE PDV</TabsTrigger>
+            <TabsTrigger value="bi" className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5" />Inteligência (BI)</TabsTrigger>
             <TabsTrigger value="forecast" className="flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" />Previsão</TabsTrigger>
             <TabsTrigger value="goals" className="flex items-center gap-1.5"><Target className="h-3.5 w-3.5" />Meta</TabsTrigger>
             <TabsTrigger value="sales">Vendas</TabsTrigger>
@@ -728,6 +1201,7 @@ export default function Reports() {
 
           {/* Novas abas INOVE */}
           <TabsContent value="inove" className="mt-4"><InoveTab /></TabsContent>
+          <TabsContent value="bi" className="mt-4"><BITab /></TabsContent>
           <TabsContent value="forecast" className="mt-4"><ForecastTab /></TabsContent>
           <TabsContent value="goals" className="mt-4"><GoalsTab /></TabsContent>
           <TabsContent value="gerencial" className="mt-4"><GerencialTab /></TabsContent>

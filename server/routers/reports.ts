@@ -11,6 +11,11 @@ import {
   getStockTurnoverReport,
   getStockSummaryReport,
   getWeeklyStockTurnoverReport,
+  getClimateCorrelationReport,
+  getLoyaltyCohortReport,
+  getAbcMatrixReport,
+  getPredictivePurchasePlanning,
+  getDreByChannelReport,
 } from "../db.reports";
 import { invokeLLM } from "../_core/llm";
 import { getDb } from "../db";
@@ -93,6 +98,29 @@ export const reportsRouter = router({
     .input(z.object({ weeksBack: z.number().min(2).max(12).default(6) }).optional())
     .query(async ({ input }) => {
       return getWeeklyStockTurnoverReport(input?.weeksBack ?? 6);
+    }),
+
+  // ─── Relatórios Avançados de Business Intelligence (BI) ───────────────────
+  climateCorrelation: protectedProcedure.query(async () => {
+    return getClimateCorrelationReport();
+  }),
+
+  loyaltyCohort: protectedProcedure.query(async () => {
+    return getLoyaltyCohortReport();
+  }),
+
+  abcMatrix: protectedProcedure.query(async () => {
+    return getAbcMatrixReport();
+  }),
+
+  predictivePurchasePlanning: protectedProcedure.query(async () => {
+    return getPredictivePurchasePlanning();
+  }),
+
+  dreByChannel: protectedProcedure
+    .input(z.object({ referenceMonth: z.string().optional() }))
+    .query(async ({ input }) => {
+      return getDreByChannelReport(input.referenceMonth);
     }),
 
   // ─── Análise de Otimização Financeira com IA ─────────────────────────────

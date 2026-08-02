@@ -1,4 +1,4 @@
-import { SQL, and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { SQL, and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import {
   FinBank,
   FinBankStatement,
@@ -36,6 +36,7 @@ import {
   finGoalExtraCosts,
   FinGoalExtraCost,
   InsertFinGoalExtraCost,
+  sales,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 
@@ -471,13 +472,52 @@ export async function getDailyRevenues(userId: number, year: number, month: numb
   const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
   const daysInMonth = new Date(year, month, 0).getDate();
   const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
-  return db.select().from(finDailyRevenue)
+
+  // 1. Obter os faturamentos reais gravados na tabela finDailyRevenue
+  const realRows = await db.select().from(finDailyRevenue)
     .where(and(
       eq(finDailyRevenue.userId, userId),
       gte(finDailyRevenue.revenueDate, dateFrom),
       lte(finDailyRevenue.revenueDate, dateTo),
     ))
     .orderBy(finDailyRevenue.revenueDate);
+
+  // 2. Para dias vazios ou hoje, obter o somatório da tabela local de vendas (sales)
+  const salesRows = await db.select({
+    day: sql<string>`DATE_FORMAT(${sales.createdAt}, '%Y-%m-%d')`,
+    total: sql<number>`SUM(${sales.finalTotal})`,
+  })
+  .from(sales)
+  .where(
+    and(
+      eq(sales.status, "completed"),
+      gte(sales.createdAt, new Date(dateFrom + "T00:00:00")),
+      lte(sales.createdAt, new Date(dateTo + "T23:59:59"))
+    )
+  )
+  .groupBy(sql`DATE_FORMAT(${sales.createdAt}, '%Y-%m-%d')`);
+
+  const salesMap = new Map(salesRows.map(r => [r.day, r.total]));
+
+  // Combinar os resultados
+  const resultList = [...realRows];
+  const existingDates = new Set(realRows.map(r => r.revenueDate));
+
+  for (const [dateStr, totalVal] of Array.from(salesMap.entries())) {
+    if (!existingDates.has(dateStr)) {
+      resultList.push({
+        id: -1, // ID temporário indicando que é tempo real
+        userId,
+        revenueDate: dateStr,
+        realAmount: String(Number(totalVal).toFixed(2)),
+        note: "Vendas locais sincronizadas em tempo real",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+    }
+  }
+
+  return resultList.sort((a, b) => a.revenueDate.localeCompare(b.revenueDate));
 }
 
 // Apagar faturamento real de uma data específica

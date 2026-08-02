@@ -7,8 +7,17 @@
 import cron from "node-cron";
 import { notifyOwner } from "./_core/notification";
 import { getDb, getUserByOpenId } from "./db";
-import { inoveConnectorConfig, finDailyRevenue, cronJobLog, inoveSalesCache } from "../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { 
+  inoveConnectorConfig, 
+  finDailyRevenue, 
+  cronJobLog, 
+  inoveSalesCache,
+  sales,
+  customers,
+  customerPurchases,
+  customerLoyaltyTokens,
+} from "../drizzle/schema";
+import { eq, and, sql } from "drizzle-orm";
 import * as mssqlLib from "mssql";
 import { ENV } from "./_core/env";
 
@@ -18,16 +27,34 @@ type MssqlPool = {
   close: () => Promise<void>;
 };
 
+type MssqlConfig = {
+  server: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+  options?: {
+    encrypt?: boolean;
+    trustServerCertificate?: boolean;
+    connectTimeout?: number;
+    requestTimeout?: number;
+  };
+};
+
 async function createInovePool(config: {
   host: string; port: number; username: string;
   password: string; database: string;
 }): Promise<MssqlPool> {
-  const mssqlConfig = {
+  const mssqlAny = mssqlLib as unknown as Record<string, unknown>;
+  const PoolClass = (mssqlAny.ConnectionPool
+    ?? (mssqlAny.default as Record<string, unknown>)?.ConnectionPool) as new (cfg: MssqlConfig) => { connect: () => Promise<MssqlPool> };
+  
+  const mssqlConfig: MssqlConfig = {
     server: config.host,
     port: config.port,
     user: config.username,
     password: config.password,
-    database: config.database,
+    database: config.database || "DUOGELATTO",
     options: {
       encrypt: false,
       trustServerCertificate: true,
@@ -35,8 +62,14 @@ async function createInovePool(config: {
       requestTimeout: 30000,
     },
   };
-  const connectFn = (mssqlLib as unknown as { connect: (cfg: typeof mssqlConfig) => Promise<MssqlPool> }).connect
-    ?? ((mssqlLib as unknown as { default: { connect: (cfg: typeof mssqlConfig) => Promise<MssqlPool> } }).default?.connect);
+
+  if (PoolClass) {
+    const poolInstance = new PoolClass(mssqlConfig);
+    return poolInstance.connect();
+  }
+
+  const connectFn = (mssqlLib as unknown as { connect: (cfg: MssqlConfig) => Promise<MssqlPool> }).connect
+    ?? ((mssqlLib as unknown as { default: { connect: (cfg: MssqlConfig) => Promise<MssqlPool> } }).default?.connect);
   if (!connectFn) throw new Error("mssql.connect não disponível");
   return connectFn(mssqlConfig);
 }
@@ -53,6 +86,214 @@ async function logCronJob(
     await db.insert(cronJobLog).values({ jobName, status, message, durationMs });
   } catch {
     // não deixar falha no log quebrar o fluxo
+  }
+}
+
+// Helper para normalizar CPF e telefone para busca
+function normalizeCpf(cpf: string): string {
+  return cpf.replace(/\D/g, "");
+}
+
+function normalizePhone(phone: string): string {
+  const clean = phone.replace(/\D/g, "");
+  return clean.length >= 9 ? clean.slice(-9) : clean;
+}
+
+function mapPaymentMethod(forma: string): "cash" | "credit_card" | "debit_card" | "pix" | "other" {
+  const f = (forma || "").toUpperCase();
+  if (f.includes("DINHEIRO") || f.includes("DIN")) return "cash";
+  if (f.includes("DEBITO") || f.includes("DÊBITO") || f.includes("DEB")) return "debit_card";
+  if (f.includes("CREDITO") || f.includes("CRÉDITO") || f.includes("CRED") || f.includes("CART")) return "credit_card";
+  if (f.includes("PIX")) return "pix";
+  return "other";
+}
+
+/**
+ * Sincroniza vendas individuais do INOVE para o BD local automaticamente.
+ */
+async function syncSalesFromInoveBackground(): Promise<void> {
+  const startedAt = Date.now();
+  console.log("[cron/sync-sales-background] Iniciando sincronização em lote de vendas do INOVE...");
+
+  const db = await getDb();
+  if (!db) {
+    console.error("[cron/sync-sales-background] DB local indisponível");
+    await logCronJob("sync-sales-background", "error", "DB local indisponível", Date.now() - startedAt);
+    return;
+  }
+
+  const rows = await db.select().from(inoveConnectorConfig).limit(1);
+  if (rows.length === 0 || !rows[0].active) {
+    console.log("[cron/sync-sales-background] Conector INOVE inativo ou não configurado");
+    return;
+  }
+  const config = rows[0];
+
+  let pool: MssqlPool | null = null;
+  try {
+    pool = await createInovePool(config);
+
+    // Buscar vendas finalizadas e não estornadas das últimas 12 horas
+    const result = await pool.request().query(`
+      SELECT 
+        v.VENDA as id, 
+        v.VEN_DATA_FIM as dataFim, 
+        CAST(v.VEN_TOTAL as float) as total,
+        CAST(ISNULL(v.VEN_DESCONTO, 0) as float) as desconto,
+        v.CLIENTE as clienteId,
+        p.PES_NOME as clienteNome,
+        p.PES_TELEFONE as clienteTelefone,
+        p.PES_TELEFONE2 as clienteTelefone2,
+        p.PES_RG_CPF as clienteCpf,
+        p.PES_DATA_NASCIMENTO as clienteNascimento,
+        (
+          SELECT TOP 1 fp.PAG_NOME 
+          FROM PAGAMENTOS_VENDAS pv 
+          JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+          WHERE pv.VENDA = v.VENDA
+          ORDER BY pv.PAG_VALOR DESC
+        ) as formaPrincipal
+      FROM VENDAS v
+      LEFT JOIN CLIENTES c ON v.CLIENTE = c.PESSOA
+      LEFT JOIN PESSOAS p ON c.PESSOA = p.PESSOA
+      WHERE v.VEN_SITUACAO = 2
+        AND v.VEN_ESTORNADO = 'N'
+        AND v.VEN_DATA_FIM >= DATEADD(HOUR, -12, GETDATE())
+      ORDER BY v.VEN_DATA_FIM ASC
+    `);
+
+    await pool.close();
+    pool = null;
+
+    const inoveSales = result.recordset as Array<{
+      id: number;
+      dataFim: Date;
+      total: number;
+      desconto: number;
+      clienteId: number | null;
+      clienteNome: string | null;
+      clienteTelefone: string | null;
+      clienteTelefone2: string | null;
+      clienteCpf: string | null;
+      clienteNascimento: Date | null;
+      formaPrincipal: string | null;
+    }>;
+
+    console.log(`[cron/sync-sales-background] Encontradas ${inoveSales.length} vendas nas últimas 12h no INOVE.`);
+
+    let insertedCount = 0;
+
+    for (const is of inoveSales) {
+      const saleRef = `INOVE-${is.id}`;
+
+      // 1. Verificar se a venda já existe no BD local
+      const existing = await db
+        .select({ id: sales.id })
+        .from(sales)
+        .where(eq(sales.notes, saleRef))
+        .limit(1);
+
+      if (existing.length > 0) continue;
+
+      // 2. Tentar encontrar ou criar cliente no sistema de fidelidade
+      let customerId: number | null = null;
+      if (is.clienteId) {
+        const cpf = is.clienteCpf ? normalizeCpf(is.clienteCpf) : "";
+        const phone = normalizePhone(is.clienteTelefone || is.clienteTelefone2 || "");
+
+        if (cpf.length >= 11) {
+          const [found] = await db
+            .select({ id: customers.id })
+            .from(customers)
+            .where(sql`REPLACE(REPLACE(REPLACE(${customers.notes}, '.', ''), '-', ''), ' ', '') LIKE ${`%${cpf}%`}`)
+            .limit(1);
+          if (found) customerId = found.id;
+        }
+
+        if (!customerId && phone.length >= 9) {
+          const [found] = await db
+            .select({ id: customers.id })
+            .from(customers)
+            .where(sql`RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(${customers.phone}, '(', ''), ')', ''), ' ', ''), '-', ''), 9) = ${phone}`)
+            .limit(1);
+          if (found) customerId = found.id;
+        }
+
+        // Criar automaticamente no fidelidade se tiver nome
+        if (!customerId && is.clienteNome && is.clienteNome.trim().length > 2) {
+          try {
+            const newCust = await db.insert(customers).values({
+              fullName: is.clienteNome.trim(),
+              phone: phone.length >= 9 ? phone : undefined,
+              notes: cpf.length >= 11 ? `CPF: ${cpf}` : `Importado INOVE`,
+              birthDate: is.clienteNascimento ? new Date(is.clienteNascimento) : undefined,
+              totalPoints: 0,
+              totalPurchases: "0.00",
+              active: true,
+            });
+            customerId = (newCust as unknown as { insertId: number }).insertId;
+            
+            // Gerar token de fidelidade
+            const hexToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+            await db.insert(customerLoyaltyTokens).values({
+              customerId,
+              token: hexToken.slice(0, 64),
+            });
+          } catch (err) {
+            console.error(`[cron/sync-sales-background] Erro ao cadastrar cliente automático ${is.clienteNome}:`, err);
+          }
+        }
+      }
+
+      // 3. Mapear forma de pagamento
+      const paymentMethod = mapPaymentMethod(is.formaPrincipal || "other");
+
+      // 4. Inserir venda local
+      await db.insert(sales).values({
+        customerId,
+        total: String((is.total + is.desconto).toFixed(2)),
+        discount: String(is.desconto.toFixed(2)),
+        finalTotal: String(is.total.toFixed(2)),
+        paymentMethod,
+        pointsEarned: customerId ? Math.floor(is.total) : 0,
+        notes: saleRef,
+        status: "completed",
+        createdAt: new Date(is.dataFim),
+      });
+
+      // 5. Se for cliente de fidelidade, registrar em customerPurchases e atualizar pontos
+      if (customerId) {
+        const points = Math.floor(is.total);
+        await db.insert(customerPurchases).values({
+          customerId,
+          amount: String(is.total.toFixed(2)),
+          paymentMethod,
+          pointsEarned: points,
+          notes: saleRef,
+          createdAt: new Date(is.dataFim),
+        });
+
+        await db.update(customers)
+          .set({
+            totalPoints: sql`totalPoints + ${points}`,
+            totalPurchases: sql`totalPurchases + ${is.total}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(customers.id, customerId));
+      }
+
+      insertedCount++;
+    }
+
+    const msg = `Sincronização de vendas concluída: ${insertedCount} novas vendas importadas para o BD local.`;
+    console.log(`[cron/sync-sales-background] ✅ ${msg}`);
+    await logCronJob("sync-sales-background", "success", msg, Date.now() - startedAt);
+
+  } catch (err) {
+    if (pool) await pool.close().catch(() => {});
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[cron/sync-sales-background] Erro na sincronização automática:", message);
+    await logCronJob("sync-sales-background", "error", message, Date.now() - startedAt);
   }
 }
 
@@ -171,7 +412,7 @@ async function syncDailyRevenue(): Promise<void> {
  */
 async function syncSalesCache(): Promise<void> {
   const startedAt = Date.now();
-  console.log("[cron/sync-sales-cache] Iniciando sincronização do cache de vendas por produto...");
+  console.log("[cron/sync-sales-cache] Iniciando sincronização del cache de vendas por produto...");
 
   const db = await getDb();
   if (!db) {
@@ -200,6 +441,21 @@ async function syncSalesCache(): Promise<void> {
 
     let synced = 0;
     for (const monthKey of monthsToSync) {
+      // Otimização: pular consulta do INOVE se for mês passado e o cache já existir
+      const isCurrentMonth = monthKey === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      if (!isCurrentMonth) {
+        const existingCache = await db
+          .select({ id: inoveSalesCache.id })
+          .from(inoveSalesCache)
+          .where(eq(inoveSalesCache.cacheKey, monthKey))
+          .limit(1);
+
+        if (existingCache.length > 0) {
+          console.log(`[cron/sync-sales-cache] Cache já existe para o mês passado ${monthKey} — pulando.`);
+          continue;
+        }
+      }
+
       const [year, month] = monthKey.split("-").map(Number);
       const prevDate = new Date(year, month - 2, 1);
       const prevYear = prevDate.getFullYear();
@@ -307,6 +563,12 @@ async function syncSalesCache(): Promise<void> {
  * Chamado uma vez durante a inicialização do servidor.
  */
 export function registerCronJobs(): void {
+  // Sincronização periódica de vendas individuais do INOVE — a cada 5 minutos
+  cron.schedule("*/5 * * * *", syncSalesFromInoveBackground, {
+    timezone: "America/Sao_Paulo",
+    name: "sync-sales-background",
+  });
+
   // Sincronização de faturamento do dia anterior — todos os dias às 8h (horário de Brasília)
   cron.schedule("0 8 * * *", syncDailyRevenue, {
     timezone: "America/Sao_Paulo",
@@ -320,9 +582,10 @@ export function registerCronJobs(): void {
   });
 
   console.log("[cron] Cron jobs registrados:");
+  console.log("[cron]   → sync-sales-background: a cada 5 minutos (Brasília)");
   console.log("[cron]   → sync-daily-revenue: todos os dias às 08:00 (Brasília)");
   console.log("[cron]   → sync-sales-cache: todos os dias às 08:05 (Brasília)");
 }
 
 // Exportar para uso no endpoint manual (disparar agora)
-export { syncDailyRevenue, syncSalesCache };
+export { syncDailyRevenue, syncSalesCache, syncSalesFromInoveBackground };

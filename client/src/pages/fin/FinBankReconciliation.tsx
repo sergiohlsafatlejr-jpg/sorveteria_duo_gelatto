@@ -586,12 +586,21 @@ function RedeTab() {
   const [importFileId, setImportFileId] = useState<number | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isReconciling, setIsReconciling] = useState(false);
+  const [isBankReconciling, setIsBankReconciling] = useState(false);
+  const [bankRecResults, setBankRecResults] = useState<any[] | null>(null);
 
   const importMutation = trpc.rede.importFile.useMutation();
   const reconcileMutation = trpc.rede.reconcile.useMutation();
+  const reconcileWithBankMutation = trpc.rede.reconcileWithBank.useMutation();
   const listImports = trpc.rede.listImports.useQuery(undefined);
-  const listReconciliations = trpc.rede.listReconciliations.useQuery(undefined);
-  const stats = trpc.rede.getStats.useQuery(undefined);
+  const listReconciliations = trpc.rede.listReconciliations.useQuery(
+    importFileId ? { importFileId } : undefined,
+    { enabled: importFileId !== null }
+  );
+  const stats = trpc.rede.getStats.useQuery(
+    importFileId ? { importFileId } : undefined,
+    { enabled: importFileId !== null }
+  );
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
@@ -649,85 +658,150 @@ function RedeTab() {
     }
   };
 
+  const handleBankReconcile = async () => {
+    if (!importFileId) {
+      toast.error("Nenhuma importação selecionada");
+      return;
+    }
+
+    setIsBankReconciling(true);
+    try {
+      const result = await reconcileWithBankMutation.mutateAsync({
+        importFileId,
+        tolerancePercent: 5,
+      });
+
+      setBankRecResults(result.results);
+      toast.success(`Conciliação bancária concluída: ${result.summary.matchedCount} depósitos conciliados`);
+      listReconciliations.refetch();
+      stats.refetch();
+    } catch (error) {
+      toast.error(`Erro na conciliação bancária: ${error instanceof Error ? error.message : "Desconhecido"}`);
+    } finally {
+      setIsBankReconciling(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Upload Section */}
-      <div className="rounded-xl border bg-card p-6">
-        <h3 className="font-semibold mb-4">Importar Relatório Rede</h3>
+      {/* Upload & Select grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Upload Section */}
+        <div className="rounded-xl border bg-card p-6 flex flex-col justify-between">
+          <div>
+            <h3 className="font-semibold mb-4 text-sm flex items-center gap-2">
+              <Upload className="w-4 h-4 text-muted-foreground" />
+              Importar Relatório Rede (.xlsx)
+            </h3>
+            <div className="space-y-4">
+              {/* Drag and Drop clickable box */}
+              <div
+                className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const f = e.dataTransfer.files[0];
+                  if (f) setFile(f);
+                }}
+                onClick={() => document.getElementById("rede-file-input")?.click()}
+              >
+                <Upload className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-xs font-medium">Clique ou arraste o relatório de vendas Excel aqui</p>
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  onChange={handleFileChange}
+                  className="hidden"
+                  id="rede-file-input"
+                />
+              </div>
 
-        <div className="space-y-4">
-          {/* Drag and Drop */}
-          <div
-            className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-muted/50 transition-colors"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const f = e.dataTransfer.files[0];
-              if (f) setFile(f);
-            }}
-          >
-            <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-            <p className="text-sm font-medium">Arraste o arquivo Excel aqui ou clique para selecionar</p>
-            <p className="text-xs text-muted-foreground mt-1">Formato: .xlsx (Rede Relatório de Vendas)</p>
-            <input
-              type="file"
-              accept=".xlsx"
-              onChange={handleFileChange}
-              className="hidden"
-              id="rede-file-input"
-            />
-            <label htmlFor="rede-file-input" className="cursor-pointer">
-              <span className="sr-only">Selecionar arquivo</span>
-            </label>
+              {file && (
+                <div className="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs">
+                  <File className="w-4 h-4 text-emerald-600" />
+                  <span className="text-emerald-900 truncate max-w-full">{file.name}</span>
+                </div>
+              )}
+
+              {/* Period Selection */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-muted-foreground">Data Início</Label>
+                  <Input
+                    type="date"
+                    value={periodStart}
+                    onChange={(e) => setPeriodStart(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-muted-foreground">Data Fim</Label>
+                  <Input
+                    type="date"
+                    value={periodEnd}
+                    onChange={(e) => setPeriodEnd(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
-
-          {file && (
-            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-              <File className="w-4 h-4 text-emerald-600" />
-              <span className="text-sm text-emerald-900">{file.name}</span>
-            </div>
-          )}
-
-          {/* Period Selection */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs">Data Início</Label>
-              <Input
-                type="date"
-                value={periodStart}
-                onChange={(e) => setPeriodStart(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Data Fim</Label>
-              <Input
-                type="date"
-                value={periodEnd}
-                onChange={(e) => setPeriodEnd(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* Import Button */}
           <Button
             onClick={handleImport}
             disabled={!file || !periodStart || !periodEnd || isImporting}
-            className="w-full gap-2"
+            className="w-full gap-2 mt-4 h-9"
           >
             {isImporting ? <Loader className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            {isImporting ? "Importando..." : "Importar"}
+            {isImporting ? "Importando..." : "Importar Relatório"}
           </Button>
+        </div>
+
+        {/* Previous Import Selector */}
+        <div className="rounded-xl border bg-card p-6 flex flex-col justify-between">
+          <div>
+            <h3 className="font-semibold mb-4 text-sm flex items-center gap-2">
+              <File className="w-4 h-4 text-muted-foreground" />
+              Selecionar Importação Anterior
+            </h3>
+            {listImports.data && listImports.data.length > 0 ? (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Escolha um lote importado:</Label>
+                <select
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  value={importFileId || ""}
+                  onChange={(e) => {
+                    setImportFileId(e.target.value ? Number(e.target.value) : null);
+                    setBankRecResults(null);
+                  }}
+                >
+                  <option value="">Selecione um arquivo...</option>
+                  {listImports.data.map((imp: any) => (
+                    <option key={imp.id} value={imp.id}>
+                      {imp.fileName} ({new Date(imp.createdAt).toLocaleDateString("pt-BR")} - {fmtBRL(parseFloat(imp.totalValue))})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-2">
+                  Selecione um lote para visualizar os matches, conciliações e estatísticas financeiras de vendas da maquininha.
+                </p>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground text-xs italic">
+                Nenhum lote importado anteriormente localizado.
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Stats Section */}
-      {stats.data && (
+      {importFileId && stats.data && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { label: "✅ Conciliados", value: stats.data.matched.count, color: "text-emerald-600" },
             { label: "❌ Sem INOVE", value: stats.data.unmatchedRede.count, color: "text-red-600" },
             { label: "⚠️ Divergentes", value: stats.data.divergent.count, color: "text-amber-600" },
-            { label: "Total", value: stats.data.matched.count + stats.data.unmatchedRede.count + stats.data.divergent.count, color: "text-foreground" },
+            { label: "Total Vendas", value: stats.data.matched.count + stats.data.unmatchedRede.count + stats.data.divergent.count, color: "text-foreground" },
           ].map(k => (
             <div key={k.label} className="rounded-xl border bg-card p-4 text-center">
               <div className={`text-2xl font-bold ${k.color}`}>{k.value}</div>
@@ -737,24 +811,96 @@ function RedeTab() {
         </div>
       )}
 
-      {/* Reconcile Button */}
+      {/* Reconcile Buttons */}
       {importFileId && (
-        <Button
-          onClick={handleReconcile}
-          disabled={isReconciling}
-          className="w-full gap-2"
-          variant="default"
-        >
-          {isReconciling ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          {isReconciling ? "Conciliando..." : "Conciliar com INOVE"}
-        </Button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Button
+            onClick={handleReconcile}
+            disabled={isReconciling}
+            className="w-full gap-2"
+            variant="outline"
+          >
+            {isReconciling ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {isReconciling ? "Conciliando..." : "Conciliar Vendas (Rede x INOVE)"}
+          </Button>
+          <Button
+            onClick={handleBankReconcile}
+            disabled={isBankReconciling}
+            className="w-full gap-2"
+            variant="default"
+          >
+            {isBankReconciling ? <Loader className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            {isBankReconciling ? "Conciliando..." : "Conciliar Extrato (Rede x Banco)"}
+          </Button>
+        </div>
+      )}
+
+      {/* Bank Reconciliation results table */}
+      {bankRecResults && (
+        <div className="rounded-xl border bg-card overflow-hidden">
+          <div className="px-4 py-3 border-b bg-muted/20 flex justify-between items-center">
+            <p className="text-sm font-medium">Resultados da Conciliação Bancária (Rede x Extrato)</p>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setBankRecResults(null)}>Limpar</Button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/50 text-xs">
+                <tr>
+                  <th className="px-4 py-2 text-left">Data do Crédito</th>
+                  <th className="px-4 py-2 text-right">Líquido Rede (Esperado)</th>
+                  <th className="px-4 py-2 text-right">Crédito Banco (Realizado)</th>
+                  <th className="px-4 py-2 text-right">Diferença</th>
+                  <th className="px-4 py-2 text-left">Descrição no Extrato</th>
+                  <th className="px-4 py-2 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bankRecResults.map((res: any, idx: number) => {
+                  const diffVal = res.diff;
+                  const absDiff = Math.abs(diffVal);
+                  const isMatch = res.status === "matched";
+                  const isDivergent = res.status === "divergent";
+                  
+                  return (
+                    <tr key={idx} className="border-b hover:bg-muted/50 text-xs">
+                      <td className="px-4 py-2 font-mono">{fmtDateStr(res.date)}</td>
+                      <td className="px-4 py-2 text-right font-semibold">{fmtBRL(res.expectedTotal)}</td>
+                      <td className="px-4 py-2 text-right text-emerald-600 font-semibold">
+                        {res.bankTotal > 0 ? fmtBRL(res.bankTotal) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-right whitespace-nowrap">
+                        {res.bankTotal > 0 ? (
+                          <span className={isMatch ? "text-emerald-600" : isDivergent ? "text-amber-600" : "text-red-600"}>
+                            {diffVal > 0 ? "+" : ""}{fmtBRL(diffVal)}
+                          </span>
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-muted-foreground truncate max-w-xs">
+                        {res.bankDescription || <span className="italic text-muted-foreground/30">não localizado</span>}
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        <Badge className={
+                          isMatch ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30" :
+                          isDivergent ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                          "bg-red-500/10 text-red-700 border-red-500/30"
+                        } variant="outline">
+                          {isMatch ? "✅ Conciliado" : isDivergent ? "⚠️ Divergente" : "❌ Sem depósito"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* Reconciliations Table */}
-      {listReconciliations.data && listReconciliations.data.length > 0 && (
+      {importFileId && listReconciliations.data && listReconciliations.data.length > 0 && (
         <div className="rounded-xl border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b bg-muted/20">
-            <p className="text-sm font-medium">Últimas Conciliações</p>
+            <p className="text-sm font-medium">Histórico de matches (Rede x INOVE)</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -762,8 +908,9 @@ function RedeTab() {
                 <tr>
                   <th className="px-4 py-2 text-left">Data Rede</th>
                   <th className="px-4 py-2 text-right">Valor Rede</th>
-                  <th className="px-4 py-2 text-left">Status</th>
                   <th className="px-4 py-2 text-left">Bandeira</th>
+                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-4 py-2 text-left">Depósito Extrato</th>
                 </tr>
               </thead>
               <tbody>
@@ -771,12 +918,21 @@ function RedeTab() {
                   <tr key={rec.id} className="border-b hover:bg-muted/50">
                     <td className="px-4 py-2">{new Date(rec.redeDate).toLocaleDateString("pt-BR")}</td>
                     <td className="px-4 py-2 text-right font-mono">{fmtBRL(parseFloat(rec.redeValue))}</td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">{rec.redeBandeira || "-"}</td>
                     <td className="px-4 py-2">
                       <Badge className={rec.status === "matched" ? "bg-emerald-500/10 text-emerald-700" : "bg-red-500/10 text-red-700"}>
                         {rec.status === "matched" ? "✅ Conciliado" : "❌ Não encontrado"}
                       </Badge>
                     </td>
-                    <td className="px-4 py-2 text-xs text-muted-foreground">{rec.redeBandeira || "-"}</td>
+                    <td className="px-4 py-2 text-xs font-mono">
+                      {rec.bankCreditDate ? (
+                        <span className="text-emerald-600">
+                          {new Date(rec.bankCreditDate).toLocaleDateString("pt-BR")} ({fmtBRL(parseFloat(rec.bankCreditValue))})
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/45 italic">pendente</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -787,3 +943,4 @@ function RedeTab() {
     </div>
   );
 }
+
