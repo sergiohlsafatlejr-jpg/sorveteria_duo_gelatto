@@ -760,13 +760,13 @@ export const finRouter = router({
         realAmount: z.number().min(0),
         note: z.string().max(255).optional(),
       }))
-      .mutation(({ ctx, input }) => saveDailyRevenue(ctx.user.id, input.revenueDate, input.realAmount, input.note ?? null)),
+      .mutation(({ ctx, input }) => saveDailyRevenue(ctx.user.id, input.revenueDate, input.realAmount, input.note ?? null, ctx.user.establishmentId ?? "default")),
     getRealRevenues: protectedProcedure
       .input(z.object({
         year: z.number().int(),
         month: z.number().int().min(1).max(12),
       }))
-      .query(({ ctx, input }) => getDailyRevenues(ctx.user.id, input.year, input.month)),
+      .query(({ ctx, input }) => getDailyRevenues(ctx.user.id, input.year, input.month, ctx.user.establishmentId ?? "default")),
     deleteRealRevenue: protectedProcedure
       .input(z.object({
         revenueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

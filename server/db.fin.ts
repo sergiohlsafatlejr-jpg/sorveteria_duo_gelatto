@@ -451,22 +451,23 @@ export async function saveDailyRevenue(
   revenueDate: string,
   realAmount: number,
   note: string | null,
+  establishmentId: string = "default",
 ): Promise<void> {
   const db = await getDb();
   if (!db) return;
   const existing = await db.select().from(finDailyRevenue)
-    .where(and(eq(finDailyRevenue.userId, userId), eq(finDailyRevenue.revenueDate, revenueDate)))
+    .where(and(eq(finDailyRevenue.establishmentId, establishmentId), eq(finDailyRevenue.revenueDate, revenueDate)))
     .limit(1);
   if (existing.length > 0) {
     await db.update(finDailyRevenue)
       .set({ realAmount: String(realAmount), note, updatedAt: new Date() })
-      .where(and(eq(finDailyRevenue.userId, userId), eq(finDailyRevenue.revenueDate, revenueDate)));
+      .where(and(eq(finDailyRevenue.establishmentId, establishmentId), eq(finDailyRevenue.revenueDate, revenueDate)));
   } else {
-    await db.insert(finDailyRevenue).values({ userId, revenueDate, realAmount: String(realAmount), note });
+    await db.insert(finDailyRevenue).values({ userId, establishmentId, revenueDate, realAmount: String(realAmount), note });
   }
 }
 
-export async function getDailyRevenues(userId: number, year: number, month: number) {
+export async function getDailyRevenues(userId: number, year: number, month: number, establishmentId: string = "default") {
   const db = await getDb();
   if (!db) return [];
   const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
@@ -476,7 +477,7 @@ export async function getDailyRevenues(userId: number, year: number, month: numb
   // 1. Obter os faturamentos reais gravados na tabela finDailyRevenue
   const realRows = await db.select().from(finDailyRevenue)
     .where(and(
-      eq(finDailyRevenue.userId, userId),
+      eq(finDailyRevenue.establishmentId, establishmentId),
       gte(finDailyRevenue.revenueDate, dateFrom),
       lte(finDailyRevenue.revenueDate, dateTo),
     ))
@@ -525,7 +526,7 @@ export async function deleteRealRevenue(userId: number, revenueDate: string): Pr
   const db = await getDb();
   if (!db) return { deleted: 0 };
   const result = await db.delete(finDailyRevenue)
-    .where(and(eq(finDailyRevenue.userId, userId), eq(finDailyRevenue.revenueDate, revenueDate)));
+    .where(and(eq(finDailyRevenue.establishmentId, establishmentId), eq(finDailyRevenue.revenueDate, revenueDate)));
   return { deleted: (result as unknown as { rowsAffected?: number }).rowsAffected ?? 1 };
 }
 
@@ -538,14 +539,14 @@ export async function clearMonthRealRevenues(userId: number, year: number, month
   const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
   const rows = await db.select({ id: finDailyRevenue.id }).from(finDailyRevenue)
     .where(and(
-      eq(finDailyRevenue.userId, userId),
+      eq(finDailyRevenue.establishmentId, establishmentId),
       gte(finDailyRevenue.revenueDate, dateFrom),
       lte(finDailyRevenue.revenueDate, dateTo),
     ));
   if (rows.length === 0) return { deleted: 0 };
   await db.delete(finDailyRevenue)
     .where(and(
-      eq(finDailyRevenue.userId, userId),
+      eq(finDailyRevenue.establishmentId, establishmentId),
       gte(finDailyRevenue.revenueDate, dateFrom),
       lte(finDailyRevenue.revenueDate, dateTo),
     ));
