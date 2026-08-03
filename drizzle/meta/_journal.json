@@ -204,13 +204,6 @@
       "when": 1785347046512,
       "tag": "0028_reflective_human_torch",
       "breakpoints": true
-    },
-    {
-      "idx": 29,
-      "version": "5",
-      "when": 1785796267451,
-      "tag": "0029_peaceful_peter_quill",
-      "breakpoints": true
     }
   ]
 }

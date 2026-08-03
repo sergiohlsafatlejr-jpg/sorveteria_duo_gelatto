@@ -1,1 +1,0 @@
-ALTER TABLE `fin_daily_revenue` ADD `establishmentId` varchar(50) DEFAULT 'default' NOT NULL;
