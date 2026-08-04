@@ -184,10 +184,12 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
 
   // Calcular realizado para cada meta de produto usando keywords matching
   const productGoalsWithProgress = productGoalsList.map(goal => {
-    const keywords = goal.searchKeywords.split(',').map((k: string) => k.trim().toUpperCase());
+    const sep = goal.searchKeywords.includes('|') ? '|' : ',';
+    const keywords = goal.searchKeywords.split(sep).map((k: string) => k.trim().toUpperCase());
     const matchingProducts = allProductsMonth.filter(p => {
       const nome = p.nome.toUpperCase();
-      return keywords.some(kw => nome.includes(kw));
+      // Matching exato por nome completo (produtos selecionados via checkbox)
+      return keywords.some(kw => kw.length > 0 && nome === kw);
     });
     const totalQty = matchingProducts.reduce((sum, p) => sum + p.qtd, 0);
     const totalRevenue = matchingProducts.reduce((sum, p) => sum + p.total, 0);

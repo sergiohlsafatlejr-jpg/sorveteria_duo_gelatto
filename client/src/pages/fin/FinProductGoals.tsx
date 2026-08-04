@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -21,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Plus, Pencil, Trash2, Copy, Target } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Copy, Target, Search } from "lucide-react";
 import { Link } from "wouter";
 
 export default function FinProductGoals() {
@@ -34,17 +35,18 @@ export default function FinProductGoals() {
 
   // Form state
   const [formProductName, setFormProductName] = useState("");
-  const [formKeywords, setFormKeywords] = useState("");
   const [formTargetQty, setFormTargetQty] = useState("");
   const [formTargetRevenue, setFormTargetRevenue] = useState("");
   const [formIcon, setFormIcon] = useState("🎯");
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+  const [productSearch, setProductSearch] = useState("");
 
   const utils = trpc.useUtils();
   const { data: goals = [], isLoading } = trpc.productGoals.listAll.useQuery({ month: selectedMonth });
 
-  // Buscar produtos do INOVE para preview de matching
+  // Buscar produtos do INOVE (lista completa para seleção)
   const { data: topProducts = [] } = trpc.inove.getTopProducts.useQuery(
-    { days: new Date().getDate(), limit: 50 },
+    { days: new Date().getDate(), limit: 200 },
     { staleTime: 5 * 60 * 1000 }
   );
 
@@ -90,20 +92,26 @@ export default function FinProductGoals() {
 
   function resetForm() {
     setFormProductName("");
-    setFormKeywords("");
     setFormTargetQty("");
     setFormTargetRevenue("");
     setFormIcon("🎯");
+    setSelectedProducts([]);
+    setProductSearch("");
+  }
+
+  // Gerar keywords a partir dos produtos selecionados (usa | como separador para evitar conflito com nomes como "1,5L")
+  function getKeywordsFromSelected(): string {
+    return selectedProducts.join("|");
   }
 
   function handleCreate() {
-    if (!formProductName || !formKeywords || !formTargetQty) {
-      toast.error("Preencha todos os campos obrigatórios");
+    if (!formProductName || selectedProducts.length === 0 || !formTargetQty) {
+      toast.error("Preencha o nome, selecione pelo menos 1 produto e defina a meta");
       return;
     }
     createMut.mutate({
       productName: formProductName,
-      searchKeywords: formKeywords,
+      searchKeywords: getKeywordsFromSelected(),
       targetQuantity: parseInt(formTargetQty),
       targetRevenue: formTargetRevenue ? parseFloat(formTargetRevenue) : 0,
       month: selectedMonth,
@@ -115,7 +123,7 @@ export default function FinProductGoals() {
     updateMut.mutate({
       id,
       productName: formProductName || undefined,
-      searchKeywords: formKeywords || undefined,
+      searchKeywords: selectedProducts.length > 0 ? getKeywordsFromSelected() : undefined,
       targetQuantity: formTargetQty ? parseInt(formTargetQty) : undefined,
       targetRevenue: formTargetRevenue ? parseFloat(formTargetRevenue) : undefined,
       icon: formIcon || undefined,
@@ -125,29 +133,39 @@ export default function FinProductGoals() {
   function startEdit(goal: typeof goals[0]) {
     setEditingGoal(goal.id);
     setFormProductName(goal.productName);
-    setFormKeywords(goal.searchKeywords || "");
     setFormTargetQty(goal.targetQuantity.toString());
     setFormTargetRevenue(goal.targetRevenue?.toString() || "");
     setFormIcon(goal.icon || "🎯");
+    // Parsear keywords existentes para pré-selecionar produtos (suporta | e , como separador)
+    const sep = (goal.searchKeywords || "").includes("|") ? "|" : ",";
+    const existingKeywords = (goal.searchKeywords || "").split(sep).map(k => k.trim());
+    setSelectedProducts(existingKeywords.filter(k => k.length > 0));
+    setProductSearch("");
   }
 
-  // Preview: quantos produtos do INOVE matcham as keywords
-  const matchPreview = useMemo(() => {
-    if (!formKeywords) return [];
-    const keywords = formKeywords.split(",").map(k => k.trim().toUpperCase());
-    return topProducts.filter(p => {
-      const nome = p.nome.toUpperCase();
-      return keywords.some(kw => nome.includes(kw));
-    });
-  }, [formKeywords, topProducts]);
+  function toggleProduct(productName: string) {
+    setSelectedProducts(prev =>
+      prev.includes(productName)
+        ? prev.filter(p => p !== productName)
+        : [...prev, productName]
+    );
+  }
+
+  // Filtrar produtos pela busca
+  const filteredProducts = useMemo(() => {
+    if (!productSearch) return topProducts;
+    const search = productSearch.toUpperCase();
+    return topProducts.filter(p => p.nome.toUpperCase().includes(search));
+  }, [productSearch, topProducts]);
 
   // Calcular realizado para cada meta
   const goalsWithProgress = useMemo(() => {
     return goals.map(goal => {
-      const keywords = (goal.searchKeywords || "").split(",").map(k => k.trim().toUpperCase());
+      const sep = (goal.searchKeywords || "").includes("|") ? "|" : ",";
+      const keywords = (goal.searchKeywords || "").split(sep).map(k => k.trim().toUpperCase());
       const matched = topProducts.filter(p => {
         const nome = p.nome.toUpperCase();
-        return keywords.some(kw => nome.includes(kw));
+        return keywords.some(kw => kw.length > 0 && nome === kw);
       });
       const realQty = matched.reduce((sum, p) => sum + p.qtd, 0);
       const realRevenue = matched.reduce((sum, p) => sum + p.total, 0);
@@ -156,10 +174,82 @@ export default function FinProductGoals() {
     });
   }, [goals, topProducts]);
 
+  // Componente de seleção de produtos com checkboxes
+  function ProductSelector() {
+    return (
+      <div className="space-y-3">
+        <Label>Selecione os produtos do INOVE</Label>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={productSearch}
+            onChange={(e) => setProductSearch(e.target.value)}
+            placeholder="Buscar produto..."
+            className="pl-9"
+          />
+        </div>
+
+        {/* Produtos selecionados */}
+        {selectedProducts.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {selectedProducts.map((name) => (
+              <Badge
+                key={name}
+                variant="secondary"
+                className="cursor-pointer hover:bg-destructive/20 transition-colors"
+                onClick={() => toggleProduct(name)}
+              >
+                {name} ✕
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        {/* Lista de produtos com checkboxes */}
+        <div className="border rounded-md max-h-[250px] overflow-y-auto">
+          {filteredProducts.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              {topProducts.length === 0 ? "Nenhum produto encontrado no INOVE" : "Nenhum resultado para a busca"}
+            </p>
+          ) : (
+            <div className="divide-y">
+              {filteredProducts.map((product, idx) => {
+                const isSelected = selectedProducts.includes(product.nome);
+                return (
+                  <label
+                    key={idx}
+                    className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors ${
+                      isSelected ? "bg-primary/5" : ""
+                    }`}
+                  >
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleProduct(product.nome)}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium truncate block">{product.nome}</span>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-xs text-muted-foreground">{product.qtd} un</span>
+                      <span className="text-xs text-muted-foreground ml-2">R$ {product.total.toFixed(0)}</span>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {selectedProducts.length} produto(s) selecionado(s) — a meta será calculada somando as vendas de todos os itens marcados.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <Link href="/fin/forecast">
             <Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4 mr-1" /> Voltar</Button>
@@ -172,7 +262,7 @@ export default function FinProductGoals() {
             <p className="text-muted-foreground text-sm">Configure metas mensais para produtos específicos (Açaí 1,5L, Pote Sorvete, etc)</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Input
             type="month"
             value={selectedMonth}
@@ -187,13 +277,13 @@ export default function FinProductGoals() {
           >
             <Copy className="h-4 w-4 mr-1" /> Copiar mês anterior
           </Button>
-          <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+          <Dialog open={showCreateDialog} onOpenChange={(open) => { setShowCreateDialog(open); if (open) resetForm(); }}>
             <DialogTrigger asChild>
-              <Button size="sm" onClick={resetForm}>
+              <Button size="sm">
                 <Plus className="h-4 w-4 mr-1" /> Nova Meta
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-lg">
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Nova Meta de Produto</DialogTitle>
               </DialogHeader>
@@ -203,29 +293,13 @@ export default function FinProductGoals() {
                   <Input value={formIcon} onChange={(e) => setFormIcon(e.target.value)} placeholder="🍨" className="w-20" />
                 </div>
                 <div>
-                  <Label>Nome do Produto</Label>
+                  <Label>Nome da Meta</Label>
                   <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} placeholder="Ex: Açaí 1,5L" />
                 </div>
-                <div>
-                  <Label>Palavras-chave (separadas por vírgula)</Label>
-                  <Input value={formKeywords} onChange={(e) => setFormKeywords(e.target.value)} placeholder="Ex: ACAI,AÇAÍ,AÇAI,1.5,1,5" />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Usadas para buscar automaticamente no INOVE. Separe por vírgula.
-                  </p>
-                </div>
-                {matchPreview.length > 0 && (
-                  <div className="bg-green-50 border border-green-200 rounded p-2">
-                    <p className="text-xs font-medium text-green-700 mb-1">
-                      ✅ {matchPreview.length} produto(s) encontrado(s) no INOVE:
-                    </p>
-                    <ul className="text-xs text-green-600 space-y-0.5">
-                      {matchPreview.slice(0, 5).map((p, i) => (
-                        <li key={i}>• {p.nome} ({p.qtd} un, R$ {p.total.toFixed(2)})</li>
-                      ))}
-                      {matchPreview.length > 5 && <li>... e mais {matchPreview.length - 5}</li>}
-                    </ul>
-                  </div>
-                )}
+
+                {/* Seleção de produtos com checkboxes */}
+                <ProductSelector />
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>Meta (unidades/mês)</Label>
@@ -265,7 +339,7 @@ export default function FinProductGoals() {
                 <TableRow>
                   <TableHead className="w-12"></TableHead>
                   <TableHead>Produto</TableHead>
-                  <TableHead>Keywords</TableHead>
+                  <TableHead>Itens Selecionados</TableHead>
                   <TableHead className="text-center">Meta (un)</TableHead>
                   <TableHead className="text-center">Realizado</TableHead>
                   <TableHead className="text-center">%</TableHead>
@@ -277,27 +351,22 @@ export default function FinProductGoals() {
                 {goalsWithProgress.map((goal) => (
                   <TableRow key={goal.id}>
                     <TableCell className="text-xl">{goal.icon}</TableCell>
-                    <TableCell className="font-medium">
-                      {editingGoal === goal.id ? (
-                        <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} className="h-8" />
-                      ) : (
-                        goal.productName
-                      )}
+                    <TableCell className="font-medium">{goal.productName}</TableCell>
+                    <TableCell className="max-w-[200px]">
+                      <div className="flex flex-wrap gap-1">
+                        {(goal.searchKeywords || "").split(",").filter(k => k.trim()).slice(0, 3).map((kw, i) => (
+                          <Badge key={i} variant="outline" className="text-[10px] px-1.5 py-0">
+                            {kw.trim()}
+                          </Badge>
+                        ))}
+                        {(goal.searchKeywords || "").split(",").filter(k => k.trim()).length > 3 && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            +{(goal.searchKeywords || "").split(",").filter(k => k.trim()).length - 3}
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground max-w-[150px] truncate">
-                      {editingGoal === goal.id ? (
-                        <Input value={formKeywords} onChange={(e) => setFormKeywords(e.target.value)} className="h-8" />
-                      ) : (
-                        goal.searchKeywords
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {editingGoal === goal.id ? (
-                        <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} className="h-8 w-20 mx-auto" />
-                      ) : (
-                        goal.targetQuantity
-                      )}
-                    </TableCell>
+                    <TableCell className="text-center">{goal.targetQuantity}</TableCell>
                     <TableCell className="text-center font-medium">{Math.round(goal.realQty)}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center gap-2">
@@ -323,21 +392,50 @@ export default function FinProductGoals() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {editingGoal === goal.id ? (
-                        <div className="flex gap-1 justify-end">
-                          <Button size="sm" variant="ghost" onClick={() => handleUpdate(goal.id)}>Salvar</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingGoal(null)}>Cancelar</Button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-1 justify-end">
-                          <Button size="sm" variant="ghost" onClick={() => startEdit(goal)}>
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteMut.mutate({ id: goal.id })}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      )}
+                      <div className="flex gap-1 justify-end">
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button size="sm" variant="ghost" onClick={() => startEdit(goal)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                              <DialogTitle>Editar Meta: {goal.productName}</DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-[auto_1fr] gap-4 items-center">
+                                <Label>Ícone</Label>
+                                <Input value={formIcon} onChange={(e) => setFormIcon(e.target.value)} className="w-20" />
+                              </div>
+                              <div>
+                                <Label>Nome da Meta</Label>
+                                <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} />
+                              </div>
+
+                              {/* Seleção de produtos com checkboxes */}
+                              <ProductSelector />
+
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <Label>Meta (unidades/mês)</Label>
+                                  <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} />
+                                </div>
+                                <div>
+                                  <Label>Meta faturamento (R$, opcional)</Label>
+                                  <Input type="number" value={formTargetRevenue} onChange={(e) => setFormTargetRevenue(e.target.value)} />
+                                </div>
+                              </div>
+                              <Button onClick={() => handleUpdate(goal.id)} disabled={updateMut.isPending} className="w-full">
+                                {updateMut.isPending ? "Salvando..." : "Salvar Alterações"}
+                              </Button>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                        <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteMut.mutate({ id: goal.id })}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -351,8 +449,8 @@ export default function FinProductGoals() {
       <Card className="border-blue-200 bg-blue-50/50">
         <CardContent className="pt-4">
           <p className="text-sm text-blue-700">
-            <strong>💡 Dica:</strong> As metas cadastradas aqui aparecem automaticamente no Dashboard principal como KPIs com barra de progresso.
-            Use palavras-chave amplas para capturar variações do nome do produto no INOVE (ex: "ACAI,AÇAÍ,AÇAI" para Açaí).
+            <strong>💡 Dica:</strong> Marque os produtos que deseja incluir na meta usando os checkboxes.
+            A meta será calculada somando as vendas de todos os itens selecionados. As metas aparecem automaticamente no Dashboard.
           </p>
         </CardContent>
       </Card>
