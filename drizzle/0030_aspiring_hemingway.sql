@@ -1,0 +1,1 @@
+ALTER TABLE `fin_daily_revenue` ADD CONSTRAINT `fin_daily_revenue_date_idx` UNIQUE(`revenueDate`);

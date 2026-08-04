@@ -211,6 +211,13 @@
       "when": 1785796267451,
       "tag": "0029_peaceful_peter_quill",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1785871515492,
+      "tag": "0030_aspiring_hemingway",
+      "breakpoints": true
     }
   ]
 }

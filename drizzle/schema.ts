@@ -8,6 +8,7 @@ import {
   mysqlTable,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 
@@ -408,7 +409,9 @@ export const finDailyRevenue = mysqlTable("fin_daily_revenue", {
   note: varchar("note", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  uniqueDate: uniqueIndex("fin_daily_revenue_date_idx").on(table.revenueDate),
+}));
 export type FinDailyRevenue = typeof finDailyRevenue.$inferSelect;
 export type InsertFinDailyRevenue = typeof finDailyRevenue.$inferInsert;
 

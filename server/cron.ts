@@ -326,71 +326,80 @@ async function syncDailyRevenue(): Promise<void> {
   try {
     pool = await createInovePool(config);
 
-    // Buscar total de vendas do dia anterior
+    // Buscar total de vendas dos últimos 7 dias (cobre falhas e garante dados atualizados)
     const result = await pool.request().query(`
       SELECT
-        CAST(DATEADD(day, -1, CAST(GETDATE() as date)) as varchar(10)) as data_ontem,
+        CONVERT(varchar(10), CAST(VEN_DATA_FIM as date), 120) as data_venda,
         CAST(ISNULL(SUM(VEN_TOTAL), 0) as float) as total_vendas,
         COUNT(*) as qtd_vendas
       FROM VENDAS
       WHERE VEN_SITUACAO = 2
-        AND CAST(VEN_DATA_FIM as date) = CAST(DATEADD(day, -1, GETDATE()) as date)
+        AND CAST(VEN_DATA_FIM as date) >= CAST(DATEADD(day, -7, GETDATE()) as date)
+        AND CAST(VEN_DATA_FIM as date) < CAST(GETDATE() as date)
+      GROUP BY CAST(VEN_DATA_FIM as date)
+      ORDER BY data_venda
     `);
     await pool.close();
     pool = null;
 
-    const row = result.recordset[0] as { data_ontem: string; total_vendas: number; qtd_vendas: number };
-    if (!row || !row.data_ontem) throw new Error("Nenhum dado retornado do INOVE");
+    if (!result.recordset || result.recordset.length === 0) {
+      const msg = "Nenhum dado de vendas encontrado nos últimos 7 dias";
+      console.warn(`[cron/sync-revenue] ${msg}`);
+      await logCronJob("sync-daily-revenue", "skipped", msg, Date.now() - startedAt);
+      return;
+    }
 
-    const revenueDate = row.data_ontem; // YYYY-MM-DD
-    const totalVendas = row.total_vendas ?? 0;
-    const qtdVendas = row.qtd_vendas ?? 0;
-
-    // Buscar userId do dono do sistema
+    // Buscar userId do dono do sistema (para manter compatibilidade)
     const ownerUser = await getUserByOpenId(ENV.ownerOpenId);
     if (!ownerUser) throw new Error("Usuário dono não encontrado no sistema");
 
-    // Verificar se já existe registro para essa data
-    const existing = await db.select()
-      .from(finDailyRevenue)
-      .where(and(
-        eq(finDailyRevenue.userId, ownerUser.id),
-        eq(finDailyRevenue.revenueDate, revenueDate),
-      ))
-      .limit(1);
+    let updatedCount = 0;
+    let createdCount = 0;
 
-    const alreadyExisted = existing.length > 0;
+    for (const row of result.recordset) {
+      const revenueDate = row.data_venda as string;
+      const totalVendas = (row.total_vendas as number) ?? 0;
+      const qtdVendas = (row.qtd_vendas as number) ?? 0;
 
-    if (alreadyExisted) {
-      await db.update(finDailyRevenue)
-        .set({
+      if (totalVendas <= 0) continue;
+
+      // Verificar se já existe registro para essa data (compartilhado, sem filtro userId)
+      const existing = await db.select()
+        .from(finDailyRevenue)
+        .where(eq(finDailyRevenue.revenueDate, revenueDate))
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db.update(finDailyRevenue)
+          .set({
+            realAmount: String(totalVendas.toFixed(2)),
+            note: `Importado automaticamente do PDV INOVE (${qtdVendas} vendas)`,
+            updatedAt: new Date(),
+          })
+          .where(eq(finDailyRevenue.revenueDate, revenueDate));
+        updatedCount++;
+      } else {
+        await db.insert(finDailyRevenue).values({
+          userId: ownerUser.id,
+          revenueDate,
           realAmount: String(totalVendas.toFixed(2)),
           note: `Importado automaticamente do PDV INOVE (${qtdVendas} vendas)`,
-          updatedAt: new Date(),
-        })
-        .where(and(
-          eq(finDailyRevenue.userId, ownerUser.id),
-          eq(finDailyRevenue.revenueDate, revenueDate),
-        ));
-    } else {
-      await db.insert(finDailyRevenue).values({
-        userId: ownerUser.id,
-        revenueDate,
-        realAmount: String(totalVendas.toFixed(2)),
-        note: `Importado automaticamente do PDV INOVE (${qtdVendas} vendas)`,
-      });
+        });
+        createdCount++;
+      }
     }
 
-    const action = alreadyExisted ? "atualizado" : "registrado";
-    const msg = `Faturamento ${action} — ${revenueDate} — R$ ${totalVendas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (${qtdVendas} vendas)`;
+    const msg = `Faturamento sincronizado — ${createdCount} novo(s), ${updatedCount} atualizado(s) nos últimos 7 dias`;
     console.log(`[cron/sync-revenue] ✅ ${msg}`);
 
     await logCronJob("sync-daily-revenue", "success", msg, Date.now() - startedAt);
 
-    await notifyOwner({
-      title: "📊 Faturamento Real INOVE Sincronizado",
-      content: `✅ ${msg}\n• Previsão de Faturamento atualizada automaticamente`,
-    }).catch(() => {});
+    if (createdCount > 0) {
+      await notifyOwner({
+        title: "📊 Faturamento Real INOVE Sincronizado",
+        content: `✅ ${msg}\n• Previsão de Faturamento atualizada automaticamente`,
+      }).catch(() => {});
+    }
 
   } catch (err) {
     if (pool) await pool.close().catch(() => {});
