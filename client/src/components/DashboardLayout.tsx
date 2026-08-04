@@ -141,6 +141,7 @@ const menuGroups: MenuGroup[] = [
       { icon: PiggyBank, label: "Cadastro de Custos", path: "/fin/costs-register" },
       { icon: Activity, label: "Fluxo de Caixa", path: "/fin/cashflow" },
       { icon: Target, label: "Meta de Gerência", path: "/fin/goals" },
+      { icon: Target, label: "Metas de Produtos", path: "/fin/product-goals" },
       { icon: BarChart2, label: "Comparativo Mensal", path: "/fin/monthly-comparison" },
       { icon: Settings, label: "Config. Financeiras", path: "/fin/settings" },
     ],

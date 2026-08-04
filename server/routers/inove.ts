@@ -541,7 +541,7 @@ export const inoveRouter = router({
 
   // ── Top Produtos Mais Vendidos ────────────────────────────────────────────
   getTopProducts: protectedProcedure
-    .input(z.object({ days: z.number().int().min(1).max(365).default(30), limit: z.number().int().min(1).max(50).default(10) }))
+    .input(z.object({ days: z.number().int().min(1).max(365).default(30), limit: z.number().int().min(1).max(200).default(10) }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");

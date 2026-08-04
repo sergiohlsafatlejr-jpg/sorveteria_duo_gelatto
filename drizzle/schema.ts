@@ -854,3 +854,19 @@ export const redeInoveReconciliation = mysqlTable("rede_inove_reconciliation", {
 
 export type RedeInoveReconciliation = typeof redeInoveReconciliation.$inferSelect;
 export type InsertRedeInoveReconciliation = typeof redeInoveReconciliation.$inferInsert;
+
+// ─── Product Goals (Metas de Produtos — Açaí 1,5L, Pote Sorvete, etc) ────────
+export const productGoals = mysqlTable("product_goals", {
+  id: int("id").autoincrement().primaryKey(),
+  productName: varchar("productName", { length: 200 }).notNull(), // Nome do produto (ex: "Açaí 1,5L")
+  searchKeywords: text("searchKeywords").notNull(), // Palavras-chave para buscar no INOVE (ex: "ACAI,AÇAÍ,AÇAI")
+  targetQuantity: int("targetQuantity").notNull().default(0), // Meta de unidades/mês
+  targetRevenue: decimal("targetRevenue", { precision: 12, scale: 2 }).default("0"), // Meta de faturamento/mês (opcional)
+  month: varchar("month", { length: 7 }).notNull(), // "2026-08" (mês de referência)
+  active: boolean("active").notNull().default(true),
+  icon: varchar("icon", { length: 10 }).default("🎯"), // Emoji para exibição
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type ProductGoal = typeof productGoals.$inferSelect;
+export type InsertProductGoal = typeof productGoals.$inferInsert;

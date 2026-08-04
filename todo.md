@@ -12,3 +12,9 @@
 - [x] Dashboard: KPI de meta geral do mês com barra de progresso
 - [x] Dashboard: KPI de vendas de Açaí 1,5L (meta vs realizado)
 - [x] Dashboard: KPI de vendas de Pote de Sorvete (meta vs realizado)
+- [x] Criar tabela product_goals para metas de produtos (Açaí 1,5L, Pote Sorvete)
+- [x] Criar endpoint CRUD para metas de produtos
+- [x] Criar tela de configuração de metas de produtos (/fin/product-goals)
+- [x] Integrar GoalsWidget com metas de produtos configuráveis (não hardcoded)
+- [x] Adicionar link "Metas de Produtos" no menu lateral (seção Financeiro)
+- [x] Corrigir erro checkDailyGoalAlert no cron.ts (era cache antigo, resolvido com restart)

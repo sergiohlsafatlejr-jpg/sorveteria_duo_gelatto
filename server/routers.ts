@@ -29,6 +29,7 @@ import { metaAdsRouter } from "./routers/meta-ads";
 import { adLibraryRouter } from "./routers/ad-library";
 import { inoveRouter } from "./routers/inove";
 import { redeRouter } from "./routers/rede";
+import { productGoalsRouter } from "./routers/productGoals";
 
 // ─── App Router ───────────────────────────────────────────────────────────────
 export const appRouter = router({
@@ -60,6 +61,7 @@ export const appRouter = router({
   adLibrary: adLibraryRouter,
   inove: inoveRouter,
   rede: redeRouter,
+  productGoals: productGoalsRouter,
   cron: router({
     // Listar últimas execuções dos cron jobs
     getLogs: protectedProcedure

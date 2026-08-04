@@ -28,6 +28,7 @@ import FinCosts from "./pages/fin/FinCosts";
 import FinDRE from "./pages/fin/FinDRE";
 import FinOtimizacao from "./pages/fin/FinOtimizacao";
 import FinRevenueForecast from "./pages/fin/FinRevenueForecast";
+import FinProductGoals from "./pages/fin/FinProductGoals";
 import FinGoals from "./pages/fin/FinGoals";
 import FinSettings from "./pages/fin/FinSettings";
 import FinCategories from "./pages/fin/FinCategories";
@@ -104,6 +105,7 @@ function Router() {
       <Route path="/fin/settings">{() => <ProtectedRoute path="/fin/settings"><FinSettings /></ProtectedRoute>}</Route>
       {/* Finance — gerente+ */}
       <Route path="/fin/forecast">{() => <ProtectedRoute path="/fin/forecast"><FinRevenueForecast /></ProtectedRoute>}</Route>
+      <Route path="/fin/product-goals">{() => <ProtectedRoute path="/fin/product-goals"><FinProductGoals /></ProtectedRoute>}</Route>
       <Route path="/fin/goals">{() => <ProtectedRoute path="/fin/goals"><FinGoals /></ProtectedRoute>}</Route>
       <Route path="/fin/monthly-comparison">{() => <ProtectedRoute path="/fin/monthly-comparison"><FinMonthlyComparison /></ProtectedRoute>}</Route>
       <Route path="/fin/bank-reconciliation">{() => <ProtectedRoute path="/fin/bank-reconciliation"><FinBankReconciliation /></ProtectedRoute>}</Route>

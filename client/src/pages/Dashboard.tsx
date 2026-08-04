@@ -156,14 +156,23 @@ const DEFAULT_COLORS = ["#10b981", "#8b5cf6", "#3b82f6", "#f59e0b", "#ef4444", "
 
 // ── Widget de Metas do Mês ───────────────────────────────────────────────────────────────
 function GoalsWidget({ vendasMes }: { vendasMes: number }) {
+  const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
+
+  // Buscar metas de faturamento geral (finGoals)
   const { data: goalsList } = trpc.fin.goals.list.useQuery(
-    { month: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7) },
+    { month: currentMonth },
     { staleTime: 5 * 60 * 1000 }
   );
 
-  // Buscar todos os produtos do mês (sem limite de top N) para açaí e pote
+  // Buscar metas de produtos configuráveis (productGoals)
+  const { data: productGoalsList = [] } = trpc.productGoals.list.useQuery(
+    { month: currentMonth },
+    { staleTime: 5 * 60 * 1000 }
+  );
+
+  // Buscar todos os produtos do mês para matching com metas
   const { data: allProductsMonth = [] } = trpc.inove.getTopProducts.useQuery(
-    { days: new Date().getDate(), limit: 50 }, // do dia 1 até hoje
+    { days: new Date().getDate(), limit: 200 }, // do dia 1 até hoje — cobre todos os produtos
     { staleTime: 5 * 60 * 1000 }
   );
 
@@ -173,28 +182,18 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
     : 0;
   const percentGeral = metaGeral > 0 ? Math.min((vendasMes / metaGeral) * 100, 150) : 0;
 
-  // Filtrar produtos específicos (açaí 1,5L e pote sorvete) de TODOS os produtos do mês
-  const acaiProducts = allProductsMonth.filter(p => {
-    const nome = p.nome.toUpperCase();
-    return nome.includes('ACAI') || nome.includes('AÇAI') || nome.includes('AÇAÍ');
+  // Calcular realizado para cada meta de produto usando keywords matching
+  const productGoalsWithProgress = productGoalsList.map(goal => {
+    const keywords = goal.searchKeywords.split(',').map((k: string) => k.trim().toUpperCase());
+    const matchingProducts = allProductsMonth.filter(p => {
+      const nome = p.nome.toUpperCase();
+      return keywords.some(kw => nome.includes(kw));
+    });
+    const totalQty = matchingProducts.reduce((sum, p) => sum + p.qtd, 0);
+    const totalRevenue = matchingProducts.reduce((sum, p) => sum + p.total, 0);
+    const percent = goal.targetQuantity > 0 ? Math.min((totalQty / goal.targetQuantity) * 100, 150) : 0;
+    return { ...goal, totalQty, totalRevenue, percent };
   });
-  const poteProducts = allProductsMonth.filter(p => {
-    const nome = p.nome.toUpperCase();
-    return nome.includes('POTE') || (nome.includes('SORVETE') && (nome.includes('1,5') || nome.includes('1.5') || nome.includes('2L') || nome.includes('LITRO')));
-  });
-
-  const totalAcai = acaiProducts.reduce((sum, p) => sum + p.qtd, 0);
-  const totalPotes = poteProducts.reduce((sum, p) => sum + p.qtd, 0);
-  const revenueAcai = acaiProducts.reduce((sum, p) => sum + p.total, 0);
-  const revenuePotes = poteProducts.reduce((sum, p) => sum + p.total, 0);
-
-  // Metas de produto (configuráveis via finGoals - busca por label)
-  const metaAcaiGoal = goalsList?.find(g => g.label.toUpperCase().includes('ACAI') || g.label.toUpperCase().includes('AÇAÍ'));
-  const metaPoteGoal = goalsList?.find(g => g.label.toUpperCase().includes('POTE') || g.label.toUpperCase().includes('SORVETE'));
-  const metaAcai = metaAcaiGoal ? Number(metaAcaiGoal.targetRevenue) : 100;
-  const metaPotes = metaPoteGoal ? Number(metaPoteGoal.targetRevenue) : 80;
-  const percentAcai = metaAcai > 0 ? Math.min((totalAcai / metaAcai) * 100, 150) : 0;
-  const percentPotes = metaPotes > 0 ? Math.min((totalPotes / metaPotes) * 100, 150) : 0;
 
   return (
     <Card className="border-0 shadow-sm">
@@ -208,8 +207,8 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Meta Geral */}
+        <div className={`grid grid-cols-1 ${productGoalsWithProgress.length > 0 ? `md:grid-cols-${Math.min(productGoalsWithProgress.length + 1, 4)}` : 'md:grid-cols-2'} gap-4`}>
+          {/* Meta Geral de Faturamento */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium flex items-center gap-1.5">
@@ -221,7 +220,7 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
             <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all"
-                style={{ width: `${percentGeral}%` }}
+                style={{ width: `${Math.min(percentGeral, 100)}%` }}
               />
             </div>
             <div className="flex justify-between text-xs text-muted-foreground">
@@ -230,47 +229,46 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
             </div>
           </div>
 
-          {/* Meta Açaí 1,5L */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium flex items-center gap-1.5">
-                <IceCream className="h-3.5 w-3.5 text-purple-500" />
-                Açaí 1,5L
-              </span>
-              <span className="text-xs font-bold text-purple-600">{percentAcai.toFixed(0)}%</span>
-            </div>
-            <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-purple-400 to-purple-600 transition-all"
-                style={{ width: `${percentAcai}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>{totalAcai} un ({formatCurrency(revenueAcai)})</span>
-              <span>Meta: {metaAcai} un</span>
-            </div>
-          </div>
+          {/* Metas de Produtos (dinâmicas da tabela productGoals) */}
+          {productGoalsWithProgress.map((goal, idx) => {
+            const colors = [
+              { bar: 'from-purple-400 to-purple-600', text: 'text-purple-600' },
+              { bar: 'from-blue-400 to-blue-600', text: 'text-blue-600' },
+              { bar: 'from-orange-400 to-orange-600', text: 'text-orange-600' },
+              { bar: 'from-pink-400 to-pink-600', text: 'text-pink-600' },
+              { bar: 'from-cyan-400 to-cyan-600', text: 'text-cyan-600' },
+            ];
+            const color = colors[idx % colors.length];
+            return (
+              <div key={goal.id} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    <span className="text-sm">{goal.icon || '🎯'}</span>
+                    {goal.productName}
+                  </span>
+                  <span className={`text-xs font-bold ${color.text}`}>{goal.percent.toFixed(0)}%</span>
+                </div>
+                <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full bg-gradient-to-r ${color.bar} transition-all`}
+                    style={{ width: `${Math.min(goal.percent, 100)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{goal.totalQty} un ({formatCurrency(goal.totalRevenue)})</span>
+                  <span>Meta: {goal.targetQuantity} un</span>
+                </div>
+              </div>
+            );
+          })}
 
-          {/* Meta Pote Sorvete */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium flex items-center gap-1.5">
-                <Package className="h-3.5 w-3.5 text-blue-500" />
-                Pote Sorvete
-              </span>
-              <span className="text-xs font-bold text-blue-600">{percentPotes.toFixed(0)}%</span>
+          {/* Mensagem se não há metas de produto configuradas */}
+          {productGoalsWithProgress.length === 0 && (
+            <div className="space-y-2 flex flex-col items-center justify-center text-center">
+              <span className="text-xs text-muted-foreground">Nenhuma meta de produto configurada</span>
+              <Link href="/fin/product-goals" className="text-xs text-blue-500 hover:underline">Configurar metas</Link>
             </div>
-            <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-blue-400 to-blue-600 transition-all"
-                style={{ width: `${percentPotes}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>{totalPotes} un ({formatCurrency(revenuePotes)})</span>
-              <span>Meta: {metaPotes} un</span>
-            </div>
-          </div>
+          )}
         </div>
       </CardContent>
     </Card>
