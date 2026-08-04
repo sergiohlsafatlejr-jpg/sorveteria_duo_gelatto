@@ -300,15 +300,10 @@ export default function FinProductGoals() {
                 {/* Seleção de produtos com checkboxes */}
                 <ProductSelector />
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Meta (unidades/mês)</Label>
-                    <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} placeholder="100" />
-                  </div>
-                  <div>
-                    <Label>Meta faturamento (R$, opcional)</Label>
-                    <Input type="number" value={formTargetRevenue} onChange={(e) => setFormTargetRevenue(e.target.value)} placeholder="5000" />
-                  </div>
+                <div>
+                  <Label>Meta (unidades/mês)</Label>
+                  <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} placeholder="100" />
+                  <p className="text-xs text-muted-foreground mt-1">A meta de faturamento geral é a mesma configurada no Forecast.</p>
                 </div>
                 <Button onClick={handleCreate} disabled={createMut.isPending} className="w-full">
                   {createMut.isPending ? "Criando..." : "Criar Meta"}
@@ -416,15 +411,10 @@ export default function FinProductGoals() {
                               {/* Seleção de produtos com checkboxes */}
                               <ProductSelector />
 
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <Label>Meta (unidades/mês)</Label>
-                                  <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} />
-                                </div>
-                                <div>
-                                  <Label>Meta faturamento (R$, opcional)</Label>
-                                  <Input type="number" value={formTargetRevenue} onChange={(e) => setFormTargetRevenue(e.target.value)} />
-                                </div>
+                              <div>
+                                <Label>Meta (unidades/mês)</Label>
+                                <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} />
+                                <p className="text-xs text-muted-foreground mt-1">A meta de faturamento geral é a mesma configurada no Forecast.</p>
                               </div>
                               <Button onClick={() => handleUpdate(goal.id)} disabled={updateMut.isPending} className="w-full">
                                 {updateMut.isPending ? "Salvando..." : "Salvar Alterações"}

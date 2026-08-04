@@ -19,3 +19,4 @@
 - [x] Adicionar link "Metas de Produtos" no menu lateral (seção Financeiro)
 - [x] Corrigir erro checkDailyGoalAlert no cron.ts (era cache antigo, resolvido com restart)
 - [x] Adicionar checkboxes na tela de Metas de Produtos para selecionar produtos do INOVE (ao invés de digitar keywords manualmente)
+- [x] Meta de faturamento no Dashboard deve usar a mesma meta do Forecast (finGoals) automaticamente

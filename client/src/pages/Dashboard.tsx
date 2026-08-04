@@ -176,7 +176,8 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
     { staleTime: 5 * 60 * 1000 }
   );
 
-  // Meta geral do mês (soma de todas as metas cadastradas para o mês)
+  // Meta geral do mês = meta do Forecast (finGoals)
+  // Usa a soma de todas as metas/cenários cadastrados no Forecast para o mês
   const metaGeral = goalsList && goalsList.length > 0
     ? goalsList.reduce((sum, g) => sum + Number(g.targetRevenue || 0), 0)
     : 0;
@@ -210,7 +211,7 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
       </CardHeader>
       <CardContent>
         <div className={`grid grid-cols-1 ${productGoalsWithProgress.length > 0 ? `md:grid-cols-${Math.min(productGoalsWithProgress.length + 1, 4)}` : 'md:grid-cols-2'} gap-4`}>
-          {/* Meta Geral de Faturamento */}
+          {/* Meta Geral de Faturamento (vem do Forecast) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium flex items-center gap-1.5">
@@ -229,6 +230,9 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
               <span>{formatCurrency(vendasMes)}</span>
               <span>Meta: {formatCurrency(metaGeral)}</span>
             </div>
+            {metaGeral > 0 && (
+              <p className="text-[10px] text-muted-foreground/70 italic">Meta do Forecast</p>
+            )}
           </div>
 
           {/* Metas de Produtos (dinâmicas da tabela productGoals) */}
