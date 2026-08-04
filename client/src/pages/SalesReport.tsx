@@ -405,14 +405,14 @@ export default function SalesReport() {
   // Fonte primária: INOVE SQL Server
   const { data: inoveData, isLoading: loadingInove, error: inoveError } = trpc.inove.getSalesByProduct.useQuery(
     { month: activeMonth },
-    { retry: 1, retryDelay: 500 }
+    { retry: 1, retryDelay: 500, refetchInterval: 5 * 60 * 1000 }
   );
 
   // Fallback: importações locais confirmadas
   const { data: confirmedMonths } = trpc.salesImport.getConfirmedMonths.useQuery();
   const { data: localReport, isLoading: loadingLocal } = trpc.salesImport.getSalesReport.useQuery(
     { referenceMonth: activeMonth, compareMonth },
-    { enabled: !!inoveError && (confirmedMonths?.includes(activeMonth) ?? false) }
+    { enabled: !!inoveError && (confirmedMonths?.includes(activeMonth) ?? false), refetchInterval: 5 * 60 * 1000 }
   );
 
   const isLoading = loadingInove || (!!inoveError && loadingLocal);
@@ -495,8 +495,12 @@ export default function SalesReport() {
         </p>
       </div>
 
-      <Tabs defaultValue="mensal">
+      <Tabs defaultValue="geral">
         <TabsList className="mb-2">
+          <TabsTrigger value="geral" className="gap-2">
+            <BarChart2 className="h-4 w-4" />
+            Visão Geral
+          </TabsTrigger>
           <TabsTrigger value="mensal" className="gap-2">
             <BarChart2 className="h-4 w-4" />
             Mensal (Top 10)
@@ -510,6 +514,77 @@ export default function SalesReport() {
             Por Tipo de Pagamento
           </TabsTrigger>
         </TabsList>
+
+        {/* ─── Aba: Visão Geral (todas as informações em uma única tela) ─── */}
+        <TabsContent value="geral" className="space-y-6 mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Coluna 1: Top 10 Mensal resumido */}
+            <Card className="p-4">
+              <CardHeader className="p-0 pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart2 className="h-4 w-4 text-purple-600" />
+                  Top 10 Produtos - {activeMonth}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {loadingInove ? (
+                  <div className="p-4 text-center text-muted-foreground text-sm">Carregando...</div>
+                ) : inoveData && inoveData.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-2 font-medium">#</th>
+                          <th className="text-left p-2 font-medium">Produto</th>
+                          <th className="text-right p-2 font-medium">Qtd</th>
+                          <th className="text-right p-2 font-medium">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inoveData.slice(0, 10).map((item: any, idx: number) => (
+                          <tr key={idx} className="border-b hover:bg-muted/50">
+                            <td className="p-2 font-bold text-purple-600">{idx + 1}</td>
+                            <td className="p-2 truncate max-w-[200px]">{item.produto || item.name}</td>
+                            <td className="p-2 text-right">{item.qtd || item.quantity}</td>
+                            <td className="p-2 text-right font-mono">{fmtBRL(item.total || item.revenue)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground p-4">Sem dados disponíveis</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Coluna 2: Tipo de Pagamento resumido */}
+            <Card className="p-4">
+              <CardHeader className="p-0 pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-green-600" />
+                  Formas de Pagamento
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <PagamentoResumo />
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Vendas da Semana resumido */}
+          <Card className="p-4">
+            <CardHeader className="p-0 pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-blue-600" />
+                Vendas da Semana
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <VendasSemanaTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* ─── Aba: Mensal ─── */}
         <TabsContent value="mensal" className="space-y-6 mt-4">
@@ -786,9 +861,10 @@ function PagamentoTab() {
   const [queryTo, setQueryTo] = useState(defaultDates.to);
   const [filtroTipo, setFiltroTipo] = useState<string | null>(null);
 
-  const { data, isLoading, error } = trpc.inove.getSalesByPeriodInove.useQuery(
-    { from: queryFrom, to: queryTo },
-    { enabled: !!queryFrom && !!queryTo, retry: 1 }
+  // Buscar dados REAIS de tipo de pagamento do INOVE
+  const { data: paymentData, isLoading, error } = trpc.inove.getSalesByPaymentType.useQuery(
+    { dateFrom: queryFrom, dateTo: queryTo, days: 30 },
+    { enabled: !!queryFrom && !!queryTo, retry: 1, refetchInterval: 5 * 60 * 1000 }
   );
 
   function handleBuscar() {
@@ -796,27 +872,39 @@ function PagamentoTab() {
     setQueryTo(to);
   }
 
-  // Agrupar vendas por tipo de pagamento (simulado a partir dos dados de período)
+  // Mapear dados reais do backend para o formato esperado
   const pagamentoData = useMemo(() => {
-    if (!data?.itens) return [];
+    if (!paymentData || paymentData.length === 0) return [];
     
-    // Simulação: distribuir vendas entre PIX, Dinheiro e Cartão
-    // Na prática, isso viria do backend
-    const total = data.resumo.totalRevenue;
-    const tipos = [
-      { tipo: 'PIX', percentual: 0.35, icone: '📱' },
-      { tipo: 'Dinheiro', percentual: 0.25, icone: '💵' },
-      { tipo: 'Cartão', percentual: 0.40, icone: '💳' },
-    ];
+    const totalGeral = paymentData.reduce((s, p) => s + p.total, 0);
+    
+    // Mapear icones por tipo
+    function getIcone(forma: string) {
+      const lower = forma.toLowerCase();
+      if (lower.includes('pix')) return '📱';
+      if (lower.includes('dinheiro') || lower.includes('especie')) return '💵';
+      if (lower.includes('credito') || lower.includes('crédito')) return '💳';
+      if (lower.includes('debito') || lower.includes('débito')) return '🏧';
+      if (lower.includes('voucher') || lower.includes('vale')) return '🎫';
+      return '💰';
+    }
 
-    return tipos.map(t => ({
-      tipo: t.tipo,
-      icone: t.icone,
-      valor: Math.round(total * t.percentual * 100) / 100,
-      percentual: Math.round(t.percentual * 10000) / 100,
-      qtdVendas: Math.round(data.resumo.totalVendas * t.percentual),
+    return paymentData.map(p => ({
+      tipo: p.forma,
+      icone: getIcone(p.forma),
+      valor: p.total,
+      percentual: totalGeral > 0 ? Math.round((p.total / totalGeral) * 10000) / 100 : 0,
+      qtdVendas: p.qtd_vendas,
+      ticketMedio: p.ticket_medio,
     }));
-  }, [data]);
+  }, [paymentData]);
+
+  const data = paymentData && paymentData.length > 0 ? {
+    resumo: {
+      totalRevenue: paymentData.reduce((s, p) => s + p.total, 0),
+      totalVendas: paymentData.reduce((s, p) => s + p.qtd_vendas, 0),
+    }
+  } : null;
 
   const tiposDisponiveis = pagamentoData.map(p => p.tipo);
 
@@ -876,7 +964,7 @@ function PagamentoTab() {
           <p className="text-muted-foreground font-medium">Erro ao buscar dados</p>
           <p className="text-xs text-muted-foreground mt-1">{error.message}</p>
         </Card>
-      ) : !data || pagamentoData.length === 0 ? (
+      ) : !paymentData || pagamentoData.length === 0 ? (
         <Card className="p-10 text-center">
           <Package className="h-14 w-14 mx-auto mb-3 text-muted-foreground/30" />
           <p className="text-muted-foreground">Nenhuma venda encontrada para o período.</p>
@@ -898,15 +986,15 @@ function PagamentoTab() {
                 <DollarSign className="h-3 w-3" />
                 Total
               </p>
-              <p className="text-xl font-bold">{fmtBRL(data.resumo.totalRevenue)}</p>
-              <p className="text-xs text-muted-foreground">{data.resumo.totalVendas} vendas</p>
+              <p className="text-xl font-bold">{fmtBRL(data?.resumo.totalRevenue ?? 0)}</p>
+              <p className="text-xs text-muted-foreground">{data?.resumo.totalVendas ?? 0} vendas</p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <ShoppingCart className="h-3 w-3" />
                 Ticket Médio
               </p>
-              <p className="text-xl font-bold">{fmtBRL(data.resumo.totalRevenue / data.resumo.totalVendas)}</p>
+              <p className="text-xl font-bold">{fmtBRL((data?.resumo.totalRevenue ?? 0) / (data?.resumo.totalVendas || 1))}</p>
               <p className="text-xs text-muted-foreground">por venda</p>
             </Card>
             <Card className="p-4">
@@ -1021,3 +1109,58 @@ function PagamentoTab() {
   );
 }
 
+
+// Componente resumido de pagamento para a aba Visão Geral
+function PagamentoResumo() {
+  const defaultDates = useMemo(() => {
+    const today = new Date();
+    const d30 = new Date(today); d30.setDate(today.getDate() - 29);
+    const toDateStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { from: toDateStr(d30), to: toDateStr(today) };
+  }, []);
+
+  const { data: paymentData, isLoading } = trpc.inove.getSalesByPaymentType.useQuery(
+    { dateFrom: defaultDates.from, dateTo: defaultDates.to, days: 30 },
+    { retry: 1, refetchInterval: 5 * 60 * 1000 }
+  );
+
+  if (isLoading) return <div className="p-4 text-center text-muted-foreground text-sm">Carregando...</div>;
+  if (!paymentData || paymentData.length === 0) return <p className="text-sm text-muted-foreground p-4">Sem dados disponíveis</p>;
+
+  const totalGeral = paymentData.reduce((s, p) => s + p.total, 0);
+
+  function getIcone(forma: string) {
+    const lower = forma.toLowerCase();
+    if (lower.includes('pix')) return '📱';
+    if (lower.includes('dinheiro') || lower.includes('especie')) return '💵';
+    if (lower.includes('credito') || lower.includes('crédito')) return '💳';
+    if (lower.includes('debito') || lower.includes('débito')) return '🏧';
+    if (lower.includes('voucher') || lower.includes('vale')) return '🎫';
+    return '💰';
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="bg-muted/50">
+          <tr>
+            <th className="text-left p-2 font-medium">Forma</th>
+            <th className="text-right p-2 font-medium">Total</th>
+            <th className="text-right p-2 font-medium">Vendas</th>
+            <th className="text-right p-2 font-medium">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {paymentData.map((p, idx) => (
+            <tr key={idx} className="border-b hover:bg-muted/50">
+              <td className="p-2">{getIcone(p.forma)} {p.forma}</td>
+              <td className="p-2 text-right font-mono">{fmtBRL(p.total)}</td>
+              <td className="p-2 text-right">{p.qtd_vendas}</td>
+              <td className="p-2 text-right">{totalGeral > 0 ? Math.round((p.total / totalGeral) * 100) : 0}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

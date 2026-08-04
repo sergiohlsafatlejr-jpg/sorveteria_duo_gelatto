@@ -402,6 +402,7 @@ export type InsertFinRevenueForecast = typeof finRevenueForecasts.$inferInsert;
 export const finDailyRevenue = mysqlTable("fin_daily_revenue", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
+  establishmentId: varchar("establishmentId", { length: 50 }).notNull().default("default"),
   revenueDate: varchar("revenueDate", { length: 10 }).notNull(), // YYYY-MM-DD
   realAmount: decimal("realAmount", { precision: 12, scale: 2 }).notNull(),
   note: varchar("note", { length: 255 }),

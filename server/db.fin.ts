@@ -454,13 +454,14 @@ export async function saveDailyRevenue(
 ): Promise<void> {
   const db = await getDb();
   if (!db) return;
+  // Compartilhado entre todos os usuários - filtra apenas por data
   const existing = await db.select().from(finDailyRevenue)
-    .where(and(eq(finDailyRevenue.userId, userId), eq(finDailyRevenue.revenueDate, revenueDate)))
+    .where(eq(finDailyRevenue.revenueDate, revenueDate))
     .limit(1);
   if (existing.length > 0) {
     await db.update(finDailyRevenue)
       .set({ realAmount: String(realAmount), note, updatedAt: new Date() })
-      .where(and(eq(finDailyRevenue.userId, userId), eq(finDailyRevenue.revenueDate, revenueDate)));
+      .where(eq(finDailyRevenue.revenueDate, revenueDate));
   } else {
     await db.insert(finDailyRevenue).values({ userId, revenueDate, realAmount: String(realAmount), note });
   }
@@ -473,10 +474,9 @@ export async function getDailyRevenues(userId: number, year: number, month: numb
   const daysInMonth = new Date(year, month, 0).getDate();
   const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
 
-  // 1. Obter os faturamentos reais gravados na tabela finDailyRevenue
+  // 1. Obter os faturamentos reais gravados na tabela finDailyRevenue (compartilhado entre todos)
   const realRows = await db.select().from(finDailyRevenue)
     .where(and(
-      eq(finDailyRevenue.userId, userId),
       gte(finDailyRevenue.revenueDate, dateFrom),
       lte(finDailyRevenue.revenueDate, dateTo),
     ))
@@ -524,8 +524,9 @@ export async function getDailyRevenues(userId: number, year: number, month: numb
 export async function deleteRealRevenue(userId: number, revenueDate: string): Promise<{ deleted: number }> {
   const db = await getDb();
   if (!db) return { deleted: 0 };
+  // Compartilhado - filtra apenas por data
   const result = await db.delete(finDailyRevenue)
-    .where(and(eq(finDailyRevenue.userId, userId), eq(finDailyRevenue.revenueDate, revenueDate)));
+    .where(eq(finDailyRevenue.revenueDate, revenueDate));
   return { deleted: (result as unknown as { rowsAffected?: number }).rowsAffected ?? 1 };
 }
 
@@ -536,16 +537,15 @@ export async function clearMonthRealRevenues(userId: number, year: number, month
   const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
   const daysInMonth = new Date(year, month, 0).getDate();
   const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+  // Compartilhado - filtra apenas por período
   const rows = await db.select({ id: finDailyRevenue.id }).from(finDailyRevenue)
     .where(and(
-      eq(finDailyRevenue.userId, userId),
       gte(finDailyRevenue.revenueDate, dateFrom),
       lte(finDailyRevenue.revenueDate, dateTo),
     ));
   if (rows.length === 0) return { deleted: 0 };
   await db.delete(finDailyRevenue)
     .where(and(
-      eq(finDailyRevenue.userId, userId),
       gte(finDailyRevenue.revenueDate, dateFrom),
       lte(finDailyRevenue.revenueDate, dateTo),
     ));
@@ -712,7 +712,8 @@ export async function getRainAlert(
 export async function getForecastSettings(userId: number): Promise<ForecastSettings | null> {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(forecastSettings).where(eq(forecastSettings.userId, userId)).limit(1);
+  // Compartilhado - busca a primeira configuração existente (global)
+  const rows = await db.select().from(forecastSettings).limit(1);
   return rows[0] ?? null;
 }
 
@@ -722,7 +723,8 @@ export async function saveForecastSettings(
 ): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  const existing = await db.select({ id: forecastSettings.id }).from(forecastSettings).where(eq(forecastSettings.userId, userId)).limit(1);
+  // Compartilhado - busca qualquer configuração existente (global)
+  const existing = await db.select({ id: forecastSettings.id }).from(forecastSettings).limit(1);
   if (existing.length > 0) {
     await db.update(forecastSettings)
       .set({
@@ -731,7 +733,7 @@ export async function saveForecastSettings(
         avgSundayHoliday: settings.avgSundayHoliday,
         rainFactor: String(settings.rainFactor),
       })
-      .where(eq(forecastSettings.userId, userId));
+      .where(eq(forecastSettings.id, existing[0].id));
   } else {
     await db.insert(forecastSettings).values({
       userId,
