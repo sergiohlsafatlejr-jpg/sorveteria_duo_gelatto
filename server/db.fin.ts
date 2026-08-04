@@ -483,21 +483,21 @@ export async function getDailyRevenues(userId: number, year: number, month: numb
     .orderBy(finDailyRevenue.revenueDate);
 
   // 2. Para dias vazios ou hoje, obter o somatório da tabela local de vendas (sales)
-  const salesRows = await db.select({
-    day: sql<string>`DATE_FORMAT(${sales.createdAt}, '%Y-%m-%d')`,
-    total: sql<number>`SUM(${sales.finalTotal})`,
-  })
-  .from(sales)
-  .where(
-    and(
-      eq(sales.status, "completed"),
-      gte(sales.createdAt, new Date(dateFrom + "T00:00:00")),
-      lte(sales.createdAt, new Date(dateTo + "T23:59:59"))
-    )
-  )
-  .groupBy(sql`DATE_FORMAT(${sales.createdAt}, '%Y-%m-%d')`);
-
-  const salesMap = new Map(salesRows.map(r => [r.day, r.total]));
+  let salesMap = new Map<string, number>();
+  try {
+    const rawSales = await db.execute(sql`
+      SELECT DATE_FORMAT(createdAt, '%Y-%m-%d') as day_date, SUM(finalTotal) as day_total
+      FROM sales
+      WHERE status = 'completed'
+        AND createdAt >= ${dateFrom + " 00:00:00"}
+        AND createdAt <= ${dateTo + " 23:59:59"}
+      GROUP BY day_date
+    `);
+    const rows = (rawSales as any)[0] as Array<{ day_date: string; day_total: number }>;
+    if (rows && rows.length > 0) {
+      salesMap = new Map(rows.map((r: any) => [r.day_date, Number(r.day_total)]));
+    }
+  } catch { /* tabela sales pode não existir ou estar vazia */ }
 
   // Combinar os resultados
   const resultList = [...realRows];
