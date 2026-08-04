@@ -16,6 +16,8 @@ import {
   customers,
   customerPurchases,
   customerLoyaltyTokens,
+  forecastSettings,
+  finGoals,
 } from "../drizzle/schema";
 import { eq, and, sql } from "drizzle-orm";
 import * as mssqlLib from "mssql";
@@ -568,6 +570,71 @@ async function syncSalesCache(): Promise<void> {
 }
 
 /**
+ * Verifica se a meta diária foi atingida e envia alerta se não.
+ * Roda às 22:00 (Brasília).
+ */
+async function checkDailyGoalAlert(): Promise<void> {
+  const startedAt = Date.now();
+  console.log("[cron/goal-alert] Verificando meta diária...");
+
+  const db = await getDb();
+  if (!db) {
+    await logCronJob("check-daily-goal-alert", "error", "DB indisponível", Date.now() - startedAt);
+    return;
+  }
+
+  try {
+    // Buscar faturamento real de hoje
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    const todayRows = await db.select()
+      .from(finDailyRevenue)
+      .where(eq(finDailyRevenue.revenueDate, today))
+      .limit(1);
+
+    const realToday = todayRows.length > 0 ? Number(todayRows[0].realAmount) : 0;
+
+    // Buscar meta mensal do mês atual (finGoals)
+    const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
+    const goalRows = await db.select().from(finGoals)
+      .where(eq(finGoals.month, currentMonth))
+      .limit(1);
+    if (goalRows.length === 0) {
+      await logCronJob("check-daily-goal-alert", "skipped", "Meta mensal não definida para " + currentMonth, Date.now() - startedAt);
+      return;
+    }
+
+    // Calcular meta diária baseada na meta mensal
+    const monthlyGoal = Number(goalRows[0].targetRevenue || 0);
+    if (monthlyGoal <= 0) {
+      await logCronJob("check-daily-goal-alert", "skipped", "Meta mensal zerada", Date.now() - startedAt);
+      return;
+    }
+
+    const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+    const dailyGoal = monthlyGoal / daysInMonth;
+    const percentage = realToday > 0 ? (realToday / dailyGoal) * 100 : 0;
+
+    if (percentage < 80) {
+      await notifyOwner({
+        title: "⚠️ Meta Diária Não Atingida",
+        content: `Faturamento de hoje (${today}): R$ ${realToday.toFixed(2)}\nMeta diária: R$ ${dailyGoal.toFixed(2)}\nAtingido: ${percentage.toFixed(0)}%\n\n⚠️ Abaixo de 80% da meta!`,
+      }).catch(() => {});
+      const msg = `Alerta enviado: ${percentage.toFixed(0)}% da meta (R$ ${realToday.toFixed(2)} / R$ ${dailyGoal.toFixed(2)})`;
+      console.log(`[cron/goal-alert] ${msg}`);
+      await logCronJob("check-daily-goal-alert", "success", msg, Date.now() - startedAt);
+    } else {
+      const msg = `Meta OK: ${percentage.toFixed(0)}% (R$ ${realToday.toFixed(2)} / R$ ${dailyGoal.toFixed(2)})`;
+      console.log(`[cron/goal-alert] ✅ ${msg}`);
+      await logCronJob("check-daily-goal-alert", "success", msg, Date.now() - startedAt);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[cron/goal-alert] Erro:", message);
+    await logCronJob("check-daily-goal-alert", "error", message, Date.now() - startedAt);
+  }
+}
+
+/**
  * Registra todos os cron jobs.
  * Chamado uma vez durante a inicialização do servidor.
  */
@@ -590,10 +657,23 @@ export function registerCronJobs(): void {
     name: "sync-sales-cache",
   });
 
+  // Segunda importação diária às 20:00 para pegar o dia completo
+  cron.schedule("0 20 * * *", syncDailyRevenue, {
+    timezone: "America/Sao_Paulo",
+    name: "sync-daily-revenue-noite",
+  });
+
+  // Alerta de meta não atingida às 22:00
+  cron.schedule("0 22 * * *", checkDailyGoalAlert, {
+    timezone: "America/Sao_Paulo",
+    name: "check-daily-goal-alert",
+  });
+
   console.log("[cron] Cron jobs registrados:");
   console.log("[cron]   → sync-sales-background: a cada 5 minutos (Brasília)");
-  console.log("[cron]   → sync-daily-revenue: todos os dias às 08:00 (Brasília)");
+  console.log("[cron]   → sync-daily-revenue: todos os dias às 08:00 e 20:00 (Brasília)");
   console.log("[cron]   → sync-sales-cache: todos os dias às 08:05 (Brasília)");
+  console.log("[cron]   → check-daily-goal-alert: todos os dias às 22:00 (Brasília)");
 }
 
 // Exportar para uso no endpoint manual (disparar agora)

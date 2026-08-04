@@ -6,3 +6,9 @@
 - [x] Dashboard: adicionar KPIs relevantes (top produtos vendidos do dia, formas de pagamento, ticket médio)
 - [x] Dashboard: substituir cards sem uso por informações mais relevantes (gráfico pizza pagamentos, top produtos hoje)
 - [x] BUG: Forecast - valores importados do INOVE não aparecem no calendário (corrigido: erro SQL only_full_group_by)
+- [x] Cron: importação automática INOVE às 20:00 (segundo horário)
+- [x] Cron: alerta de meta não atingida às 22:00 via notifyOwner
+- [x] Forecast: barra de progresso meta vs real em cada dia do calendário
+- [x] Dashboard: KPI de meta geral do mês com barra de progresso
+- [x] Dashboard: KPI de vendas de Açaí 1,5L (meta vs realizado)
+- [x] Dashboard: KPI de vendas de Pote de Sorvete (meta vs realizado)

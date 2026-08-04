@@ -154,6 +154,129 @@ const PAYMENT_COLORS: Record<string, string> = {
 };
 const DEFAULT_COLORS = ["#10b981", "#8b5cf6", "#3b82f6", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899"];
 
+// ── Widget de Metas do Mês ───────────────────────────────────────────────────────────────
+function GoalsWidget({ vendasMes }: { vendasMes: number }) {
+  const { data: goalsList } = trpc.fin.goals.list.useQuery(
+    { month: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7) },
+    { staleTime: 5 * 60 * 1000 }
+  );
+
+  // Buscar todos os produtos do mês (sem limite de top N) para açaí e pote
+  const { data: allProductsMonth = [] } = trpc.inove.getTopProducts.useQuery(
+    { days: new Date().getDate(), limit: 50 }, // do dia 1 até hoje
+    { staleTime: 5 * 60 * 1000 }
+  );
+
+  // Meta geral do mês (soma de todas as metas cadastradas para o mês)
+  const metaGeral = goalsList && goalsList.length > 0
+    ? goalsList.reduce((sum, g) => sum + Number(g.targetRevenue || 0), 0)
+    : 0;
+  const percentGeral = metaGeral > 0 ? Math.min((vendasMes / metaGeral) * 100, 150) : 0;
+
+  // Filtrar produtos específicos (açaí 1,5L e pote sorvete) de TODOS os produtos do mês
+  const acaiProducts = allProductsMonth.filter(p => {
+    const nome = p.nome.toUpperCase();
+    return nome.includes('ACAI') || nome.includes('AÇAI') || nome.includes('AÇAÍ');
+  });
+  const poteProducts = allProductsMonth.filter(p => {
+    const nome = p.nome.toUpperCase();
+    return nome.includes('POTE') || (nome.includes('SORVETE') && (nome.includes('1,5') || nome.includes('1.5') || nome.includes('2L') || nome.includes('LITRO')));
+  });
+
+  const totalAcai = acaiProducts.reduce((sum, p) => sum + p.qtd, 0);
+  const totalPotes = poteProducts.reduce((sum, p) => sum + p.qtd, 0);
+  const revenueAcai = acaiProducts.reduce((sum, p) => sum + p.total, 0);
+  const revenuePotes = poteProducts.reduce((sum, p) => sum + p.total, 0);
+
+  // Metas de produto (configuráveis via finGoals - busca por label)
+  const metaAcaiGoal = goalsList?.find(g => g.label.toUpperCase().includes('ACAI') || g.label.toUpperCase().includes('AÇAÍ'));
+  const metaPoteGoal = goalsList?.find(g => g.label.toUpperCase().includes('POTE') || g.label.toUpperCase().includes('SORVETE'));
+  const metaAcai = metaAcaiGoal ? Number(metaAcaiGoal.targetRevenue) : 100;
+  const metaPotes = metaPoteGoal ? Number(metaPoteGoal.targetRevenue) : 80;
+  const percentAcai = metaAcai > 0 ? Math.min((totalAcai / metaAcai) * 100, 150) : 0;
+  const percentPotes = metaPotes > 0 ? Math.min((totalPotes / metaPotes) * 100, 150) : 0;
+
+  return (
+    <Card className="border-0 shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-semibold flex items-center gap-2">
+          <Target className="h-4 w-4 text-orange-500" />
+          Metas do Mês
+          <span className="ml-auto text-xs font-normal text-muted-foreground">
+            {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Meta Geral */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
+                Faturamento
+              </span>
+              <span className="text-xs font-bold text-emerald-600">{percentGeral.toFixed(0)}%</span>
+            </div>
+            <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all"
+                style={{ width: `${percentGeral}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>{formatCurrency(vendasMes)}</span>
+              <span>Meta: {formatCurrency(metaGeral)}</span>
+            </div>
+          </div>
+
+          {/* Meta Açaí 1,5L */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                <IceCream className="h-3.5 w-3.5 text-purple-500" />
+                Açaí 1,5L
+              </span>
+              <span className="text-xs font-bold text-purple-600">{percentAcai.toFixed(0)}%</span>
+            </div>
+            <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-purple-400 to-purple-600 transition-all"
+                style={{ width: `${percentAcai}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>{totalAcai} un ({formatCurrency(revenueAcai)})</span>
+              <span>Meta: {metaAcai} un</span>
+            </div>
+          </div>
+
+          {/* Meta Pote Sorvete */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                <Package className="h-3.5 w-3.5 text-blue-500" />
+                Pote Sorvete
+              </span>
+              <span className="text-xs font-bold text-blue-600">{percentPotes.toFixed(0)}%</span>
+            </div>
+            <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-blue-400 to-blue-600 transition-all"
+                style={{ width: `${percentPotes}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>{totalPotes} un ({formatCurrency(revenuePotes)})</span>
+              <span>Meta: {metaPotes} un</span>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Dashboard() {
   const { data: metrics, isLoading } = trpc.dashboard.metrics.useQuery();
   const { data: birthdays } = trpc.dashboard.birthdays.useQuery();
@@ -271,6 +394,9 @@ export default function Dashboard() {
             gradient="bg-gradient-to-br from-cyan-500 to-teal-600"
           />
         </div>
+
+        {/* Metas do Mês */}
+        <GoalsWidget vendasMes={inoveKpis?.vendas_mes?.total ?? 0} />
 
         {/* Widget de Previsão do Tempo */}
         <WeatherWidget />

@@ -641,6 +641,19 @@ export default function FinRevenueForecast() {
                             )}
                           </div>
 
+                          {/* Barra de progresso meta vs real */}
+                          {hasReal && compareBase > 0 && (
+                            <div className="w-full h-1.5 bg-muted/40 rounded-full overflow-hidden mt-0.5">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full transition-all",
+                                  (accuracyDay ?? 0) >= 95 ? "bg-emerald-400" : (accuracyDay ?? 0) >= 75 ? "bg-amber-400" : "bg-rose-400"
+                                )}
+                                style={{ width: `${Math.min(accuracyDay ?? 0, 100)}%` }}
+                              />
+                            </div>
+                          )}
+
                           {/* Acurácia do dia */}
                           {accuracyDay !== null && (
                             <span className={cn(
