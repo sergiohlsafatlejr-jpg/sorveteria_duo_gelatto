@@ -20,3 +20,6 @@
 - [x] Corrigir erro checkDailyGoalAlert no cron.ts (era cache antigo, resolvido com restart)
 - [x] Adicionar checkboxes na tela de Metas de Produtos para selecionar produtos do INOVE (ao invés de digitar keywords manualmente)
 - [x] Meta de faturamento no Dashboard e alerta cron usam a mesma meta do Forecast (soma dos dias do calendário)
+- [x] Dashboard: mudar gráfico Vendas e Mais Vendidos de "Últimos 30 dias" para "Mês Atual"
+- [x] Dashboard: adicionar card de Avaliações Google (via Google Places API)
+- [x] Dashboard: remover card Estoque Baixo
