@@ -158,9 +158,10 @@ const DEFAULT_COLORS = ["#10b981", "#8b5cf6", "#3b82f6", "#f59e0b", "#ef4444", "
 function GoalsWidget({ vendasMes }: { vendasMes: number }) {
   const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
 
-  // Buscar metas de faturamento geral (finGoals)
-  const { data: goalsList } = trpc.fin.goals.list.useQuery(
-    { month: currentMonth },
+  // Buscar meta do mês do Forecast (soma dos valores diários do calendário)
+  const [currentYear, currentMonthNum] = currentMonth.split('-').map(Number);
+  const { data: goalForecasts = [] } = trpc.fin.forecastCalendar.getGoalForecasts.useQuery(
+    { year: currentYear, month: currentMonthNum },
     { staleTime: 5 * 60 * 1000 }
   );
 
@@ -176,10 +177,9 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
     { staleTime: 5 * 60 * 1000 }
   );
 
-  // Meta geral do mês = meta do Forecast (finGoals)
-  // Usa a soma de todas as metas/cenários cadastrados no Forecast para o mês
-  const metaGeral = goalsList && goalsList.length > 0
-    ? goalsList.reduce((sum, g) => sum + Number(g.targetRevenue || 0), 0)
+  // Meta geral do mês = soma dos valores diários do Forecast (mesma "Meta do Mês" exibida no Forecast)
+  const metaGeral = goalForecasts.length > 0
+    ? goalForecasts.reduce((sum: number, f: { amount: string | number }) => sum + Number(f.amount), 0)
     : 0;
   const percentGeral = metaGeral > 0 ? Math.min((vendasMes / metaGeral) * 100, 150) : 0;
 

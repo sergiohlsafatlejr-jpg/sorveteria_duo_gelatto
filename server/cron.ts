@@ -18,6 +18,7 @@ import {
   customerLoyaltyTokens,
   forecastSettings,
   finGoals,
+  finRevenueForecasts,
 } from "../drizzle/schema";
 import { eq, and, sql } from "drizzle-orm";
 import * as mssqlLib from "mssql";
@@ -593,24 +594,26 @@ async function checkDailyGoalAlert(): Promise<void> {
 
     const realToday = todayRows.length > 0 ? Number(todayRows[0].realAmount) : 0;
 
-    // Buscar meta mensal do mês atual (finGoals)
-    const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
-    const goalRows = await db.select().from(finGoals)
-      .where(eq(finGoals.month, currentMonth))
-      .limit(1);
-    if (goalRows.length === 0) {
-      await logCronJob("check-daily-goal-alert", "skipped", "Meta mensal não definida para " + currentMonth, Date.now() - startedAt);
-      return;
-    }
+    // Buscar meta do mês do Forecast (soma dos valores diários do calendário)
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const monthEnd = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
-    // Calcular meta diária baseada na meta mensal
-    const monthlyGoal = Number(goalRows[0].targetRevenue || 0);
+    const forecastRows = await db.select().from(finRevenueForecasts)
+      .where(and(
+        sql`${finRevenueForecasts.forecastDate} >= ${monthStart}`,
+        sql`${finRevenueForecasts.forecastDate} <= ${monthEnd}`,
+      ));
+
+    const monthlyGoal = forecastRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
     if (monthlyGoal <= 0) {
-      await logCronJob("check-daily-goal-alert", "skipped", "Meta mensal zerada", Date.now() - startedAt);
+      await logCronJob("check-daily-goal-alert", "skipped", "Meta mensal do Forecast zerada ou não definida", Date.now() - startedAt);
       return;
     }
 
-    const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
     const dailyGoal = monthlyGoal / daysInMonth;
     const percentage = realToday > 0 ? (realToday / dailyGoal) * 100 : 0;
 
