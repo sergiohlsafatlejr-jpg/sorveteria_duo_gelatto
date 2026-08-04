@@ -940,16 +940,20 @@ export const inoveRouter = router({
       const config = rows[0];
       try {
         const pool = await createInovePool(config);
-        let dateFilter = `v.VEN_DATA_FIM >= DATEADD(day, -${input.days}, GETDATE())`;
+        let dateFilter = '';
         if (input.dateFrom && input.dateTo) {
-          dateFilter = `v.VEN_DATA_FIM >= '${input.dateFrom}' AND v.VEN_DATA_FIM <= '${input.dateTo} 23:59:59'`;
+          dateFilter = `CAST(v.VEN_DATA_FIM AS DATE) >= '${input.dateFrom}' AND CAST(v.VEN_DATA_FIM AS DATE) <= '${input.dateTo}'`;
+        } else if (input.days === 1) {
+          dateFilter = `CAST(v.VEN_DATA_FIM AS DATE) = CAST(GETDATE() AS DATE)`;
+        } else {
+          dateFilter = `CAST(v.VEN_DATA_FIM AS DATE) >= CAST(DATEADD(day, -${input.days}, GETDATE()) AS DATE)`;
         }
         const result = await pool.request().query(`
           SELECT
             fp.PAG_NOME as forma,
             COUNT(DISTINCT pv.VENDA) as qtd_vendas,
             CAST(SUM(pv.PAG_VALOR) as float) as total,
-            CAST(AVG(pv.PAG_VALOR) as float) as ticket_medio
+            CAST(CASE WHEN COUNT(DISTINCT pv.VENDA) > 0 THEN SUM(pv.PAG_VALOR) / COUNT(DISTINCT pv.VENDA) ELSE 0 END as float) as ticket_medio
           FROM PAGAMENTOS_VENDAS pv
           JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
           JOIN VENDAS v ON v.VENDA = pv.VENDA
