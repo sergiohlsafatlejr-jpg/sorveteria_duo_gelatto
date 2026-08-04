@@ -12,10 +12,10 @@ async function fetchGoogleReviews() {
     return googleReviewsCache;
   }
   try {
-    // Buscar a sorveteria pelo nome
+    // Buscar a sorveteria pelo nome exato + bairro
     const searchResult = await makeRequest<{ results: Array<{ place_id: string; name: string; rating?: number; user_ratings_total?: number }> }>(
       "/maps/api/place/textsearch/json",
-      { query: "Duo Gelatto Sorveteria" }
+      { query: "Duo Gelatto Urias Magalhães" }
     );
     if (searchResult.results && searchResult.results.length > 0) {
       const place = searchResult.results[0];
