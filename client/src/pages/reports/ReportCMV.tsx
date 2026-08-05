@@ -116,7 +116,7 @@ export default function ReportCMV() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 max-w-7xl mx-auto">
         <BackButton to="/dashboard" />
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -152,7 +152,7 @@ export default function ReportCMV() {
         ) : (
           <>
             {/* KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 gap-2 sm:gap-4">
               <KpiCard title="Receita Total" value={fmt(totalReceita)} icon={TrendingUp} color="bg-green-500" />
               <KpiCard
                 title="CMV Total"
@@ -242,17 +242,17 @@ export default function ReportCMV() {
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-xs sm:text-sm min-w-[600px]">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr>
-                        <th className="text-left py-2 px-4 font-medium">Produto</th>
-                        <th className="text-right py-2 px-3 font-medium">Qtd</th>
-                        <th className="text-right py-2 px-3 font-medium">Preço Médio</th>
-                        <th className="text-right py-2 px-3 font-medium">Custo Unit.</th>
-                        <th className="text-right py-2 px-3 font-medium">Receita</th>
-                        <th className="text-right py-2 px-3 font-medium">CMV</th>
-                        <th className="text-right py-2 px-3 font-medium">Lucro Bruto</th>
-                        <th className="text-right py-2 px-3 font-medium">Margem</th>
+                        <th className="text-left py-2 px-2 sm:px-4 font-medium whitespace-nowrap">Produto</th>
+                        <th className="text-right py-2 px-1 sm:px-3 font-medium">Qtd</th>
+                        <th className="text-right py-2 px-1 sm:px-3 font-medium hidden sm:table-cell">Preço Médio</th>
+                        <th className="text-right py-2 px-1 sm:px-3 font-medium hidden sm:table-cell">Custo Unit.</th>
+                        <th className="text-right py-2 px-1 sm:px-3 font-medium">Receita</th>
+                        <th className="text-right py-2 px-1 sm:px-3 font-medium">CMV</th>
+                        <th className="text-right py-2 px-1 sm:px-3 font-medium">Lucro Bruto</th>
+                        <th className="text-right py-2 px-1 sm:px-3 font-medium">Margem</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -261,15 +261,15 @@ export default function ReportCMV() {
                       )}
                       {data.map((r, i) => (
                         <tr key={i} className={`border-b hover:bg-muted/30 ${r.costPrice === 0 ? "opacity-60" : ""}`}>
-                          <td className="py-2 px-4 max-w-[200px] truncate font-medium">{r.productName}</td>
-                          <td className="py-2 px-3 text-right font-mono text-xs">{fmtQty(r.totalQty)}</td>
-                          <td className="py-2 px-3 text-right font-mono text-xs">{fmt(r.avgSalePrice)}</td>
-                          <td className="py-2 px-3 text-right font-mono text-xs">
+                          <td className="py-2 px-2 sm:px-4 max-w-[120px] sm:max-w-[200px] truncate font-medium">{r.productName}</td>
+                          <td className="py-2 px-1 sm:px-3 text-right font-mono text-xs">{fmtQty(r.totalQty)}</td>
+                          <td className="py-2 px-1 sm:px-3 text-right font-mono text-xs hidden sm:table-cell">{fmt(r.avgSalePrice)}</td>
+                          <td className="py-2 px-1 sm:px-3 text-right font-mono text-xs hidden sm:table-cell">
                             {r.costPrice > 0 ? fmt(r.costPrice) : <span className="text-red-400">Sem custo</span>}
                           </td>
-                          <td className="py-2 px-3 text-right font-mono text-xs text-green-600 font-semibold">{fmt(r.totalRevenue)}</td>
-                          <td className="py-2 px-3 text-right font-mono text-xs">{r.costPrice > 0 ? fmt(r.totalCost) : "—"}</td>
-                          <td className="py-2 px-3 text-right font-mono text-xs font-semibold">
+                          <td className="py-2 px-1 sm:px-3 text-right font-mono text-xs text-green-600 font-semibold">{fmt(r.totalRevenue)}</td>
+                          <td className="py-2 px-1 sm:px-3 text-right font-mono text-xs">{r.costPrice > 0 ? fmt(r.totalCost) : "—"}</td>
+                          <td className="py-2 px-1 sm:px-3 text-right font-mono text-xs font-semibold">
                             {r.costPrice > 0 ? (
                               <span className={r.grossProfit >= 0 ? "text-green-600" : "text-red-500"}>{fmt(r.grossProfit)}</span>
                             ) : "—"}

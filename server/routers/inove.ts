@@ -1575,20 +1575,20 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const topReceita = await pool.request().query(`
-          SELECT TOP 10 p.PRO_DESCRICAO as nome,
+          SELECT TOP 10 ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as nome,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as receita,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd
           FROM ITENS_VENDAS iv JOIN VENDAS v ON v.VENDA = iv.VENDA JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${dateFilter}
-          GROUP BY p.PRO_DESCRICAO ORDER BY receita DESC
+          GROUP BY ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) ORDER BY receita DESC
         `);
         const topQtd = await pool.request().query(`
-          SELECT TOP 10 p.PRO_DESCRICAO as nome,
+          SELECT TOP 10 ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as nome,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as receita
           FROM ITENS_VENDAS iv JOIN VENDAS v ON v.VENDA = iv.VENDA JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${dateFilter}
-          GROUP BY p.PRO_DESCRICAO ORDER BY qtd DESC
+          GROUP BY ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) ORDER BY qtd DESC
         `);
         const pagamentos = await pool.request().query(`
           SELECT fp.PAG_NOME as forma,
@@ -1689,7 +1689,7 @@ export const inoveRouter = router({
         const res = await pool.request().query(`
           SELECT TOP ${input.limit}
             p.PRODUTO as produtoId,
-            p.PRO_DESCRICAO as nome,
+            ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as nome,
             p.PRO_CODIGO as codPdv,
             ISNULL(CAST(p.PRO_CUSTO as float), 0) as custo,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
@@ -1698,7 +1698,7 @@ export const inoveRouter = router({
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${monthFilter}
-          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_CUSTO
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_CUSTO
           ORDER BY faturamento DESC
         `);
         await pool.close();
@@ -1892,7 +1892,7 @@ export const inoveRouter = router({
         const res = await pool.request().query(`
           SELECT
             p.PRODUTO as productId,
-            p.PRO_DESCRICAO as productName,
+            ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as productName,
             ISNULL(CAST(p.PRO_CUSTO as float), 0) as costPrice,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as totalQty,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as totalRevenue,
@@ -1902,7 +1902,7 @@ export const inoveRouter = router({
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${monthFilter}
-          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CUSTO, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_DESCRICAO, p.PRO_CUSTO, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
           ORDER BY totalRevenue DESC
         `);
         await pool.close();
@@ -3163,7 +3163,7 @@ export const inoveRouter = router({
         const res = await pool.request().query(`
           SELECT
             p.PRODUTO as productId,
-            p.PRO_DESCRICAO as productName,
+            ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as productName,
             p.PRO_CODIGO as externalCode,
             ISNULL(p.PRO_ESTOQUE, 0) as currentStock,
             FORMAT(v.VEN_DATA_FIM, 'yyyy-MM') as saleMonth,
@@ -3173,8 +3173,8 @@ export const inoveRouter = router({
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2
             AND v.VEN_DATA_FIM >= DATEADD(month, -${input.months}, GETDATE())
-          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_ESTOQUE, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
-          ORDER BY p.PRO_DESCRICAO, saleMonth
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_ESTOQUE, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
+          ORDER BY ISNULL(p.PRO_NOME, p.PRO_DESCRICAO), saleMonth
         `);
         await pool.close();
         // Agrupar por produto

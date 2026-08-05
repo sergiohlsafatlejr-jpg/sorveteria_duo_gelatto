@@ -31,3 +31,5 @@
 - [x] Corrigir aba Pagamentos do Relatório de Vendas (tabela FORMAS_PAGAMENTOS e campo PAG_NOME)
 - [x] Fazer tela Média de Vendas buscar dados direto do INOVE (endpoint salesAverageInove)
 - [x] Remover aba "Ranking Produtos" do Relatório de Vendas (redundante com "Por Período")
+- [x] Corrigir coluna Produto na tela /reports/cmv (PRO_DESCRICAO → PRO_NOME)
+- [x] Ajustar layout da tela /reports/cmv para celular (responsivo)
