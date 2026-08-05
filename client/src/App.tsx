@@ -57,6 +57,10 @@ import InoveProductSales from "./pages/InoveProductSales";
 import InoveCostMargin from "./pages/InoveCostMargin";
 import InoveManagerial from "./pages/InoveManagerial";
 import PublicLoyalty from "./pages/PublicLoyalty";
+// Novos relatórios consolidados
+import ReportSales from "./pages/reports/ReportSales";
+import ReportCMV from "./pages/reports/ReportCMV";
+import ReportManagerial from "./pages/reports/ReportManagerial";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function Router() {
@@ -76,6 +80,10 @@ function Router() {
       <Route path="/smart-purchase-plan">{() => <ProtectedRoute path="/smart-purchase-plan"><SmartPurchasePlanner /></ProtectedRoute>}</Route>
       <Route path="/reports">{() => <ProtectedRoute path="/reports"><Reports /></ProtectedRoute>}</Route>
       <Route path="/gerencial">{() => <ProtectedRoute path="/gerencial"><GerencialReports /></ProtectedRoute>}</Route>
+      {/* Novos relatórios consolidados */}
+      <Route path="/reports/sales">{() => <ProtectedRoute path="/reports/sales"><ReportSales /></ProtectedRoute>}</Route>
+      <Route path="/reports/cmv">{() => <ProtectedRoute path="/reports/cmv"><ReportCMV /></ProtectedRoute>}</Route>
+      <Route path="/reports/managerial">{() => <ProtectedRoute path="/reports/managerial"><ReportManagerial /></ProtectedRoute>}</Route>
       {/* Pontos — regras e canais (gerente+) */}
       <Route path="/points-rules">{() => <ProtectedRoute path="/points-rules"><PointsRules /></ProtectedRoute>}</Route>
       <Route path="/whatsapp">{() => <ProtectedRoute path="/whatsapp"><WhatsApp /></ProtectedRoute>}</Route>

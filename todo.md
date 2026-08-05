@@ -23,3 +23,8 @@
 - [x] Dashboard: mudar gráfico Vendas e Mais Vendidos de "Últimos 30 dias" para "Mês Atual"
 - [x] Dashboard: adicionar card de Avaliações Google (via Google Places API)
 - [x] Dashboard: remover card Estoque Baixo
+- [x] Reorganizar relatórios: criar Relatório de Vendas consolidado (/reports/sales)
+- [x] Reorganizar relatórios: criar Relatório de CMV consolidado (/reports/cmv)
+- [x] Reorganizar relatórios: criar Relatório Gerencial consolidado (/reports/managerial)
+- [x] Atualizar menu lateral com nova estrutura de Relatórios (Vendas, CMV, Gerencial)
+- [x] Rotas antigas mantidas funcionando em paralelo (sem remoção) para não quebrar bookmarks
