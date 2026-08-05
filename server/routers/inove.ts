@@ -1684,7 +1684,7 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`
           : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
         const res = await pool.request().query(`
           SELECT TOP ${input.limit}
@@ -1698,7 +1698,7 @@ export const inoveRouter = router({
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${monthFilter}
-          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO
+          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_CUSTO
           ORDER BY faturamento DESC
         `);
         await pool.close();
@@ -1712,7 +1712,8 @@ export const inoveRouter = router({
           custo: Number(r.custo),
           fonte: "inove" as const,
         }));
-      } catch {
+      } catch (err) {
+        console.error("[getTopProductsInove] Erro:", err instanceof Error ? err.message : err);
         return localTopProducts();
       }
     }),
@@ -1753,7 +1754,7 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`
           : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
         const res = await pool.request().query(`
           SELECT
@@ -1777,7 +1778,8 @@ export const inoveRouter = router({
           percentual: totalGeral > 0 ? (Number(r.total) / totalGeral) * 100 : 0,
           fonte: "inove" as const,
         }));
-      } catch {
+      } catch (err) {
+        console.error("[getPaymentMethodsInove] Erro:", err instanceof Error ? err.message : err);
         return localPayments();
       }
     }),
@@ -1835,12 +1837,12 @@ export const inoveRouter = router({
         transactionCount: Number(r.transactionCount),
         ticketMedio: Number(r.transactionCount) > 0 ? Number(r.totalRevenue) / Number(r.transactionCount) : 0,
         fonte: "inove" as const,
-      }));
-    } catch {
+            }));
+    } catch (err) {
+      console.error("[getMonthlySalesEvolutionInove] Erro:", err instanceof Error ? err.message : err);
       return localEvolution();
     }
   }),
-
   // ── Relatório: Custo x Vendas por produto INOVE (com fallback local) ─────────
   getCostVsSalesInove: protectedProcedure
     .input(z.object({ referenceMonth: z.string().optional() }))
@@ -1885,7 +1887,7 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`
           : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
         const res = await pool.request().query(`
           SELECT
@@ -2029,7 +2031,7 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`
           : `AND v.VEN_DATA_FIM >= DATEADD(month, -6, GETDATE())`;
         const res = await pool.request().query(`
           SELECT
