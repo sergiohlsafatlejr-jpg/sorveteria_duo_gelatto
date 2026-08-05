@@ -45,13 +45,24 @@ export default function SalesAverage() {
   const [showTop, setShowTop] = useState(20);
   const [showApplyModal, setShowApplyModal] = useState(false);
 
-  const { data, isLoading } = trpc.salesImport.salesAverage.useQuery({ months });
+  // Buscar do INOVE primeiro, fallback para dados locais
+  const { data: inoveData, isLoading: inoveLoading } = trpc.inove.salesAverageInove.useQuery(
+    { months },
+    { retry: 1 }
+  );
+  const { data: localData, isLoading: localLoading } = trpc.salesImport.salesAverage.useQuery(
+    { months },
+    { enabled: !inoveData || inoveData.length === 0 }
+  );
+  const data = (inoveData && inoveData.length > 0) ? inoveData : localData;
+  const isLoading = inoveLoading || ((!inoveData || inoveData.length === 0) && localLoading);
   const utils = trpc.useUtils();
 
   const applyBulkMutation = trpc.products.applyMinStockBulk.useMutation({
     onSuccess: (result) => {
       toast.success(`Estoque mínimo atualizado em ${result.updated} produto(s)!`);
       setShowApplyModal(false);
+      utils.inove.salesAverageInove.invalidate();
       utils.salesImport.salesAverage.invalidate();
     },
     onError: (err) => {
@@ -273,7 +284,7 @@ export default function SalesAverage() {
           <div className="p-8 text-center text-muted-foreground">
             <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
             <p>Nenhum produto encontrado.</p>
-            <p className="text-xs mt-1">Importe e confirme relatórios mensais para ver a média de vendas.</p>
+            <p className="text-xs mt-1">Aguardando dados do PDV INOVE...</p>
           </div>
         ) : (
           <>
@@ -363,7 +374,7 @@ export default function SalesAverage() {
 
       {/* Legenda */}
       <div className="mt-4 text-xs text-muted-foreground bg-muted/30 rounded-lg p-3">
-        <strong>Como interpretar:</strong> A <strong>Média/mês</strong> é calculada apenas nos meses em que houve venda (importações mensais confirmadas).
+        <strong>Como interpretar:</strong> A <strong>Média/mês</strong> é calculada apenas nos meses em que houve venda (dados do PDV INOVE).
         O <strong>Estoque Mín. Sugerido</strong> = média × 1,2 (20% de margem de segurança).
         Indicadores: <span className="text-red-600 font-medium">vermelho</span> = estoque abaixo de 50% da média,
         <span className="text-amber-600 font-medium ml-1">âmbar</span> = entre 50% e 100%,

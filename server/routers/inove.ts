@@ -1758,14 +1758,14 @@ export const inoveRouter = router({
           : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
         const res = await pool.request().query(`
           SELECT
-            fp.FOR_DESCRICAO as forma,
+            fp.PAG_NOME as forma,
             CAST(SUM(pv.PAG_VALOR) as float) as total,
             COUNT(DISTINCT pv.VENDA) as qtdVendas
           FROM PAGAMENTOS_VENDAS pv
           JOIN VENDAS v ON v.VENDA = pv.VENDA
-          JOIN FORMAS_PAGAMENTO fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+          JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
           WHERE v.VEN_SITUACAO = 2 ${monthFilter}
-          GROUP BY fp.FOR_DESCRICAO
+          GROUP BY fp.PAG_NOME
           ORDER BY total DESC
         `);
         await pool.close();
@@ -3147,5 +3147,76 @@ export const inoveRouter = router({
       });
 
       return { items, summary, weeks, months };
+    }),
+
+  // ── Média de Vendas por Produto (INOVE direto) ──────────────────────────────────────
+  salesAverageInove: protectedProcedure
+    .input(z.object({ months: z.number().min(1).max(12).default(3) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (!connRows.length || !connRows[0].active) return [];
+      const config = connRows[0];
+      try {
+        const pool = await createInovePool(config);
+        const res = await pool.request().query(`
+          SELECT
+            p.PRODUTO as productId,
+            p.PRO_DESCRICAO as productName,
+            p.PRO_CODIGO as externalCode,
+            ISNULL(p.PRO_ESTOQUE, 0) as currentStock,
+            FORMAT(v.VEN_DATA_FIM, 'yyyy-MM') as saleMonth,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as totalQty
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= DATEADD(month, -${input.months}, GETDATE())
+          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_ESTOQUE, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
+          ORDER BY p.PRO_DESCRICAO, saleMonth
+        `);
+        await pool.close();
+        // Agrupar por produto
+        const productMap = new Map<number, {
+          productId: number; productName: string; externalCode: string;
+          currentStock: number; monthlyQty: Record<string, number>;
+        }>();
+        for (const row of res.recordset as Array<{productId:number;productName:string;externalCode:string;currentStock:number;saleMonth:string;totalQty:number}>) {
+          if (!productMap.has(row.productId)) {
+            productMap.set(row.productId, {
+              productId: row.productId,
+              productName: row.productName,
+              externalCode: row.externalCode || "",
+              currentStock: Number(row.currentStock) || 0,
+              monthlyQty: {},
+            });
+          }
+          const p = productMap.get(row.productId)!;
+          p.monthlyQty[row.saleMonth] = Number(row.totalQty) || 0;
+        }
+        // Calcular média e sugestão de estoque mínimo
+        return Array.from(productMap.values()).map(p => {
+          const qtys = Object.values(p.monthlyQty);
+          const monthsWithSales = qtys.filter(q => q > 0).length;
+          const avgQty = monthsWithSales > 0 ? qtys.reduce((s, q) => s + q, 0) / monthsWithSales : 0;
+          const suggestedMinStock = Math.ceil(avgQty * 1.2);
+          return {
+            productId: p.productId,
+            productName: p.productName,
+            externalCode: p.externalCode,
+            externalName: p.productName,
+            unit: "un",
+            monthlyQty: p.monthlyQty,
+            avgQty,
+            monthsWithSales,
+            currentStock: p.currentStock,
+            suggestedMinStock,
+          };
+        }).sort((a, b) => b.avgQty - a.avgQty);
+      } catch (err) {
+        console.error("[salesAverageInove] Erro:", err instanceof Error ? err.message : err);
+        return [];
+      }
     }),
 });
