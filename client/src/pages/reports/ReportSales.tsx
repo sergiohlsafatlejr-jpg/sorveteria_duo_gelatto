@@ -509,15 +509,13 @@ export default function ReportSales() {
         </div>
 
         <Tabs defaultValue="periodo">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="periodo">Por Período</TabsTrigger>
-            <TabsTrigger value="ranking">Ranking Produtos</TabsTrigger>
             <TabsTrigger value="pagamentos">Pagamentos</TabsTrigger>
             <TabsTrigger value="hora">Por Hora</TabsTrigger>
           </TabsList>
 
           <TabsContent value="periodo" className="mt-6"><VendasPeriodoTab /></TabsContent>
-          <TabsContent value="ranking" className="mt-6"><RankingProdutosTab /></TabsContent>
           <TabsContent value="pagamentos" className="mt-6"><PagamentosTab /></TabsContent>
           <TabsContent value="hora" className="mt-6"><VendasHoraTab /></TabsContent>
         </Tabs>

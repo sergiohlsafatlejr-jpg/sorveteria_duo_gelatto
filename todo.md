@@ -30,3 +30,4 @@
 - [x] Rotas antigas mantidas funcionando em paralelo (sem remoção) para não quebrar bookmarks
 - [x] Corrigir aba Pagamentos do Relatório de Vendas (tabela FORMAS_PAGAMENTOS e campo PAG_NOME)
 - [x] Fazer tela Média de Vendas buscar dados direto do INOVE (endpoint salesAverageInove)
+- [x] Remover aba "Ranking Produtos" do Relatório de Vendas (redundante com "Por Período")
