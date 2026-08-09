@@ -1,0 +1,36 @@
+
+- [x] Corrigir persistência do Forecast - dados compartilhados entre todos os usuários (não por userId)
+- [x] Criar dashboard unificado com todas as abas de vendas em uma única tela (dados reais do INOVE via getSalesByPaymentType)
+- [x] Implementar auto-refresh do Top 10 Mensal a cada 5 minutos
+- [x] Corrigir Forecast: importação INOVE mostra sucesso mas não salva no calendário (limpou duplicatas + cron 7 dias)
+- [x] Dashboard: adicionar KPIs relevantes (top produtos vendidos do dia, formas de pagamento, ticket médio)
+- [x] Dashboard: substituir cards sem uso por informações mais relevantes (gráfico pizza pagamentos, top produtos hoje)
+- [x] BUG: Forecast - valores importados do INOVE não aparecem no calendário (corrigido: erro SQL only_full_group_by)
+- [x] Cron: importação automática INOVE às 20:00 (segundo horário)
+- [x] Cron: alerta de meta não atingida às 22:00 via notifyOwner
+- [x] Forecast: barra de progresso meta vs real em cada dia do calendário
+- [x] Dashboard: KPI de meta geral do mês com barra de progresso
+- [x] Dashboard: KPI de vendas de Açaí 1,5L (meta vs realizado)
+- [x] Dashboard: KPI de vendas de Pote de Sorvete (meta vs realizado)
+- [x] Criar tabela product_goals para metas de produtos (Açaí 1,5L, Pote Sorvete)
+- [x] Criar endpoint CRUD para metas de produtos
+- [x] Criar tela de configuração de metas de produtos (/fin/product-goals)
+- [x] Integrar GoalsWidget com metas de produtos configuráveis (não hardcoded)
+- [x] Adicionar link "Metas de Produtos" no menu lateral (seção Financeiro)
+- [x] Corrigir erro checkDailyGoalAlert no cron.ts (era cache antigo, resolvido com restart)
+- [x] Adicionar checkboxes na tela de Metas de Produtos para selecionar produtos do INOVE (ao invés de digitar keywords manualmente)
+- [x] Meta de faturamento no Dashboard e alerta cron usam a mesma meta do Forecast (soma dos dias do calendário)
+- [x] Dashboard: mudar gráfico Vendas e Mais Vendidos de "Últimos 30 dias" para "Mês Atual"
+- [x] Dashboard: adicionar card de Avaliações Google (via Google Places API)
+- [x] Dashboard: remover card Estoque Baixo
+- [x] Reorganizar relatórios: criar Relatório de Vendas consolidado (/reports/sales)
+- [x] Reorganizar relatórios: criar Relatório de CMV consolidado (/reports/cmv)
+- [x] Reorganizar relatórios: criar Relatório Gerencial consolidado (/reports/managerial)
+- [x] Atualizar menu lateral com nova estrutura de Relatórios (Vendas, CMV, Gerencial)
+- [x] Rotas antigas mantidas funcionando em paralelo (sem remoção) para não quebrar bookmarks
+- [x] Corrigir aba Pagamentos do Relatório de Vendas (tabela FORMAS_PAGAMENTOS e campo PAG_NOME)
+- [x] Fazer tela Média de Vendas buscar dados direto do INOVE (endpoint salesAverageInove)
+- [x] Remover aba "Ranking Produtos" do Relatório de Vendas (redundante com "Por Período")
+- [x] Corrigir coluna Produto na tela /reports/cmv (PRO_DESCRICAO → PRO_NOME)
+- [x] Ajustar layout da tela /reports/cmv para celular (responsivo)
+- [x] Adicionar filtro por data (De/Até + Filtrar) na aba Pagamentos do Relatório de Vendas

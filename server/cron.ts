@@ -16,6 +16,9 @@ import {
   customers,
   customerPurchases,
   customerLoyaltyTokens,
+  forecastSettings,
+  finGoals,
+  finRevenueForecasts,
 } from "../drizzle/schema";
 import { eq, and, sql } from "drizzle-orm";
 import * as mssqlLib from "mssql";
@@ -326,71 +329,80 @@ async function syncDailyRevenue(): Promise<void> {
   try {
     pool = await createInovePool(config);
 
-    // Buscar total de vendas do dia anterior
+    // Buscar total de vendas dos últimos 7 dias (cobre falhas e garante dados atualizados)
     const result = await pool.request().query(`
       SELECT
-        CAST(DATEADD(day, -1, CAST(GETDATE() as date)) as varchar(10)) as data_ontem,
+        CONVERT(varchar(10), CAST(VEN_DATA_FIM as date), 120) as data_venda,
         CAST(ISNULL(SUM(VEN_TOTAL), 0) as float) as total_vendas,
         COUNT(*) as qtd_vendas
       FROM VENDAS
       WHERE VEN_SITUACAO = 2
-        AND CAST(VEN_DATA_FIM as date) = CAST(DATEADD(day, -1, GETDATE()) as date)
+        AND CAST(VEN_DATA_FIM as date) >= CAST(DATEADD(day, -7, GETDATE()) as date)
+        AND CAST(VEN_DATA_FIM as date) < CAST(GETDATE() as date)
+      GROUP BY CAST(VEN_DATA_FIM as date)
+      ORDER BY data_venda
     `);
     await pool.close();
     pool = null;
 
-    const row = result.recordset[0] as { data_ontem: string; total_vendas: number; qtd_vendas: number };
-    if (!row || !row.data_ontem) throw new Error("Nenhum dado retornado do INOVE");
+    if (!result.recordset || result.recordset.length === 0) {
+      const msg = "Nenhum dado de vendas encontrado nos últimos 7 dias";
+      console.warn(`[cron/sync-revenue] ${msg}`);
+      await logCronJob("sync-daily-revenue", "skipped", msg, Date.now() - startedAt);
+      return;
+    }
 
-    const revenueDate = row.data_ontem; // YYYY-MM-DD
-    const totalVendas = row.total_vendas ?? 0;
-    const qtdVendas = row.qtd_vendas ?? 0;
-
-    // Buscar userId do dono do sistema
+    // Buscar userId do dono do sistema (para manter compatibilidade)
     const ownerUser = await getUserByOpenId(ENV.ownerOpenId);
     if (!ownerUser) throw new Error("Usuário dono não encontrado no sistema");
 
-    // Verificar se já existe registro para essa data
-    const existing = await db.select()
-      .from(finDailyRevenue)
-      .where(and(
-        eq(finDailyRevenue.userId, ownerUser.id),
-        eq(finDailyRevenue.revenueDate, revenueDate),
-      ))
-      .limit(1);
+    let updatedCount = 0;
+    let createdCount = 0;
 
-    const alreadyExisted = existing.length > 0;
+    for (const row of result.recordset) {
+      const revenueDate = row.data_venda as string;
+      const totalVendas = (row.total_vendas as number) ?? 0;
+      const qtdVendas = (row.qtd_vendas as number) ?? 0;
 
-    if (alreadyExisted) {
-      await db.update(finDailyRevenue)
-        .set({
+      if (totalVendas <= 0) continue;
+
+      // Verificar se já existe registro para essa data (compartilhado, sem filtro userId)
+      const existing = await db.select()
+        .from(finDailyRevenue)
+        .where(eq(finDailyRevenue.revenueDate, revenueDate))
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db.update(finDailyRevenue)
+          .set({
+            realAmount: String(totalVendas.toFixed(2)),
+            note: `Importado automaticamente do PDV INOVE (${qtdVendas} vendas)`,
+            updatedAt: new Date(),
+          })
+          .where(eq(finDailyRevenue.revenueDate, revenueDate));
+        updatedCount++;
+      } else {
+        await db.insert(finDailyRevenue).values({
+          userId: ownerUser.id,
+          revenueDate,
           realAmount: String(totalVendas.toFixed(2)),
           note: `Importado automaticamente do PDV INOVE (${qtdVendas} vendas)`,
-          updatedAt: new Date(),
-        })
-        .where(and(
-          eq(finDailyRevenue.userId, ownerUser.id),
-          eq(finDailyRevenue.revenueDate, revenueDate),
-        ));
-    } else {
-      await db.insert(finDailyRevenue).values({
-        userId: ownerUser.id,
-        revenueDate,
-        realAmount: String(totalVendas.toFixed(2)),
-        note: `Importado automaticamente do PDV INOVE (${qtdVendas} vendas)`,
-      });
+        });
+        createdCount++;
+      }
     }
 
-    const action = alreadyExisted ? "atualizado" : "registrado";
-    const msg = `Faturamento ${action} — ${revenueDate} — R$ ${totalVendas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (${qtdVendas} vendas)`;
+    const msg = `Faturamento sincronizado — ${createdCount} novo(s), ${updatedCount} atualizado(s) nos últimos 7 dias`;
     console.log(`[cron/sync-revenue] ✅ ${msg}`);
 
     await logCronJob("sync-daily-revenue", "success", msg, Date.now() - startedAt);
 
-    await notifyOwner({
-      title: "📊 Faturamento Real INOVE Sincronizado",
-      content: `✅ ${msg}\n• Previsão de Faturamento atualizada automaticamente`,
-    }).catch(() => {});
+    if (createdCount > 0) {
+      await notifyOwner({
+        title: "📊 Faturamento Real INOVE Sincronizado",
+        content: `✅ ${msg}\n• Previsão de Faturamento atualizada automaticamente`,
+      }).catch(() => {});
+    }
 
   } catch (err) {
     if (pool) await pool.close().catch(() => {});
@@ -559,6 +571,73 @@ async function syncSalesCache(): Promise<void> {
 }
 
 /**
+ * Verifica se a meta diária foi atingida e envia alerta se não.
+ * Roda às 22:00 (Brasília).
+ */
+async function checkDailyGoalAlert(): Promise<void> {
+  const startedAt = Date.now();
+  console.log("[cron/goal-alert] Verificando meta diária...");
+
+  const db = await getDb();
+  if (!db) {
+    await logCronJob("check-daily-goal-alert", "error", "DB indisponível", Date.now() - startedAt);
+    return;
+  }
+
+  try {
+    // Buscar faturamento real de hoje
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    const todayRows = await db.select()
+      .from(finDailyRevenue)
+      .where(eq(finDailyRevenue.revenueDate, today))
+      .limit(1);
+
+    const realToday = todayRows.length > 0 ? Number(todayRows[0].realAmount) : 0;
+
+    // Buscar meta do mês do Forecast (soma dos valores diários do calendário)
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const monthEnd = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+    const forecastRows = await db.select().from(finRevenueForecasts)
+      .where(and(
+        sql`${finRevenueForecasts.forecastDate} >= ${monthStart}`,
+        sql`${finRevenueForecasts.forecastDate} <= ${monthEnd}`,
+      ));
+
+    const monthlyGoal = forecastRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    if (monthlyGoal <= 0) {
+      await logCronJob("check-daily-goal-alert", "skipped", "Meta mensal do Forecast zerada ou não definida", Date.now() - startedAt);
+      return;
+    }
+
+    const dailyGoal = monthlyGoal / daysInMonth;
+    const percentage = realToday > 0 ? (realToday / dailyGoal) * 100 : 0;
+
+    if (percentage < 80) {
+      await notifyOwner({
+        title: "⚠️ Meta Diária Não Atingida",
+        content: `Faturamento de hoje (${today}): R$ ${realToday.toFixed(2)}\nMeta diária: R$ ${dailyGoal.toFixed(2)}\nAtingido: ${percentage.toFixed(0)}%\n\n⚠️ Abaixo de 80% da meta!`,
+      }).catch(() => {});
+      const msg = `Alerta enviado: ${percentage.toFixed(0)}% da meta (R$ ${realToday.toFixed(2)} / R$ ${dailyGoal.toFixed(2)})`;
+      console.log(`[cron/goal-alert] ${msg}`);
+      await logCronJob("check-daily-goal-alert", "success", msg, Date.now() - startedAt);
+    } else {
+      const msg = `Meta OK: ${percentage.toFixed(0)}% (R$ ${realToday.toFixed(2)} / R$ ${dailyGoal.toFixed(2)})`;
+      console.log(`[cron/goal-alert] ✅ ${msg}`);
+      await logCronJob("check-daily-goal-alert", "success", msg, Date.now() - startedAt);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[cron/goal-alert] Erro:", message);
+    await logCronJob("check-daily-goal-alert", "error", message, Date.now() - startedAt);
+  }
+}
+
+/**
  * Registra todos os cron jobs.
  * Chamado uma vez durante a inicialização do servidor.
  */
@@ -581,10 +660,23 @@ export function registerCronJobs(): void {
     name: "sync-sales-cache",
   });
 
+  // Segunda importação diária às 20:00 para pegar o dia completo
+  cron.schedule("0 20 * * *", syncDailyRevenue, {
+    timezone: "America/Sao_Paulo",
+    name: "sync-daily-revenue-noite",
+  });
+
+  // Alerta de meta não atingida às 22:00
+  cron.schedule("0 22 * * *", checkDailyGoalAlert, {
+    timezone: "America/Sao_Paulo",
+    name: "check-daily-goal-alert",
+  });
+
   console.log("[cron] Cron jobs registrados:");
   console.log("[cron]   → sync-sales-background: a cada 5 minutos (Brasília)");
-  console.log("[cron]   → sync-daily-revenue: todos os dias às 08:00 (Brasília)");
+  console.log("[cron]   → sync-daily-revenue: todos os dias às 08:00 e 20:00 (Brasília)");
   console.log("[cron]   → sync-sales-cache: todos os dias às 08:05 (Brasília)");
+  console.log("[cron]   → check-daily-goal-alert: todos os dias às 22:00 (Brasília)");
 }
 
 // Exportar para uso no endpoint manual (disparar agora)

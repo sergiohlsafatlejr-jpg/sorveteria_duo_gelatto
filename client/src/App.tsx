@@ -28,6 +28,7 @@ import FinCosts from "./pages/fin/FinCosts";
 import FinDRE from "./pages/fin/FinDRE";
 import FinOtimizacao from "./pages/fin/FinOtimizacao";
 import FinRevenueForecast from "./pages/fin/FinRevenueForecast";
+import FinProductGoals from "./pages/fin/FinProductGoals";
 import FinGoals from "./pages/fin/FinGoals";
 import FinSettings from "./pages/fin/FinSettings";
 import FinCategories from "./pages/fin/FinCategories";
@@ -57,6 +58,10 @@ import InoveCostMargin from "./pages/InoveCostMargin";
 import InoveManagerial from "./pages/InoveManagerial";
 import PublicLoyalty from "./pages/PublicLoyalty";
 import Purchases from "./pages/Purchases";
+// Novos relatórios consolidados
+import ReportSales from "./pages/reports/ReportSales";
+import ReportCMV from "./pages/reports/ReportCMV";
+import ReportManagerial from "./pages/reports/ReportManagerial";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function Router() {
@@ -77,6 +82,10 @@ function Router() {
       <Route path="/purchases">{() => <ProtectedRoute path="/purchases"><Purchases /></ProtectedRoute>}</Route>
       <Route path="/reports">{() => <ProtectedRoute path="/reports"><Reports /></ProtectedRoute>}</Route>
       <Route path="/gerencial">{() => <ProtectedRoute path="/gerencial"><GerencialReports /></ProtectedRoute>}</Route>
+      {/* Novos relatórios consolidados */}
+      <Route path="/reports/sales">{() => <ProtectedRoute path="/reports/sales"><ReportSales /></ProtectedRoute>}</Route>
+      <Route path="/reports/cmv">{() => <ProtectedRoute path="/reports/cmv"><ReportCMV /></ProtectedRoute>}</Route>
+      <Route path="/reports/managerial">{() => <ProtectedRoute path="/reports/managerial"><ReportManagerial /></ProtectedRoute>}</Route>
       {/* Pontos — regras e canais (gerente+) */}
       <Route path="/points-rules">{() => <ProtectedRoute path="/points-rules"><PointsRules /></ProtectedRoute>}</Route>
       <Route path="/whatsapp">{() => <ProtectedRoute path="/whatsapp"><WhatsApp /></ProtectedRoute>}</Route>
@@ -106,6 +115,7 @@ function Router() {
       <Route path="/fin/settings">{() => <ProtectedRoute path="/fin/settings"><FinSettings /></ProtectedRoute>}</Route>
       {/* Finance — gerente+ */}
       <Route path="/fin/forecast">{() => <ProtectedRoute path="/fin/forecast"><FinRevenueForecast /></ProtectedRoute>}</Route>
+      <Route path="/fin/product-goals">{() => <ProtectedRoute path="/fin/product-goals"><FinProductGoals /></ProtectedRoute>}</Route>
       <Route path="/fin/goals">{() => <ProtectedRoute path="/fin/goals"><FinGoals /></ProtectedRoute>}</Route>
       <Route path="/fin/monthly-comparison">{() => <ProtectedRoute path="/fin/monthly-comparison"><FinMonthlyComparison /></ProtectedRoute>}</Route>
       <Route path="/fin/bank-reconciliation">{() => <ProtectedRoute path="/fin/bank-reconciliation"><FinBankReconciliation /></ProtectedRoute>}</Route>

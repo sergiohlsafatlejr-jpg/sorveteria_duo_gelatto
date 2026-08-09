@@ -541,7 +541,7 @@ export const inoveRouter = router({
 
   // ── Top Produtos Mais Vendidos ────────────────────────────────────────────
   getTopProducts: protectedProcedure
-    .input(z.object({ days: z.number().int().min(1).max(365).default(30), limit: z.number().int().min(1).max(50).default(10) }))
+    .input(z.object({ days: z.number().int().min(1).max(365).default(30), limit: z.number().int().min(1).max(200).default(10) }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
@@ -940,16 +940,20 @@ export const inoveRouter = router({
       const config = rows[0];
       try {
         const pool = await createInovePool(config);
-        let dateFilter = `v.VEN_DATA_FIM >= DATEADD(day, -${input.days}, GETDATE())`;
+        let dateFilter = '';
         if (input.dateFrom && input.dateTo) {
-          dateFilter = `v.VEN_DATA_FIM >= '${input.dateFrom}' AND v.VEN_DATA_FIM <= '${input.dateTo} 23:59:59'`;
+          dateFilter = `CAST(v.VEN_DATA_FIM AS DATE) >= '${input.dateFrom}' AND CAST(v.VEN_DATA_FIM AS DATE) <= '${input.dateTo}'`;
+        } else if (input.days === 1) {
+          dateFilter = `CAST(v.VEN_DATA_FIM AS DATE) = CAST(GETDATE() AS DATE)`;
+        } else {
+          dateFilter = `CAST(v.VEN_DATA_FIM AS DATE) >= CAST(DATEADD(day, -${input.days}, GETDATE()) AS DATE)`;
         }
         const result = await pool.request().query(`
           SELECT
             fp.PAG_NOME as forma,
             COUNT(DISTINCT pv.VENDA) as qtd_vendas,
             CAST(SUM(pv.PAG_VALOR) as float) as total,
-            CAST(AVG(pv.PAG_VALOR) as float) as ticket_medio
+            CAST(CASE WHEN COUNT(DISTINCT pv.VENDA) > 0 THEN SUM(pv.PAG_VALOR) / COUNT(DISTINCT pv.VENDA) ELSE 0 END as float) as ticket_medio
           FROM PAGAMENTOS_VENDAS pv
           JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
           JOIN VENDAS v ON v.VENDA = pv.VENDA
@@ -1571,20 +1575,20 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const topReceita = await pool.request().query(`
-          SELECT TOP 10 p.PRO_DESCRICAO as nome,
+          SELECT TOP 10 ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as nome,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as receita,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd
           FROM ITENS_VENDAS iv JOIN VENDAS v ON v.VENDA = iv.VENDA JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${dateFilter}
-          GROUP BY p.PRO_DESCRICAO ORDER BY receita DESC
+          GROUP BY ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) ORDER BY receita DESC
         `);
         const topQtd = await pool.request().query(`
-          SELECT TOP 10 p.PRO_DESCRICAO as nome,
+          SELECT TOP 10 ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as nome,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as receita
           FROM ITENS_VENDAS iv JOIN VENDAS v ON v.VENDA = iv.VENDA JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${dateFilter}
-          GROUP BY p.PRO_DESCRICAO ORDER BY qtd DESC
+          GROUP BY ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) ORDER BY qtd DESC
         `);
         const pagamentos = await pool.request().query(`
           SELECT fp.PAG_NOME as forma,
@@ -1680,12 +1684,12 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`
           : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
         const res = await pool.request().query(`
           SELECT TOP ${input.limit}
             p.PRODUTO as produtoId,
-            p.PRO_DESCRICAO as nome,
+            ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as nome,
             p.PRO_CODIGO as codPdv,
             ISNULL(CAST(p.PRO_CUSTO as float), 0) as custo,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as qtd,
@@ -1694,7 +1698,7 @@ export const inoveRouter = router({
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${monthFilter}
-          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO, p.PRO_CUSTO
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_CUSTO
           ORDER BY faturamento DESC
         `);
         await pool.close();
@@ -1708,14 +1712,15 @@ export const inoveRouter = router({
           custo: Number(r.custo),
           fonte: "inove" as const,
         }));
-      } catch {
+      } catch (err) {
+        console.error("[getTopProductsInove] Erro:", err instanceof Error ? err.message : err);
         return localTopProducts();
       }
     }),
 
   // ── Relatório: Formas de Pagamento INOVE (com fallback local) ────────────────
   getPaymentMethodsInove: protectedProcedure
-    .input(z.object({ referenceMonth: z.string().optional() }))
+    .input(z.object({ referenceMonth: z.string().optional(), dateFrom: z.string().optional(), dateTo: z.string().optional() }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
@@ -1748,19 +1753,24 @@ export const inoveRouter = router({
       const config = connRows[0];
       try {
         const pool = await createInovePool(config);
-        const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
-          : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
+        let monthFilter: string;
+        if (input.dateFrom && input.dateTo) {
+          monthFilter = `AND CAST(v.VEN_DATA_FIM AS DATE) >= '${input.dateFrom}' AND CAST(v.VEN_DATA_FIM AS DATE) <= '${input.dateTo}'`;
+        } else if (input.referenceMonth) {
+          monthFilter = `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`;
+        } else {
+          monthFilter = `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
+        }
         const res = await pool.request().query(`
           SELECT
-            fp.FOR_DESCRICAO as forma,
+            fp.PAG_NOME as forma,
             CAST(SUM(pv.PAG_VALOR) as float) as total,
             COUNT(DISTINCT pv.VENDA) as qtdVendas
           FROM PAGAMENTOS_VENDAS pv
           JOIN VENDAS v ON v.VENDA = pv.VENDA
-          JOIN FORMAS_PAGAMENTO fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
+          JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
           WHERE v.VEN_SITUACAO = 2 ${monthFilter}
-          GROUP BY fp.FOR_DESCRICAO
+          GROUP BY fp.PAG_NOME
           ORDER BY total DESC
         `);
         await pool.close();
@@ -1773,7 +1783,8 @@ export const inoveRouter = router({
           percentual: totalGeral > 0 ? (Number(r.total) / totalGeral) * 100 : 0,
           fonte: "inove" as const,
         }));
-      } catch {
+      } catch (err) {
+        console.error("[getPaymentMethodsInove] Erro:", err instanceof Error ? err.message : err);
         return localPayments();
       }
     }),
@@ -1831,12 +1842,12 @@ export const inoveRouter = router({
         transactionCount: Number(r.transactionCount),
         ticketMedio: Number(r.transactionCount) > 0 ? Number(r.totalRevenue) / Number(r.transactionCount) : 0,
         fonte: "inove" as const,
-      }));
-    } catch {
+            }));
+    } catch (err) {
+      console.error("[getMonthlySalesEvolutionInove] Erro:", err instanceof Error ? err.message : err);
       return localEvolution();
     }
   }),
-
   // ── Relatório: Custo x Vendas por produto INOVE (com fallback local) ─────────
   getCostVsSalesInove: protectedProcedure
     .input(z.object({ referenceMonth: z.string().optional() }))
@@ -1881,12 +1892,12 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`
           : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
         const res = await pool.request().query(`
           SELECT
             p.PRODUTO as productId,
-            p.PRO_DESCRICAO as productName,
+            ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as productName,
             ISNULL(CAST(p.PRO_CUSTO as float), 0) as costPrice,
             CAST(SUM(iv.ITE_QUANTIDADE) as float) as totalQty,
             CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) as float) as totalRevenue,
@@ -1896,7 +1907,7 @@ export const inoveRouter = router({
           JOIN VENDAS v ON v.VENDA = iv.VENDA
           JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
           WHERE v.VEN_SITUACAO = 2 ${monthFilter}
-          GROUP BY p.PRODUTO, p.PRO_DESCRICAO, p.PRO_CUSTO, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_DESCRICAO, p.PRO_CUSTO, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
           ORDER BY totalRevenue DESC
         `);
         await pool.close();
@@ -2025,7 +2036,7 @@ export const inoveRouter = router({
       try {
         const pool = await createInovePool(config);
         const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[0]} AND MONTH(v.VEN_DATA_FIM) = ${input.referenceMonth.split('-')[1]}`
+          ? `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`
           : `AND v.VEN_DATA_FIM >= DATEADD(month, -6, GETDATE())`;
         const res = await pool.request().query(`
           SELECT
@@ -3141,5 +3152,76 @@ export const inoveRouter = router({
       });
 
       return { items, summary, weeks, months };
+    }),
+
+  // ── Média de Vendas por Produto (INOVE direto) ──────────────────────────────────────
+  salesAverageInove: protectedProcedure
+    .input(z.object({ months: z.number().min(1).max(12).default(3) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (!connRows.length || !connRows[0].active) return [];
+      const config = connRows[0];
+      try {
+        const pool = await createInovePool(config);
+        const res = await pool.request().query(`
+          SELECT
+            p.PRODUTO as productId,
+            ISNULL(p.PRO_NOME, p.PRO_DESCRICAO) as productName,
+            p.PRO_CODIGO as externalCode,
+            ISNULL(p.PRO_ESTOQUE, 0) as currentStock,
+            FORMAT(v.VEN_DATA_FIM, 'yyyy-MM') as saleMonth,
+            CAST(SUM(iv.ITE_QUANTIDADE) as float) as totalQty
+          FROM ITENS_VENDAS iv
+          JOIN VENDAS v ON v.VENDA = iv.VENDA
+          JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+          WHERE v.VEN_SITUACAO = 2
+            AND v.VEN_DATA_FIM >= DATEADD(month, -${input.months}, GETDATE())
+          GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_DESCRICAO, p.PRO_CODIGO, p.PRO_ESTOQUE, FORMAT(v.VEN_DATA_FIM, 'yyyy-MM')
+          ORDER BY ISNULL(p.PRO_NOME, p.PRO_DESCRICAO), saleMonth
+        `);
+        await pool.close();
+        // Agrupar por produto
+        const productMap = new Map<number, {
+          productId: number; productName: string; externalCode: string;
+          currentStock: number; monthlyQty: Record<string, number>;
+        }>();
+        for (const row of res.recordset as Array<{productId:number;productName:string;externalCode:string;currentStock:number;saleMonth:string;totalQty:number}>) {
+          if (!productMap.has(row.productId)) {
+            productMap.set(row.productId, {
+              productId: row.productId,
+              productName: row.productName,
+              externalCode: row.externalCode || "",
+              currentStock: Number(row.currentStock) || 0,
+              monthlyQty: {},
+            });
+          }
+          const p = productMap.get(row.productId)!;
+          p.monthlyQty[row.saleMonth] = Number(row.totalQty) || 0;
+        }
+        // Calcular média e sugestão de estoque mínimo
+        return Array.from(productMap.values()).map(p => {
+          const qtys = Object.values(p.monthlyQty);
+          const monthsWithSales = qtys.filter(q => q > 0).length;
+          const avgQty = monthsWithSales > 0 ? qtys.reduce((s, q) => s + q, 0) / monthsWithSales : 0;
+          const suggestedMinStock = Math.ceil(avgQty * 1.2);
+          return {
+            productId: p.productId,
+            productName: p.productName,
+            externalCode: p.externalCode,
+            externalName: p.productName,
+            unit: "un",
+            monthlyQty: p.monthlyQty,
+            avgQty,
+            monthsWithSales,
+            currentStock: p.currentStock,
+            suggestedMinStock,
+          };
+        }).sort((a, b) => b.avgQty - a.avgQty);
+      } catch (err) {
+        console.error("[salesAverageInove] Erro:", err instanceof Error ? err.message : err);
+        return [];
+      }
     }),
 });

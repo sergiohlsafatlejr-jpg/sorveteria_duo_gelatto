@@ -405,14 +405,14 @@ export default function SalesReport() {
   // Fonte primária: INOVE SQL Server
   const { data: inoveData, isLoading: loadingInove, error: inoveError } = trpc.inove.getSalesByProduct.useQuery(
     { month: activeMonth },
-    { retry: 1, retryDelay: 500 }
+    { retry: 1, retryDelay: 500, refetchInterval: 5 * 60 * 1000 }
   );
 
   // Fallback: importações locais confirmadas
   const { data: confirmedMonths } = trpc.salesImport.getConfirmedMonths.useQuery();
   const { data: localReport, isLoading: loadingLocal } = trpc.salesImport.getSalesReport.useQuery(
     { referenceMonth: activeMonth, compareMonth },
-    { enabled: !!inoveError && (confirmedMonths?.includes(activeMonth) ?? false) }
+    { enabled: !!inoveError && (confirmedMonths?.includes(activeMonth) ?? false), refetchInterval: 5 * 60 * 1000 }
   );
 
   const isLoading = loadingInove || (!!inoveError && loadingLocal);
@@ -495,8 +495,12 @@ export default function SalesReport() {
         </p>
       </div>
 
-      <Tabs defaultValue="mensal">
+      <Tabs defaultValue="geral">
         <TabsList className="mb-2">
+          <TabsTrigger value="geral" className="gap-2">
+            <BarChart2 className="h-4 w-4" />
+            Visão Geral
+          </TabsTrigger>
           <TabsTrigger value="mensal" className="gap-2">
             <BarChart2 className="h-4 w-4" />
             Mensal (Top 10)
@@ -505,7 +509,82 @@ export default function SalesReport() {
             <CalendarDays className="h-4 w-4" />
             Vendas da Semana
           </TabsTrigger>
+          <TabsTrigger value="pagamento" className="gap-2">
+            <DollarSign className="h-4 w-4" />
+            Por Tipo de Pagamento
+          </TabsTrigger>
         </TabsList>
+
+        {/* ─── Aba: Visão Geral (todas as informações em uma única tela) ─── */}
+        <TabsContent value="geral" className="space-y-6 mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Coluna 1: Top 10 Mensal resumido */}
+            <Card className="p-4">
+              <CardHeader className="p-0 pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart2 className="h-4 w-4 text-purple-600" />
+                  Top 10 Produtos - {activeMonth}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {loadingInove ? (
+                  <div className="p-4 text-center text-muted-foreground text-sm">Carregando...</div>
+                ) : inoveData && inoveData.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-2 font-medium">#</th>
+                          <th className="text-left p-2 font-medium">Produto</th>
+                          <th className="text-right p-2 font-medium">Qtd</th>
+                          <th className="text-right p-2 font-medium">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inoveData.slice(0, 10).map((item: any, idx: number) => (
+                          <tr key={idx} className="border-b hover:bg-muted/50">
+                            <td className="p-2 font-bold text-purple-600">{idx + 1}</td>
+                            <td className="p-2 truncate max-w-[200px]">{item.produto || item.name}</td>
+                            <td className="p-2 text-right">{item.qtd || item.quantity}</td>
+                            <td className="p-2 text-right font-mono">{fmtBRL(item.total || item.revenue)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground p-4">Sem dados disponíveis</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Coluna 2: Tipo de Pagamento resumido */}
+            <Card className="p-4">
+              <CardHeader className="p-0 pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-green-600" />
+                  Formas de Pagamento
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <PagamentoResumo />
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Vendas da Semana resumido */}
+          <Card className="p-4">
+            <CardHeader className="p-0 pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-blue-600" />
+                Vendas da Semana
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <VendasSemanaTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* ─── Aba: Mensal ─── */}
         <TabsContent value="mensal" className="space-y-6 mt-4">
@@ -753,7 +832,335 @@ export default function SalesReport() {
         <TabsContent value="semana" className="mt-4">
           <VendasSemanaTab />
         </TabsContent>
+
+        {/* ─── Aba: Por Tipo de Pagamento ─── */}
+        <TabsContent value="pagamento" className="mt-4">
+          <PagamentoTab />
+        </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ─── Aba: Por Tipo de Pagamento ────────────────────────────────────────────────────
+function PagamentoTab() {
+  function toDateStr(d: Date) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  // Inicializar com os últimos 30 dias
+  const defaultDates = useMemo(() => {
+    const today = new Date();
+    const d30 = new Date(today); d30.setDate(today.getDate() - 29);
+    return { from: toDateStr(d30), to: toDateStr(today) };
+  }, []);
+
+  const [from, setFrom] = useState(defaultDates.from);
+  const [to, setTo] = useState(defaultDates.to);
+  const [queryFrom, setQueryFrom] = useState(defaultDates.from);
+  const [queryTo, setQueryTo] = useState(defaultDates.to);
+  const [filtroTipo, setFiltroTipo] = useState<string | null>(null);
+
+  // Buscar dados REAIS de tipo de pagamento do INOVE
+  const { data: paymentData, isLoading, error } = trpc.inove.getSalesByPaymentType.useQuery(
+    { dateFrom: queryFrom, dateTo: queryTo, days: 30 },
+    { enabled: !!queryFrom && !!queryTo, retry: 1, refetchInterval: 5 * 60 * 1000 }
+  );
+
+  function handleBuscar() {
+    setQueryFrom(from);
+    setQueryTo(to);
+  }
+
+  // Mapear dados reais do backend para o formato esperado
+  const pagamentoData = useMemo(() => {
+    if (!paymentData || paymentData.length === 0) return [];
+    
+    const totalGeral = paymentData.reduce((s, p) => s + p.total, 0);
+    
+    // Mapear icones por tipo
+    function getIcone(forma: string) {
+      const lower = forma.toLowerCase();
+      if (lower.includes('pix')) return '📱';
+      if (lower.includes('dinheiro') || lower.includes('especie')) return '💵';
+      if (lower.includes('credito') || lower.includes('crédito')) return '💳';
+      if (lower.includes('debito') || lower.includes('débito')) return '🏧';
+      if (lower.includes('voucher') || lower.includes('vale')) return '🎫';
+      return '💰';
+    }
+
+    return paymentData.map(p => ({
+      tipo: p.forma,
+      icone: getIcone(p.forma),
+      valor: p.total,
+      percentual: totalGeral > 0 ? Math.round((p.total / totalGeral) * 10000) / 100 : 0,
+      qtdVendas: p.qtd_vendas,
+      ticketMedio: p.ticket_medio,
+    }));
+  }, [paymentData]);
+
+  const data = paymentData && paymentData.length > 0 ? {
+    resumo: {
+      totalRevenue: paymentData.reduce((s, p) => s + p.total, 0),
+      totalVendas: paymentData.reduce((s, p) => s + p.qtd_vendas, 0),
+    }
+  } : null;
+
+  const tiposDisponiveis = pagamentoData.map(p => p.tipo);
+
+  const filtered = useMemo(() => {
+    if (!filtroTipo) return pagamentoData;
+    return pagamentoData.filter(p => p.tipo === filtroTipo);
+  }, [pagamentoData, filtroTipo]);
+
+  function fmtDate(s: string) {
+    if (!s) return "";
+    const [y, m, d] = s.split("-");
+    return `${d}/${m}/${y}`;
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filtros */}
+      <Card className="p-4 space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <CalendarDays className="w-4 h-4" />
+          Período
+        </div>
+        <div className="flex flex-wrap gap-3 items-end">
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Data Início</Label>
+            <Input
+              type="date"
+              value={from}
+              onChange={e => setFrom(e.target.value)}
+              className="w-40 h-8 text-sm"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Data Fim</Label>
+            <Input
+              type="date"
+              value={to}
+              onChange={e => setTo(e.target.value)}
+              className="w-40 h-8 text-sm"
+            />
+          </div>
+          <Button size="sm" onClick={handleBuscar} className="gap-2 h-8">
+            <RefreshCw className="h-3.5 w-3.5" />
+            Buscar
+          </Button>
+        </div>
+      </Card>
+
+      {isLoading ? (
+        <div className="p-12 text-center text-muted-foreground">
+          <RefreshCw className="h-8 w-8 mx-auto animate-spin mb-2" />
+          Buscando dados...
+        </div>
+      ) : error ? (
+        <Card className="p-10 text-center">
+          <AlertCircle className="h-14 w-14 mx-auto mb-3 text-rose-400" />
+          <p className="text-muted-foreground font-medium">Erro ao buscar dados</p>
+          <p className="text-xs text-muted-foreground mt-1">{error.message}</p>
+        </Card>
+      ) : !paymentData || pagamentoData.length === 0 ? (
+        <Card className="p-10 text-center">
+          <Package className="h-14 w-14 mx-auto mb-3 text-muted-foreground/30" />
+          <p className="text-muted-foreground">Nenhuma venda encontrada para o período.</p>
+        </Card>
+      ) : (
+        <>
+          {/* KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="p-4">
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <CalendarDays className="h-3 w-3" />
+                Período
+              </p>
+              <p className="text-base font-bold text-purple-600">{fmtDate(queryFrom)}</p>
+              <p className="text-xs text-muted-foreground">a {fmtDate(queryTo)}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <DollarSign className="h-3 w-3" />
+                Total
+              </p>
+              <p className="text-xl font-bold">{fmtBRL(data?.resumo.totalRevenue ?? 0)}</p>
+              <p className="text-xs text-muted-foreground">{data?.resumo.totalVendas ?? 0} vendas</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <ShoppingCart className="h-3 w-3" />
+                Ticket Médio
+              </p>
+              <p className="text-xl font-bold">{fmtBRL((data?.resumo.totalRevenue ?? 0) / (data?.resumo.totalVendas || 1))}</p>
+              <p className="text-xs text-muted-foreground">por venda</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <Percent className="h-3 w-3" />
+                Tipos
+              </p>
+              <p className="text-xl font-bold">{pagamentoData.length}</p>
+              <p className="text-xs text-muted-foreground">formas de pagamento</p>
+            </Card>
+          </div>
+
+          {/* Filtro de tipo */}
+          {tiposDisponiveis.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={filtroTipo === null ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFiltroTipo(null)}
+              >
+                Todos
+              </Button>
+              {tiposDisponiveis.map(tipo => (
+                <Button
+                  key={tipo}
+                  variant={filtroTipo === tipo ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setFiltroTipo(tipo)}
+                >
+                  {tipo}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {/* Cards de Pagamento */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {filtered.map((pag) => (
+              <Card key={pag.tipo} className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <p className="text-2xl">{pag.icone}</p>
+                    <h3 className="font-semibold text-lg mt-2">{pag.tipo}</h3>
+                  </div>
+                  <Badge className="bg-blue-100 text-blue-800">{pag.percentual}%</Badge>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Faturamento</p>
+                    <p className="text-2xl font-bold">{fmtBRL(pag.valor)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Qtd. Vendas</p>
+                    <p className="text-lg font-semibold">{pag.qtdVendas}</p>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {/* Gráfico */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Distribuição por Tipo de Pagamento</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={pagamentoData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="tipo" />
+                  <YAxis />
+                  <Tooltip formatter={(value: any) => fmtBRL(value)} />
+                  <Legend />
+                  <Bar dataKey="valor" fill="#7c3aed" name="Faturamento" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Tabela */}
+          <Card>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-3 font-medium">Tipo</th>
+                      <th className="text-right p-3 font-medium">Faturamento</th>
+                      <th className="text-right p-3 font-medium">Qtd. Vendas</th>
+                      <th className="text-right p-3 font-medium">Percentual</th>
+                      <th className="text-right p-3 font-medium">Ticket Médio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((pag) => (
+                      <tr key={pag.tipo} className="border-b hover:bg-muted/50">
+                        <td className="p-3 font-medium">{pag.icone} {pag.tipo}</td>
+                        <td className="p-3 text-right font-mono">{fmtBRL(pag.valor)}</td>
+                        <td className="p-3 text-right">{pag.qtdVendas}</td>
+                        <td className="p-3 text-right">{pag.percentual}%</td>
+                        <td className="p-3 text-right font-mono">{fmtBRL(pag.valor / pag.qtdVendas)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+
+// Componente resumido de pagamento para a aba Visão Geral
+function PagamentoResumo() {
+  const defaultDates = useMemo(() => {
+    const today = new Date();
+    const d30 = new Date(today); d30.setDate(today.getDate() - 29);
+    const toDateStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { from: toDateStr(d30), to: toDateStr(today) };
+  }, []);
+
+  const { data: paymentData, isLoading } = trpc.inove.getSalesByPaymentType.useQuery(
+    { dateFrom: defaultDates.from, dateTo: defaultDates.to, days: 30 },
+    { retry: 1, refetchInterval: 5 * 60 * 1000 }
+  );
+
+  if (isLoading) return <div className="p-4 text-center text-muted-foreground text-sm">Carregando...</div>;
+  if (!paymentData || paymentData.length === 0) return <p className="text-sm text-muted-foreground p-4">Sem dados disponíveis</p>;
+
+  const totalGeral = paymentData.reduce((s, p) => s + p.total, 0);
+
+  function getIcone(forma: string) {
+    const lower = forma.toLowerCase();
+    if (lower.includes('pix')) return '📱';
+    if (lower.includes('dinheiro') || lower.includes('especie')) return '💵';
+    if (lower.includes('credito') || lower.includes('crédito')) return '💳';
+    if (lower.includes('debito') || lower.includes('débito')) return '🏧';
+    if (lower.includes('voucher') || lower.includes('vale')) return '🎫';
+    return '💰';
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="bg-muted/50">
+          <tr>
+            <th className="text-left p-2 font-medium">Forma</th>
+            <th className="text-right p-2 font-medium">Total</th>
+            <th className="text-right p-2 font-medium">Vendas</th>
+            <th className="text-right p-2 font-medium">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {paymentData.map((p, idx) => (
+            <tr key={idx} className="border-b hover:bg-muted/50">
+              <td className="p-2">{getIcone(p.forma)} {p.forma}</td>
+              <td className="p-2 text-right font-mono">{fmtBRL(p.total)}</td>
+              <td className="p-2 text-right">{p.qtd_vendas}</td>
+              <td className="p-2 text-right">{totalGeral > 0 ? Math.round((p.total / totalGeral) * 100) : 0}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

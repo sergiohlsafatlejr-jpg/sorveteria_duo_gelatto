@@ -616,9 +616,12 @@ function RedeTab() {
 
     setIsImporting(true);
     try {
-      const buffer = await file.arrayBuffer();
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const buffer = Buffer.from(uint8Array);
+      
       const result = await importMutation.mutateAsync({
-        fileBuffer: new Uint8Array(buffer) as any,
+        fileBuffer: buffer,
         fileName: file.name,
         periodStart: new Date(periodStart),
         periodEnd: new Date(periodEnd),
