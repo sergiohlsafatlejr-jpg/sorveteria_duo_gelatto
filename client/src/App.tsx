@@ -56,6 +56,7 @@ import InoveProductSales from "./pages/InoveProductSales";
 import InoveCostMargin from "./pages/InoveCostMargin";
 import InoveManagerial from "./pages/InoveManagerial";
 import PublicLoyalty from "./pages/PublicLoyalty";
+import Purchases from "./pages/Purchases";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function Router() {
@@ -73,6 +74,7 @@ function Router() {
       <Route path="/products">{() => <ProtectedRoute path="/products"><Products /></ProtectedRoute>}</Route>
       <Route path="/purchase-suggestion">{() => <ProtectedRoute path="/purchase-suggestion"><PurchaseSuggestion /></ProtectedRoute>}</Route>
       <Route path="/smart-purchase-plan">{() => <ProtectedRoute path="/smart-purchase-plan"><SmartPurchasePlanner /></ProtectedRoute>}</Route>
+      <Route path="/purchases">{() => <ProtectedRoute path="/purchases"><Purchases /></ProtectedRoute>}</Route>
       <Route path="/reports">{() => <ProtectedRoute path="/reports"><Reports /></ProtectedRoute>}</Route>
       <Route path="/gerencial">{() => <ProtectedRoute path="/gerencial"><GerencialReports /></ProtectedRoute>}</Route>
       {/* Pontos — regras e canais (gerente+) */}

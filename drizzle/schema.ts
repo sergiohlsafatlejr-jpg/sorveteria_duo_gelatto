@@ -850,3 +850,125 @@ export const redeInoveReconciliation = mysqlTable("rede_inove_reconciliation", {
 
 export type RedeInoveReconciliation = typeof redeInoveReconciliation.$inferSelect;
 export type InsertRedeInoveReconciliation = typeof redeInoveReconciliation.$inferInsert;
+
+// ─── Módulo de Compras Internas & Estoque Operacional ─────────────────────────
+
+// ── Fornecedores Operacionais ─────────────────────────────────────────────────
+export const operationalSuppliers = mysqlTable("operational_suppliers", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  phone: varchar("phone", { length: 20 }),
+  whatsapp: varchar("whatsapp", { length: 20 }),
+  email: varchar("email", { length: 320 }),
+  cnpj: varchar("cnpj", { length: 20 }),
+  categories: json("categories"), // ["limpeza", "descartaveis", ...]
+  deliveryDays: int("deliveryDays"), // prazo médio em dias
+  paymentTerms: varchar("paymentTerms", { length: 100 }), // "à vista", "30 dias", etc.
+  notes: text("notes"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type OperationalSupplier = typeof operationalSuppliers.$inferSelect;
+export type InsertOperationalSupplier = typeof operationalSuppliers.$inferInsert;
+
+// ── Itens Operacionais (Almoxarifado) ─────────────────────────────────────────
+export const operationalItems = mysqlTable("operational_items", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: mysqlEnum("category", [
+    "limpeza", "guloseimas", "caldas", "descartaveis",
+    "embalagens", "manutencao", "insumos",
+  ]).notNull(),
+  unit: varchar("unit", { length: 20 }).default("un").notNull(), // un, kg, litro, cx, pct
+  currentStock: decimal("currentStock", { precision: 10, scale: 2 }).default("0").notNull(),
+  minStock: decimal("minStock", { precision: 10, scale: 2 }).default("0").notNull(),
+  referencePrice: decimal("referencePrice", { precision: 10, scale: 2 }), // último preço pago
+  preferredSupplierId: int("preferredSupplierId"), // FK → operational_suppliers
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type OperationalItem = typeof operationalItems.$inferSelect;
+export type InsertOperationalItem = typeof operationalItems.$inferInsert;
+
+// ── Movimentações do Almoxarifado (Entradas, Consumo, Perdas, Ajustes) ───────
+export const operationalStockMovements = mysqlTable("operational_stock_movements", {
+  id: int("id").autoincrement().primaryKey(),
+  itemId: int("itemId").notNull(), // FK → operational_items
+  type: mysqlEnum("type", ["in", "consumption", "loss", "adjustment"]).notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(), // positivo=entrada, negativo=saída
+  previousStock: decimal("previousStock", { precision: 10, scale: 2 }).notNull(),
+  newStock: decimal("newStock", { precision: 10, scale: 2 }).notNull(),
+  reason: varchar("reason", { length: 255 }), // "Compra PC-2026-042", "Uso diário limpeza"
+  purchaseOrderId: int("purchaseOrderId"), // FK → purchase_orders (se entrada via compra)
+  unitCost: decimal("unitCost", { precision: 10, scale: 2 }), // custo unitário (se entrada)
+  userId: int("userId"), // quem registrou
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type OperationalStockMovement = typeof operationalStockMovements.$inferSelect;
+export type InsertOperationalStockMovement = typeof operationalStockMovements.$inferInsert;
+
+// ── Pedidos de Compra ─────────────────────────────────────────────────────────
+export const purchaseOrders = mysqlTable("purchase_orders", {
+  id: int("id").autoincrement().primaryKey(),
+  code: varchar("code", { length: 20 }).notNull().unique(), // "PC-2026-0042"
+  status: mysqlEnum("status", [
+    "draft", "requested", "approved", "rejected", "purchased", "delivered",
+  ]).default("draft").notNull(),
+  requestedBy: int("requestedBy"), // userId do solicitante
+  approvedBy: int("approvedBy"),   // userId do aprovador
+  supplierId: int("supplierId"),   // FK → operational_suppliers
+  totalEstimated: decimal("totalEstimated", { precision: 12, scale: 2 }).default("0"),
+  totalActual: decimal("totalActual", { precision: 12, scale: 2 }),
+  notes: text("notes"),
+  rejectionReason: text("rejectionReason"),
+  requestedAt: timestamp("requestedAt"),
+  approvedAt: timestamp("approvedAt"),
+  purchasedAt: timestamp("purchasedAt"),
+  deliveredAt: timestamp("deliveredAt"),
+  templateId: int("templateId"), // se gerado a partir de template
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+export type InsertPurchaseOrder = typeof purchaseOrders.$inferInsert;
+
+// ── Itens de cada Pedido de Compra ────────────────────────────────────────────
+export const purchaseOrderItems = mysqlTable("purchase_order_items_op", {
+  id: int("id").autoincrement().primaryKey(),
+  orderId: int("orderId").notNull(), // FK → purchase_orders
+  itemId: int("itemId").notNull(),   // FK → operational_items
+  itemName: varchar("itemName", { length: 255 }).notNull(), // snapshot do nome
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unit: varchar("unit", { length: 20 }).notNull(),
+  estimatedUnitPrice: decimal("estimatedUnitPrice", { precision: 10, scale: 2 }),
+  actualUnitPrice: decimal("actualUnitPrice", { precision: 10, scale: 2 }),
+  estimatedTotal: decimal("estimatedTotal", { precision: 12, scale: 2 }),
+  actualTotal: decimal("actualTotal", { precision: 12, scale: 2 }),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PurchaseOrderItem = typeof purchaseOrderItems.$inferSelect;
+export type InsertPurchaseOrderItem = typeof purchaseOrderItems.$inferInsert;
+
+// ── Templates de Compras Recorrentes ──────────────────────────────────────────
+export const purchaseTemplates = mysqlTable("purchase_templates", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 50 }), // "semanal_limpeza", "mensal_descartaveis"
+  items: json("items"), // [{itemId, quantity, unit}]
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PurchaseTemplate = typeof purchaseTemplates.$inferSelect;
+export type InsertPurchaseTemplate = typeof purchaseTemplates.$inferInsert;

@@ -41,6 +41,7 @@ import {
   Building2,
   CalendarDays,
   ChevronRight,
+  ClipboardList,
   Database,
   DollarSign,
   Gift,
@@ -93,6 +94,13 @@ const menuGroups: MenuGroup[] = [
       { icon: Brain, label: "Planejamento com IA", path: "/smart-purchase-plan" },
       { icon: TrendingUp, label: "Giro Semanal", path: "/giro-estoque" },
       { icon: BarChart3, label: "Relatórios de Estoque", path: "/reports" },
+    ],
+  },
+  {
+    icon: ClipboardList,
+    label: "Compras Internas",
+    items: [
+      { icon: ClipboardList, label: "Painel de Compras", path: "/purchases" },
     ],
   },
   {
