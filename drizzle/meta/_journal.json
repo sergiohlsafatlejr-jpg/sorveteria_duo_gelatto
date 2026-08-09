@@ -232,6 +232,13 @@
       "when": 1786318923060,
       "tag": "0032_large_mikhail_rasputin",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1786319596043,
+      "tag": "0033_loving_corsair",
+      "breakpoints": true
     }
   ]
 }

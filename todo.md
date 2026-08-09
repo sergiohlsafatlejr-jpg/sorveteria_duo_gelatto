@@ -34,3 +34,7 @@
 - [x] Corrigir coluna Produto na tela /reports/cmv (PRO_DESCRICAO → PRO_NOME)
 - [x] Ajustar layout da tela /reports/cmv para celular (responsivo)
 - [x] Adicionar filtro por data (De/Até + Filtrar) na aba Pagamentos do Relatório de Vendas
+- [x] Criar tabela box_stock e box_stock_movements para controle de caixas 10L
+- [x] Criar router boxStock com CRUD e endpoints de entrada/saída
+- [x] Criar página /stock/boxes para controle de caixas 10L com entrada/saída simples
+- [x] Adicionar link no menu lateral para a página de Caixas 10L (seção Estoque)

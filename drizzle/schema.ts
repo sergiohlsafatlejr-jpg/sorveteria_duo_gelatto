@@ -994,3 +994,31 @@ export const productGoals = mysqlTable("product_goals", {
 export type ProductGoal = typeof productGoals.$inferSelect;
 export type InsertProductGoal = typeof productGoals.$inferInsert;
 
+// ─── Controle de Caixas 10L ──────────────────────────────────────────────────
+export const boxStock = mysqlTable("box_stock", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  inoveProductId: int("inoveProductId"),
+  costPrice: decimal("costPrice", { precision: 10, scale: 2 }).default("0"),
+  currentStock: int("currentStock").default(0).notNull(),
+  minStock: int("minStock").default(0).notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type BoxStock = typeof boxStock.$inferSelect;
+export type InsertBoxStock = typeof boxStock.$inferInsert;
+
+export const boxStockMovements = mysqlTable("box_stock_movements", {
+  id: int("id").autoincrement().primaryKey(),
+  boxId: int("boxId").notNull(),
+  type: mysqlEnum("type", ["entrada", "saida"]).notNull(),
+  quantity: int("quantity").notNull(),
+  previousStock: int("previousStock").notNull(),
+  newStock: int("newStock").notNull(),
+  notes: varchar("notes", { length: 500 }),
+  userId: int("userId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type BoxStockMovement = typeof boxStockMovements.$inferSelect;
+export type InsertBoxStockMovement = typeof boxStockMovements.$inferInsert;

@@ -153,3 +153,5 @@ function App() {
 }
 
 export default App;
+import BoxesControl from "./pages/stock/BoxesControl";
+      <Route path="/stock/boxes">{() => <ProtectedRoute path="/stock/boxes"><BoxesControl /></ProtectedRoute>}</Route>

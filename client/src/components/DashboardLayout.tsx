@@ -94,6 +94,7 @@ const menuGroups: MenuGroup[] = [
       { icon: Brain, label: "Planejamento com IA", path: "/smart-purchase-plan" },
       { icon: TrendingUp, label: "Giro Semanal", path: "/giro-estoque" },
       { icon: BarChart3, label: "Relatórios de Estoque", path: "/reports" },
+      { icon: Package, label: "Caixas 10L", path: "/stock/boxes" },
     ],
   },
   {
