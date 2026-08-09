@@ -1720,7 +1720,7 @@ export const inoveRouter = router({
 
   // ── Relatório: Formas de Pagamento INOVE (com fallback local) ────────────────
   getPaymentMethodsInove: protectedProcedure
-    .input(z.object({ referenceMonth: z.string().optional() }))
+    .input(z.object({ referenceMonth: z.string().optional(), dateFrom: z.string().optional(), dateTo: z.string().optional() }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
@@ -1753,9 +1753,14 @@ export const inoveRouter = router({
       const config = connRows[0];
       try {
         const pool = await createInovePool(config);
-        const monthFilter = input.referenceMonth
-          ? `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`
-          : `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
+        let monthFilter: string;
+        if (input.dateFrom && input.dateTo) {
+          monthFilter = `AND CAST(v.VEN_DATA_FIM AS DATE) >= '${input.dateFrom}' AND CAST(v.VEN_DATA_FIM AS DATE) <= '${input.dateTo}'`;
+        } else if (input.referenceMonth) {
+          monthFilter = `AND YEAR(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[0])} AND MONTH(v.VEN_DATA_FIM) = ${parseInt(input.referenceMonth.split('-')[1])}`;
+        } else {
+          monthFilter = `AND v.VEN_DATA_FIM >= DATEADD(month, -1, GETDATE())`;
+        }
         const res = await pool.request().query(`
           SELECT
             fp.PAG_NOME as forma,

@@ -33,3 +33,4 @@
 - [x] Remover aba "Ranking Produtos" do Relatório de Vendas (redundante com "Por Período")
 - [x] Corrigir coluna Produto na tela /reports/cmv (PRO_DESCRICAO → PRO_NOME)
 - [x] Ajustar layout da tela /reports/cmv para celular (responsivo)
+- [x] Adicionar filtro por data (De/Até + Filtrar) na aba Pagamentos do Relatório de Vendas

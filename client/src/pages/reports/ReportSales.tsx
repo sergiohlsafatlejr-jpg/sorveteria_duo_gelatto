@@ -293,9 +293,15 @@ function RankingProdutosTab() {
 
 // ─── Aba: Formas de Pagamento ────────────────────────────────────────────────
 function PagamentosTab() {
-  const [month, setMonth] = useState(getCurrentMonth());
-  const { data: rawPayments = [], isLoading } = trpc.inove.getPaymentMethodsInove.useQuery(
-    { referenceMonth: month },
+  const today = new Date().toISOString().split("T")[0];
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
+  const [dateFrom, setDateFrom] = useState(weekAgo);
+  const [dateTo, setDateTo] = useState(today);
+  const [appliedFrom, setAppliedFrom] = useState(weekAgo);
+  const [appliedTo, setAppliedTo] = useState(today);
+
+  const { data: rawPayments = [], isLoading, refetch } = trpc.inove.getPaymentMethodsInove.useQuery(
+    { dateFrom: appliedFrom, dateTo: appliedTo },
     { refetchInterval: 5 * 60 * 1000 }
   );
   const { data: rawEvolution = [] } = trpc.inove.getMonthlySalesEvolutionInove.useQuery();
@@ -316,13 +322,17 @@ function PagamentosTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Select value={month} onValueChange={setMonth}>
-          <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {getMonthOptions().map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">De</label>
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-40 h-9" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">Até</label>
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40 h-9" />
+        </div>
+        <Button size="sm" onClick={() => { setAppliedFrom(dateFrom); setAppliedTo(dateTo); }}>Filtrar</Button>
+        <Button size="sm" variant="ghost" onClick={() => refetch()}><RefreshCw className="w-4 h-4" /></Button>
         <Badge variant="outline" className="text-xs">PDV INOVE</Badge>
       </div>
 
