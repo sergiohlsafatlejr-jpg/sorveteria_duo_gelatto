@@ -136,12 +136,12 @@ export const boxStockRouter = router({
 
   // Relatório mensal de consumo (saídas por mês/sabor)
   getMonthlyConsumption: protectedProcedure
-    .input(z.object({ months: z.number().int().min(1).max(12).default(6) }))
+    .input(z.object({ months: z.number().int().min(0).max(12).default(6) }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
       const since = new Date();
-      since.setMonth(since.getMonth() - input.months);
+      if (input.months === 0) { since.setDate(since.getDate() - 7); } else { since.setMonth(since.getMonth() - input.months); }
       const rows = await db.select({
         boxId: boxStockMovements.boxId,
         month: sql<string>`DATE_FORMAT(${boxStockMovements.createdAt}, '%Y-%m')`,
@@ -199,4 +199,34 @@ export const boxStockRouter = router({
       return { updated: 0, message: `Erro: ${err instanceof Error ? err.message : "desconhecido"}` };
     }
   }),
+
+  // CMV baseado nas caixas abertas no período
+  getCmvReport: protectedProcedure
+    .input(z.object({ referenceMonth: z.string().optional() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const now = new Date();
+      const month = input.referenceMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const [year, mon] = month.split("-").map(Number);
+      const startDate = new Date(year, mon - 1, 1);
+      const endDate = new Date(year, mon, 0, 23, 59, 59);
+      const movs = await db.select().from(boxStockMovements)
+        .where(and(
+          eq(boxStockMovements.type, "saida"),
+          gte(boxStockMovements.createdAt, startDate),
+          lte(boxStockMovements.createdAt, endDate)
+        ));
+      const allBoxes = await db.select().from(boxStock);
+      const report = allBoxes.filter(b => movs.some(m => m.boxId === b.id)).map(box => {
+        const exits = movs.filter(m => m.boxId === box.id);
+        const totalExits = exits.reduce((s, m) => s + m.quantity, 0);
+        const costPerBox = Number(box.costPrice) || 0;
+        const totalCmv = totalExits * costPerBox;
+        return { id: box.id, name: box.name, exits: totalExits, costPerBox, totalCmv };
+      });
+      const totalCmvGeral = report.reduce((s, r) => s + r.totalCmv, 0);
+      const totalCaixas = report.reduce((s, r) => s + r.exits, 0);
+      return { month, report, totalCmvGeral, totalCaixas };
+    }),
 });

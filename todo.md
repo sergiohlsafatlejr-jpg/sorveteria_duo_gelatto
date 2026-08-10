@@ -42,3 +42,5 @@
 - [x] Notificação de reposição quando caixa ficar abaixo do estoque mínimo (cron diário 09:00)
 - [x] Relatório mensal de consumo de caixas 10L (gráfico por sabor/mês)
 - [x] Atualização automática de custo das caixas quando mudar no INOVE (botão Custos)
+- [x] Filtro por período no gráfico de consumo de caixas (Semana, Mês, 6 Meses)
+- [x] Relatório de CMV baseado nas caixas abertas no mês (custo real por caixa aberta)

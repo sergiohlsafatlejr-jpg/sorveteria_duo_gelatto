@@ -17,11 +17,13 @@ export default function BoxesControl() {
   const utils = trpc.useUtils();
   const { data: boxes = [], isLoading } = trpc.boxStock.list.useQuery();
   const { data: movements = [] } = trpc.boxStock.getMovements.useQuery({ limit: 30 });
-  const { data: monthlyData = [] } = trpc.boxStock.getMonthlyConsumption.useQuery({ months: 6 });
+  const [chartPeriod, setChartPeriod] = useState<number>(1);
+  const { data: monthlyData = [] } = trpc.boxStock.getMonthlyConsumption.useQuery({ months: chartPeriod });
   const syncCosts = trpc.boxStock.syncCosts.useMutation({
     onSuccess: (res) => { utils.boxStock.list.invalidate(); toast.success(res.message); },
     onError: (e: any) => toast.error(e.message),
   });
+  const { data: cmvData } = trpc.boxStock.getCmvReport.useQuery({});
   const addEntry = trpc.boxStock.addEntry.useMutation({
     onSuccess: () => { utils.boxStock.list.invalidate(); utils.boxStock.getMovements.invalidate(); toast.success("Entrada registrada!"); },
     onError: (e) => toast.error(e.message),
@@ -206,7 +208,7 @@ export default function BoxesControl() {
         {/* Gráfico de Consumo Mensal */}
         {showChart && monthlyData.length > 0 && (
           <Card>
-            <CardHeader><CardTitle className="text-base">Consumo Mensal de Caixas (Saídas)</CardTitle></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between"><CardTitle className="text-base">Consumo de Caixas (Saídas)</CardTitle><div className="flex gap-1">{[{l:"Semana",v:0},{l:"Mês",v:1},{l:"6 Meses",v:6}].map(p=>(<button key={p.v} onClick={()=>setChartPeriod(p.v)} className={`px-2 py-1 text-xs rounded ${chartPeriod===p.v?"bg-primary text-primary-foreground":"bg-muted hover:bg-muted/80"}`}>{p.l}</button>))}</div></CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={(() => {
@@ -230,6 +232,43 @@ export default function BoxesControl() {
                   ))}
                 </BarChart>
               </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* CMV de Caixas do Mês */}
+        {cmvData && cmvData.report.length > 0 && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base">CMV Caixas — {cmvData.month}</CardTitle>
+              <div className="text-right">
+                <p className="text-lg font-bold text-orange-600">{fmt(cmvData.totalCmvGeral)}</p>
+                <p className="text-xs text-muted-foreground">{cmvData.totalCaixas} caixas abertas</p>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs sm:text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left py-2 px-3">Sabor</th>
+                      <th className="text-right py-2 px-3">Cx Abertas</th>
+                      <th className="text-right py-2 px-3">Custo/Cx</th>
+                      <th className="text-right py-2 px-3">CMV Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cmvData.report.map((r: any) => (
+                      <tr key={r.id} className="border-b">
+                        <td className="py-2 px-3 font-medium">{r.name}</td>
+                        <td className="py-2 px-3 text-right font-mono">{r.exits}</td>
+                        <td className="py-2 px-3 text-right font-mono">{fmt(r.costPerBox)}</td>
+                        <td className="py-2 px-3 text-right font-mono font-semibold text-orange-600">{fmt(r.totalCmv)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
         )}
