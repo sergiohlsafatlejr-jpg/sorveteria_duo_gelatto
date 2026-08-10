@@ -23,6 +23,10 @@ export default function BoxesControl() {
     onSuccess: (res) => { utils.boxStock.list.invalidate(); toast.success(res.message); },
     onError: (e: any) => toast.error(e.message),
   });
+  const syncFromInove = trpc.boxStock.syncFromInove.useMutation({
+    onSuccess: (res) => { utils.boxStock.list.invalidate(); toast.success(res.message); },
+    onError: (e: any) => toast.error(e.message),
+  });
   const { data: cmvData } = trpc.boxStock.getCmvReport.useQuery({});
   const addEntry = trpc.boxStock.addEntry.useMutation({
     onSuccess: () => { utils.boxStock.list.invalidate(); utils.boxStock.getMovements.invalidate(); toast.success("Entrada registrada!"); },
@@ -88,6 +92,9 @@ export default function BoxesControl() {
             <Button size="sm" onClick={() => setShowAdd(true)}>
               <PackagePlus className="w-4 h-4 mr-1" /> Nova Caixa
             </Button>
+            <Button size="sm" variant="default" onClick={() => syncFromInove.mutate()} disabled={syncFromInove.isPending}>
+              <RefreshCw className={`w-4 h-4 mr-1 ${syncFromInove.isPending ? "animate-spin" : ""}`} /> Importar INOVE
+            </Button>
           </div>
         </div>
 
@@ -134,7 +141,10 @@ export default function BoxesControl() {
             <CardContent className="p-8 text-center text-muted-foreground">
               <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
               <p>Nenhuma caixa cadastrada.</p>
-              <p className="text-sm mt-1">Clique em "Nova Caixa" para começar.</p>
+              <p className="text-sm mt-1">Clique em "Importar INOVE" para buscar automaticamente as caixas 10L do sistema.</p>
+              <Button className="mt-3" onClick={() => syncFromInove.mutate()} disabled={syncFromInove.isPending}>
+                <RefreshCw className={`w-4 h-4 mr-1 ${syncFromInove.isPending ? "animate-spin" : ""}`} /> Importar Caixas do INOVE
+              </Button>
             </CardContent>
           </Card>
         ) : (

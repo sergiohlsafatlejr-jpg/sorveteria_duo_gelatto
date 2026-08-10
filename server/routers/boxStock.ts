@@ -200,6 +200,53 @@ export const boxStockRouter = router({
     }
   }),
 
+  // Sincronizar caixas 10L do INOVE automaticamente
+  syncFromInove: protectedProcedure.mutation(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const connRows = await db.select().from(inoveConnectorConfig).limit(1);
+    if (!connRows.length || !connRows[0].active) return { added: 0, message: "INOVE não conectado" };
+    const config = connRows[0];
+    try {
+      const pool = await new mssqlLib.ConnectionPool({
+        server: config.host,
+        port: config.port ?? 1433,
+        database: config.database,
+        user: config.username,
+        password: config.password ?? "",
+        options: { encrypt: false, trustServerCertificate: true },
+        connectionTimeout: 10000,
+        requestTimeout: 15000,
+      }).connect();
+      const res = await pool.request().query(`
+        SELECT PRO_NOME as nome, CAST(ISNULL(PRO_CUSTO, 0) as float) as custo
+        FROM PRODUTOS
+        WHERE PRO_ATIVO = 'S'
+          AND (PRO_NOME LIKE '%10 L%' OR PRO_NOME LIKE '%10L%' OR PRO_NOME LIKE '%10 Litros%' OR PRO_NOME LIKE '%10Litros%')
+        ORDER BY PRO_NOME
+      `);
+      await pool.close();
+      const existingBoxes = await db.select().from(boxStock);
+      const existingNames = existingBoxes.map(b => b.name.toLowerCase());
+      let added = 0;
+      for (const row of res.recordset as Array<{nome: string; custo: number}>) {
+        if (!existingNames.includes(row.nome.toLowerCase())) {
+          await db.insert(boxStock).values({
+            name: row.nome,
+            costPrice: row.custo.toFixed(2),
+            currentStock: 0,
+            minStock: 2,
+            active: true,
+          });
+          added++;
+        }
+      }
+      return { added, total: res.recordset.length, message: `${added} caixa(s) importada(s) do INOVE (${res.recordset.length} encontradas)` };
+    } catch (err) {
+      return { added: 0, total: 0, message: `Erro: ${err instanceof Error ? err.message : "desconhecido"}` };
+    }
+  }),
+
   // CMV baseado nas caixas abertas no período
   getCmvReport: protectedProcedure
     .input(z.object({ referenceMonth: z.string().optional() }))
