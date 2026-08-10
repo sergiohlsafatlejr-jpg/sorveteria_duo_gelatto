@@ -44,3 +44,7 @@
 - [x] Atualização automática de custo das caixas quando mudar no INOVE (botão Custos)
 - [x] Filtro por período no gráfico de consumo de caixas (Semana, Mês, 6 Meses)
 - [x] Relatório de CMV baseado nas caixas abertas no mês (custo real por caixa aberta)
+- [x] Criar tabela box_stock_snapshots para fechamento mensal de caixas
+- [x] Cron automático no dia 1 para salvar snapshot do estoque (estoque inicial do mês)
+- [x] Resumo mensal: card com estoque inicial + entradas - saídas = estoque final
+- [x] Botão de ajuste de estoque (contagem física) com cálculo de diferença

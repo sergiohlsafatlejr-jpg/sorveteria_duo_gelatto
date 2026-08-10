@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { boxStock, boxStockMovements, inoveConnectorConfig } from "../../drizzle/schema";
+import { boxStock, boxStockMovements, boxStockSnapshots, inoveConnectorConfig } from "../../drizzle/schema";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { createInovePool } from "./inove";
 
@@ -258,4 +258,86 @@ export const boxStockRouter = router({
       const totalCaixas = report.reduce((s, r) => s + r.exits, 0);
       return { month, report, totalCmvGeral, totalCaixas };
     }),
+
+  // Obter resumo mensal (inicial + entradas - saídas = final)
+  getMonthlyResume: protectedProcedure
+    .input(z.object({ month: z.string().optional() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const now = new Date();
+      const month = input.month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const [year, mon] = month.split("-").map(Number);
+      const startDate = new Date(year, mon - 1, 1);
+      const endDate = new Date(year, mon, 0, 23, 59, 59);
+      const allBoxes = await db.select().from(boxStock).where(eq(boxStock.active, true));
+      const snapshots = await db.select().from(boxStockSnapshots).where(eq(boxStockSnapshots.month, month));
+      const movs = await db.select().from(boxStockMovements)
+        .where(and(gte(boxStockMovements.createdAt, startDate), lte(boxStockMovements.createdAt, endDate)));
+      const resume = allBoxes.map(box => {
+        const snap = snapshots.find(s => s.boxId === box.id);
+        const initialStock = snap ? snap.initialStock : box.currentStock;
+        const entries = movs.filter(m => m.boxId === box.id && m.type === "entrada").reduce((s, m) => s + m.quantity, 0);
+        const exits = movs.filter(m => m.boxId === box.id && m.type === "saida").reduce((s, m) => s + m.quantity, 0);
+        const finalStock = box.currentStock;
+        return { id: box.id, name: box.name, initialStock, entries, exits, finalStock };
+      });
+      const totals = {
+        initialStock: resume.reduce((s, r) => s + r.initialStock, 0),
+        entries: resume.reduce((s, r) => s + r.entries, 0),
+        exits: resume.reduce((s, r) => s + r.exits, 0),
+        finalStock: resume.reduce((s, r) => s + r.finalStock, 0),
+      };
+      return { month, resume, totals };
+    }),
+
+  // Ajuste de estoque (contagem física)
+  adjustStock: protectedProcedure
+    .input(z.object({
+      boxId: z.number(),
+      realStock: z.number().int().min(0),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const [box] = await db.select().from(boxStock).where(eq(boxStock.id, input.boxId));
+      if (!box) throw new Error("Caixa não encontrada");
+      const diff = input.realStock - box.currentStock;
+      if (diff === 0) return { success: true, diff: 0, message: "Estoque já está correto" };
+      await db.insert(boxStockMovements).values({
+        boxId: input.boxId,
+        type: diff > 0 ? "entrada" : "saida",
+        quantity: Math.abs(diff),
+        previousStock: box.currentStock,
+        newStock: input.realStock,
+        notes: input.notes || `Ajuste contagem física (${diff > 0 ? "+" : ""}${diff})`,
+        userId: ctx.user?.id ?? null,
+      });
+      await db.update(boxStock).set({ currentStock: input.realStock }).where(eq(boxStock.id, input.boxId));
+      return { success: true, diff, message: `Ajuste de ${diff > 0 ? "+" : ""}${diff} caixa(s)` };
+    }),
+
+  // Criar snapshot mensal (chamado pelo cron no dia 1)
+  createMonthlySnapshot: protectedProcedure.mutation(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const existing = await db.select().from(boxStockSnapshots).where(eq(boxStockSnapshots.month, month));
+    if (existing.length > 0) return { created: 0, message: `Snapshot de ${month} já existe` };
+    const allBoxes = await db.select().from(boxStock).where(eq(boxStock.active, true));
+    for (const box of allBoxes) {
+      await db.insert(boxStockSnapshots).values({
+        boxId: box.id,
+        month,
+        initialStock: box.currentStock,
+        entries: 0,
+        exits: 0,
+        adjustments: 0,
+        finalStock: box.currentStock,
+      });
+    }
+    return { created: allBoxes.length, message: `Snapshot de ${month} criado com ${allBoxes.length} caixa(s)` };
+  }),
 });

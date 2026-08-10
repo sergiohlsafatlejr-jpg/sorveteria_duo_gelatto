@@ -684,6 +684,11 @@ export function registerCronJobs(): void {
   console.log("[cron]   → sync-sales-cache: todos os dias às 08:05 (Brasília)");
   console.log("[cron]   → check-daily-goal-alert: todos os dias às 22:00 (Brasília)");
   console.log("[cron]   → check-box-stock-alert: todos os dias às 09:00 (Brasília)");
+  // Snapshot mensal de caixas no dia 1 às 00:05
+  cron.schedule("5 0 1 * *", createMonthlyBoxSnapshot, {
+    timezone: "America/Sao_Paulo",
+  });
+  console.log("[cron]   → box-monthly-snapshot: dia 1 de cada mês às 00:05 (Brasília)");
 }
 
 // Exportar para uso no endpoint manual (disparar agora)
@@ -706,5 +711,30 @@ async function checkBoxStockAlert() {
     console.log(`[cron] Alerta de caixas: ${lowBoxes.length} abaixo do mínimo`);
   } catch (err) {
     console.error("[cron] Erro checkBoxStockAlert:", err instanceof Error ? err.message : err);
+  }
+}
+
+// Snapshot mensal de estoque de caixas (dia 1 de cada mês às 00:05)
+async function createMonthlyBoxSnapshot() {
+  try {
+    const { getDb } = await import("./db");
+    const { boxStock, boxStockSnapshots } = await import("../drizzle/schema");
+    const { eq } = await import("drizzle-orm");
+    const db = await getDb();
+    if (!db) return;
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const existing = await db.select().from(boxStockSnapshots).where(eq(boxStockSnapshots.month, month));
+    if (existing.length > 0) { console.log(`[cron/box-snapshot] Snapshot de ${month} já existe`); return; }
+    const allBoxes = await db.select().from(boxStock).where(eq(boxStock.active, true));
+    for (const box of allBoxes) {
+      await db.insert(boxStockSnapshots).values({
+        boxId: box.id, month, initialStock: box.currentStock,
+        entries: 0, exits: 0, adjustments: 0, finalStock: box.currentStock,
+      });
+    }
+    console.log(`[cron/box-snapshot] ✅ Snapshot de ${month} criado com ${allBoxes.length} caixa(s)`);
+  } catch (err) {
+    console.error("[cron] Erro createMonthlyBoxSnapshot:", err instanceof Error ? err.message : err);
   }
 }

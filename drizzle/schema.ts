@@ -1022,3 +1022,17 @@ export const boxStockMovements = mysqlTable("box_stock_movements", {
 });
 export type BoxStockMovement = typeof boxStockMovements.$inferSelect;
 export type InsertBoxStockMovement = typeof boxStockMovements.$inferInsert;
+
+// Snapshots mensais de estoque de caixas
+export const boxStockSnapshots = mysqlTable("box_stock_snapshots", {
+  id: int("id").primaryKey().autoincrement(),
+  boxId: int("boxId").notNull(),
+  month: varchar("month", { length: 7 }).notNull(), // "2026-08"
+  initialStock: int("initialStock").notNull(),
+  entries: int("entries").notNull().default(0),
+  exits: int("exits").notNull().default(0),
+  adjustments: int("adjustments").notNull().default(0),
+  finalStock: int("finalStock").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type BoxStockSnapshot = typeof boxStockSnapshots.$inferSelect;

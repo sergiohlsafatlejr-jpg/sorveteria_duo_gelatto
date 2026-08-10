@@ -28,6 +28,11 @@ export default function BoxesControl() {
     onError: (e: any) => toast.error(e.message),
   });
   const { data: cmvData } = trpc.boxStock.getCmvReport.useQuery({});
+  const { data: resumeData } = trpc.boxStock.getMonthlyResume.useQuery({});
+  const adjustStock = trpc.boxStock.adjustStock.useMutation({
+    onSuccess: (res) => { utils.boxStock.list.invalidate(); utils.boxStock.getMovements.invalidate(); utils.boxStock.getMonthlyResume.invalidate(); toast.success(res.message); },
+    onError: (e: any) => toast.error(e.message),
+  });
   const addEntry = trpc.boxStock.addEntry.useMutation({
     onSuccess: () => { utils.boxStock.list.invalidate(); utils.boxStock.getMovements.invalidate(); toast.success("Entrada registrada!"); },
     onError: (e) => toast.error(e.message),
@@ -54,6 +59,9 @@ export default function BoxesControl() {
   const [exitQty, setExitQty] = useState<Record<number, number>>({});
   const [showHistory, setShowHistory] = useState(false);
   const [showChart, setShowChart] = useState(false);
+  const [showResume, setShowResume] = useState(true);
+  const [adjustBoxId, setAdjustBoxId] = useState<number | null>(null);
+  const [adjustQty, setAdjustQty] = useState("");
   const [inoveSearch, setInoveSearch] = useState("10");
   const [showInove, setShowInove] = useState(false);
   const { data: inoveProducts } = trpc.inove.getStock.useQuery(
@@ -132,6 +140,83 @@ export default function BoxesControl() {
             </span>
           </div>
         )}
+
+        {/* Resumo Mensal */}
+        {resumeData && resumeData.resume.length > 0 && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">Resumo Mensal — {resumeData.month}</CardTitle>
+              <Badge variant="outline" className="text-xs">
+                Inicial: {resumeData.totals.initialStock} + Entradas: {resumeData.totals.entries} - Saídas: {resumeData.totals.exits} = Final: {resumeData.totals.finalStock}
+              </Badge>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs sm:text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left py-2 px-3">Sabor</th>
+                      <th className="text-right py-2 px-3">Inicial</th>
+                      <th className="text-right py-2 px-3 text-green-600">+ Entradas</th>
+                      <th className="text-right py-2 px-3 text-red-600">- Saídas</th>
+                      <th className="text-right py-2 px-3 font-bold">= Final</th>
+                      <th className="text-center py-2 px-3">Ajustar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resumeData.resume.map((r: any) => (
+                      <tr key={r.id} className="border-b">
+                        <td className="py-2 px-3 font-medium">{r.name}</td>
+                        <td className="py-2 px-3 text-right font-mono">{r.initialStock}</td>
+                        <td className="py-2 px-3 text-right font-mono text-green-600">{r.entries > 0 ? `+${r.entries}` : "0"}</td>
+                        <td className="py-2 px-3 text-right font-mono text-red-600">{r.exits > 0 ? `-${r.exits}` : "0"}</td>
+                        <td className="py-2 px-3 text-right font-mono font-bold">{r.finalStock}</td>
+                        <td className="py-2 px-3 text-center">
+                          <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => { setAdjustBoxId(r.id); setAdjustQty(String(r.finalStock)); }}>
+                            Ajustar
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Dialog Ajuste de Estoque */}
+        <Dialog open={adjustBoxId !== null} onOpenChange={(open) => { if (!open) setAdjustBoxId(null); }}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Ajuste de Estoque (Contagem Física)</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Informe a quantidade real de caixas após contagem física. O sistema calculará a diferença automaticamente.
+              </p>
+              <div>
+                <label className="text-sm font-medium">Estoque Real (contagem)</label>
+                <Input type="number" min={0} value={adjustQty} onChange={e => setAdjustQty(e.target.value)} />
+              </div>
+              {adjustBoxId && (
+                <p className="text-xs text-muted-foreground">
+                  Estoque no sistema: {boxes.find(b => b.id === adjustBoxId)?.currentStock ?? 0} | 
+                  Diferença: {parseInt(adjustQty || "0") - (boxes.find(b => b.id === adjustBoxId)?.currentStock ?? 0)} caixa(s)
+                </p>
+              )}
+              <Button
+                className="w-full"
+                onClick={() => {
+                  if (adjustBoxId) {
+                    adjustStock.mutate({ boxId: adjustBoxId, realStock: parseInt(adjustQty) || 0 });
+                    setAdjustBoxId(null);
+                  }
+                }}
+              >
+                Confirmar Ajuste
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Lista de Caixas */}
         {isLoading ? (
