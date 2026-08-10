@@ -3,7 +3,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { boxStock, boxStockMovements, inoveConnectorConfig } from "../../drizzle/schema";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
-import * as mssqlLib from "mssql";
+import { createInovePool } from "./inove";
 
 export const boxStockRouter = router({
   // Listar todas as caixas ativas
@@ -170,22 +170,13 @@ export const boxStockRouter = router({
     const allBoxes = await db.select().from(boxStock).where(eq(boxStock.active, true));
     if (allBoxes.length === 0) return { updated: 0, message: "Nenhuma caixa cadastrada" };
     try {
-      const pool = await new mssqlLib.ConnectionPool({
-        server: config.host,
-        port: config.port ?? 1433,
-        database: config.database,
-        user: config.username,
-        password: config.password ?? "",
-        options: { encrypt: false, trustServerCertificate: true },
-        connectionTimeout: 10000,
-        requestTimeout: 15000,
-      }).connect();
+      const pool = await createInovePool(config);
       const names = allBoxes.map(b => `'${b.name.replace(/'/g, "''")}'`).join(",");
       const res = await pool.request().query(`
         SELECT PRO_NOME as nome, CAST(ISNULL(PRO_CUSTO, 0) as float) as custo
         FROM PRODUTOS WHERE PRO_ATIVO = 'S' AND PRO_NOME IN (${names})
       `);
-      await pool.close();
+      try { await pool.close(); } catch {}
       let updated = 0;
       for (const row of res.recordset as Array<{nome: string; custo: number}>) {
         const box = allBoxes.find(b => b.name.toLowerCase() === row.nome.toLowerCase());
@@ -208,16 +199,7 @@ export const boxStockRouter = router({
     if (!connRows.length || !connRows[0].active) return { added: 0, message: "INOVE não conectado" };
     const config = connRows[0];
     try {
-      const pool = await new mssqlLib.ConnectionPool({
-        server: config.host,
-        port: config.port ?? 1433,
-        database: config.database,
-        user: config.username,
-        password: config.password ?? "",
-        options: { encrypt: false, trustServerCertificate: true },
-        connectionTimeout: 10000,
-        requestTimeout: 15000,
-      }).connect();
+      const pool = await createInovePool(config);
       const res = await pool.request().query(`
         SELECT PRO_NOME as nome, CAST(ISNULL(PRO_CUSTO, 0) as float) as custo
         FROM PRODUTOS
@@ -225,7 +207,7 @@ export const boxStockRouter = router({
           AND (PRO_NOME LIKE '%10 L%' OR PRO_NOME LIKE '%10L%' OR PRO_NOME LIKE '%10 Litros%' OR PRO_NOME LIKE '%10Litros%')
         ORDER BY PRO_NOME
       `);
-      await pool.close();
+      try { await pool.close(); } catch {}
       const existingBoxes = await db.select().from(boxStock);
       const existingNames = existingBoxes.map(b => b.name.toLowerCase());
       let added = 0;
