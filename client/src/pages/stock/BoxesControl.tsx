@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Package, Plus, Minus, History, AlertTriangle, PackagePlus, RefreshCw, BarChart2 } from "lucide-react";
+import { Package, Plus, Minus, History, AlertTriangle, PackagePlus, RefreshCw, BarChart2, Search } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -50,6 +50,12 @@ export default function BoxesControl() {
   const [exitQty, setExitQty] = useState<Record<number, number>>({});
   const [showHistory, setShowHistory] = useState(false);
   const [showChart, setShowChart] = useState(false);
+  const [inoveSearch, setInoveSearch] = useState("10");
+  const [showInove, setShowInove] = useState(false);
+  const { data: inoveProducts } = trpc.inove.getStock.useQuery(
+    { search: inoveSearch, page: 1, pageSize: 20 },
+    { enabled: showInove && inoveSearch.length >= 2 }
+  );
 
   const totalCaixas = boxes.reduce((s, b) => s + b.currentStock, 0);
   const alertas = boxes.filter(b => b.currentStock <= b.minStock);
@@ -396,10 +402,3 @@ export default function BoxesControl() {
     </DashboardLayout>
   );
 }
-import { Search } from "lucide-react";
-  const [inoveSearch, setInoveSearch] = useState("10");
-  const [showInove, setShowInove] = useState(false);
-  const { data: inoveProducts } = trpc.inove.getStock.useQuery(
-    { search: inoveSearch, page: 1, pageSize: 20 },
-    { enabled: showInove && inoveSearch.length >= 2 }
-  );
