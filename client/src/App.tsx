@@ -62,6 +62,7 @@ import Purchases from "./pages/Purchases";
 import ReportSales from "./pages/reports/ReportSales";
 import ReportCMV from "./pages/reports/ReportCMV";
 import ReportManagerial from "./pages/reports/ReportManagerial";
+import BoxesControl from "./pages/stock/BoxesControl";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function Router() {
@@ -133,6 +134,7 @@ function Router() {
       {/* Acesso negado */}
       <Route path="/unauthorized" component={Unauthorized} />
       <Route path="/nfe-import" component={NfeImport} />
+      <Route path="/stock/boxes">{() => <ProtectedRoute path="/stock/boxes"><BoxesControl /></ProtectedRoute>}</Route>
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
@@ -153,5 +155,3 @@ function App() {
 }
 
 export default App;
-import BoxesControl from "./pages/stock/BoxesControl";
-      <Route path="/stock/boxes">{() => <ProtectedRoute path="/stock/boxes"><BoxesControl /></ProtectedRoute>}</Route>
