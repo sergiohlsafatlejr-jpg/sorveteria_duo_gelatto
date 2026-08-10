@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Package, Plus, Minus, History, AlertTriangle, PackagePlus } from "lucide-react";
+import { Package, Plus, Minus, History, AlertTriangle, PackagePlus, RefreshCw, BarChart2 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -16,6 +17,11 @@ export default function BoxesControl() {
   const utils = trpc.useUtils();
   const { data: boxes = [], isLoading } = trpc.boxStock.list.useQuery();
   const { data: movements = [] } = trpc.boxStock.getMovements.useQuery({ limit: 30 });
+  const { data: monthlyData = [] } = trpc.boxStock.getMonthlyConsumption.useQuery({ months: 6 });
+  const syncCosts = trpc.boxStock.syncCosts.useMutation({
+    onSuccess: (res) => { utils.boxStock.list.invalidate(); toast.success(res.message); },
+    onError: (e: any) => toast.error(e.message),
+  });
   const addEntry = trpc.boxStock.addEntry.useMutation({
     onSuccess: () => { utils.boxStock.list.invalidate(); utils.boxStock.getMovements.invalidate(); toast.success("Entrada registrada!"); },
     onError: (e) => toast.error(e.message),
@@ -41,6 +47,7 @@ export default function BoxesControl() {
   const [entryQty, setEntryQty] = useState<Record<number, number>>({});
   const [exitQty, setExitQty] = useState<Record<number, number>>({});
   const [showHistory, setShowHistory] = useState(false);
+  const [showChart, setShowChart] = useState(false);
 
   const totalCaixas = boxes.reduce((s, b) => s + b.currentStock, 0);
   const alertas = boxes.filter(b => b.currentStock <= b.minStock);
@@ -63,6 +70,12 @@ export default function BoxesControl() {
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => setShowHistory(!showHistory)}>
               <History className="w-4 h-4 mr-1" /> Histórico
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowChart(!showChart)}>
+              <BarChart2 className="w-4 h-4 mr-1" /> Consumo
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => syncCosts.mutate()} disabled={syncCosts.isPending}>
+              <RefreshCw className={`w-4 h-4 mr-1 ${syncCosts.isPending ? "animate-spin" : ""}`} /> Custos
             </Button>
             <Button size="sm" onClick={() => setShowAdd(true)}>
               <PackagePlus className="w-4 h-4 mr-1" /> Nova Caixa
@@ -188,6 +201,37 @@ export default function BoxesControl() {
               </Card>
             ))}
           </div>
+        )}
+
+        {/* Gráfico de Consumo Mensal */}
+        {showChart && monthlyData.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Consumo Mensal de Caixas (Saídas)</CardTitle></CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={(() => {
+                  const months = Array.from(new Set(monthlyData.map((d: any) => d.month))).sort();
+                  return months.map(m => {
+                    const entry: any = { month: m };
+                    boxes.forEach(b => {
+                      const found = monthlyData.find((d: any) => d.boxId === b.id && d.month === m);
+                      entry[b.name] = found ? found.totalQty : 0;
+                    });
+                    return entry;
+                  });
+                })()}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {boxes.slice(0, 8).map((b, i) => (
+                    <Bar key={b.id} dataKey={b.name} fill={["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6","#ec4899","#14b8a6","#f97316"][i % 8]} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
         )}
 
         {/* Histórico de Movimentações */}
