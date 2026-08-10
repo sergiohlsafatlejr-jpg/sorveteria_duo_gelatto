@@ -20,6 +20,7 @@ import {
   finGoals,
   finRevenueForecasts,
 } from "../drizzle/schema";
+import { boxStock } from "../drizzle/schema";
 import { eq, and, sql } from "drizzle-orm";
 import * as mssqlLib from "mssql";
 import { ENV } from "./_core/env";
@@ -671,13 +672,39 @@ export function registerCronJobs(): void {
     timezone: "America/Sao_Paulo",
     name: "check-daily-goal-alert",
   });
+  // Alerta de reposição de caixas 10L — todos os dias às 09:00
+  cron.schedule("0 9 * * *", checkBoxStockAlert, {
+    timezone: "America/Sao_Paulo",
+    name: "check-box-stock-alert",
+  });
 
   console.log("[cron] Cron jobs registrados:");
   console.log("[cron]   → sync-sales-background: a cada 5 minutos (Brasília)");
   console.log("[cron]   → sync-daily-revenue: todos os dias às 08:00 e 20:00 (Brasília)");
   console.log("[cron]   → sync-sales-cache: todos os dias às 08:05 (Brasília)");
   console.log("[cron]   → check-daily-goal-alert: todos os dias às 22:00 (Brasília)");
+  console.log("[cron]   → check-box-stock-alert: todos os dias às 09:00 (Brasília)");
 }
 
 // Exportar para uso no endpoint manual (disparar agora)
 export { syncDailyRevenue, syncSalesCache, syncSalesFromInoveBackground };
+
+// ── Alerta de reposição de caixas 10L ───────────────────────────────────────
+async function checkBoxStockAlert() {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const lowBoxes = await db.select().from(boxStock).where(
+      and(eq(boxStock.active, true), sql`${boxStock.currentStock} <= ${boxStock.minStock}`)
+    );
+    if (lowBoxes.length === 0) return;
+    const lista = lowBoxes.map(b => `• ${b.name}: ${b.currentStock} cx (mín: ${b.minStock})`).join("\n");
+    await notifyOwner({
+      title: `⚠️ ${lowBoxes.length} caixa(s) 10L com estoque baixo`,
+      content: `As seguintes caixas estão abaixo do estoque mínimo:\n\n${lista}\n\nAcesse /stock/boxes para verificar.`,
+    });
+    console.log(`[cron] Alerta de caixas: ${lowBoxes.length} abaixo do mínimo`);
+  } catch (err) {
+    console.error("[cron] Erro checkBoxStockAlert:", err instanceof Error ? err.message : err);
+  }
+}

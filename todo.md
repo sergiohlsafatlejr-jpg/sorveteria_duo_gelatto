@@ -38,3 +38,5 @@
 - [x] Criar router boxStock com CRUD e endpoints de entrada/saída
 - [x] Criar página /stock/boxes para controle de caixas 10L com entrada/saída simples
 - [x] Adicionar link no menu lateral para a página de Caixas 10L (seção Estoque)
+- [x] Busca automática de produtos 10L do INOVE no cadastro de caixas (preencher nome e custo)
+- [x] Notificação de reposição quando caixa ficar abaixo do estoque mínimo (cron diário 09:00)

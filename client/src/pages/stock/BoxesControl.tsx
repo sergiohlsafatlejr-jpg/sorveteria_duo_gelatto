@@ -235,6 +235,44 @@ export default function BoxesControl() {
           <DialogContent>
             <DialogHeader><DialogTitle>Cadastrar Nova Caixa 10L</DialogTitle></DialogHeader>
             <div className="space-y-3">
+              {/* Busca INOVE */}
+              <div>
+                <label className="text-sm font-medium">Buscar no INOVE</label>
+                <div className="flex gap-2 mt-1">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2 top-2.5 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar produto 10L no INOVE..."
+                      value={inoveSearch}
+                      onChange={e => { setInoveSearch(e.target.value); setShowInove(true); }}
+                      onFocus={() => setShowInove(true)}
+                      className="pl-8"
+                    />
+                  </div>
+                </div>
+                {showInove && inoveProducts?.items && inoveProducts.items.length > 0 && (
+                  <div className="mt-1 max-h-[150px] overflow-y-auto border rounded-md bg-background">
+                    {inoveProducts.items.map((p: any) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted border-b last:border-0 flex justify-between items-center"
+                        onClick={() => {
+                          setNewName(p.nome);
+                          setNewCost(p.preco_custo?.toFixed(2) || "0");
+                          setShowInove(false);
+                        }}
+                      >
+                        <span className="font-medium truncate">{p.nome}</span>
+                        <span className="text-xs text-muted-foreground ml-2 whitespace-nowrap">
+                          Custo: {fmt(p.preco_custo || 0)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <hr className="border-dashed" />
               <div>
                 <label className="text-sm font-medium">Nome do Sabor *</label>
                 <Input placeholder="Ex: Pistache 10LT" value={newName} onChange={e => setNewName(e.target.value)} />
@@ -275,3 +313,10 @@ export default function BoxesControl() {
     </DashboardLayout>
   );
 }
+import { Search } from "lucide-react";
+  const [inoveSearch, setInoveSearch] = useState("10");
+  const [showInove, setShowInove] = useState(false);
+  const { data: inoveProducts } = trpc.inove.getStock.useQuery(
+    { search: inoveSearch, page: 1, pageSize: 20 },
+    { enabled: showInove && inoveSearch.length >= 2 }
+  );
