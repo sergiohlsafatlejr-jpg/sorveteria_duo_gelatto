@@ -402,3 +402,4 @@ export default function BoxesControl() {
     </DashboardLayout>
   );
 }
+// BoxesControl v2 - hooks fix applied
