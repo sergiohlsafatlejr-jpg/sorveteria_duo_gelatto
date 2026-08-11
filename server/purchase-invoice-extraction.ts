@@ -210,7 +210,33 @@ export async function extractPurchaseInvoicePdf(pdfUrl: string): Promise<{
     throw new Error("O modelo não retornou uma extração estruturada.");
   }
 
-  const parsed = extractedDocumentSchema.parse(JSON.parse(content));
+  // Limpar possíveis caracteres de controle que quebram JSON.parse
+  let cleanContent = content.trim();
+  // Remover markdown code fences se presentes
+  if (cleanContent.startsWith("```")) {
+    cleanContent = cleanContent.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+  }
+  // Remover caracteres de controle invisíveis (exceto \n, \r, \t)
+  cleanContent = cleanContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+  
+  let jsonObj: unknown;
+  try {
+    jsonObj = JSON.parse(cleanContent);
+  } catch (parseErr: any) {
+    // Tentar truncar no último } válido se o JSON está cortado
+    const lastBrace = cleanContent.lastIndexOf("}");
+    if (lastBrace > 0) {
+      try {
+        jsonObj = JSON.parse(cleanContent.slice(0, lastBrace + 1));
+      } catch {
+        throw new Error(`Erro ao interpretar resposta do modelo (JSON inválido na posição ${parseErr.message?.match(/position (\d+)/)?.[1] ?? "?"}). Tente importar novamente ou com menos páginas.`);
+      }
+    } else {
+      throw new Error(`Erro ao interpretar resposta do modelo: ${parseErr.message}`);
+    }
+  }
+
+  const parsed = extractedDocumentSchema.parse(jsonObj);
   return {
     invoices: parsed.invoices.map(validateExtractedInvoice),
     model: result.model || PURCHASE_INVOICE_MODEL,
