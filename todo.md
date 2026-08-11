@@ -51,3 +51,4 @@
 - [x] Integrar upload e extração por IA de notas fiscais em PDF, revisão humana, confirmação de estoque, indicadores mensais e itens por categoria no Painel de Compras
 - [x] Separar notas importadas: Duo Gelatto (sorvetes) em aba separada, outros fornecedores no Almoxarifado
 - [x] Criar filtro "Sorvetes (Duo Gelatto)" e "Almoxarifado (outros)" na página Compras por Item
+- [x] Criar abas Almoxarifado e Sorvetes na página Painel de Compras (/purchases)

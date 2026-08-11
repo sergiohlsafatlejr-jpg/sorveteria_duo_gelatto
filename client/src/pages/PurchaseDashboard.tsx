@@ -15,6 +15,7 @@ import {
   TrendingUp,
   UsersRound,
 } from "lucide-react";
+import { IceCream, Warehouse } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useLocation } from "wouter";
@@ -53,19 +54,21 @@ function axisMoney(value: number) {
 export default function PurchaseDashboard() {
   const [, setLocation] = useLocation();
   const [month, setMonth] = useState<string | null>(null);
-  const input = useMemo(() => ({ month }), [month]);
-  const { data, isLoading } = trpc.purchaseInvoices.dashboard.useQuery(input);
+  const [activeTab, setActiveTab] = useState<"almoxarifado" | "sorvetes">("almoxarifado");
+  const supplierFilter = activeTab === "sorvetes" ? "duo_gelatto" : "almoxarifado";
+  const input = useMemo(() => ({ month, supplier: supplierFilter as "all" | "duo_gelatto" | "almoxarifado" }), [month, supplierFilter]);
+  const { data: filteredData, isLoading } = trpc.purchaseInvoices.dashboard.useQuery(input);
 
   useEffect(() => {
-    if (!month && data?.month) setMonth(data.month);
-  }, [data?.month, month]);
+    if (!month && filteredData?.month) setMonth(filteredData.month);
+  }, [filteredData?.month, month]);
 
-  const summary = data?.summary;
+  const summary = filteredData?.summary;
   const daily = useMemo(
-    () => (data?.daily ?? []).map((row) => ({ ...row, label: dayLabel(row.date) })),
-    [data?.daily],
+    () => (filteredData?.daily ?? []).map((row) => ({ ...row, label: dayLabel(row.date) })),
+    [filteredData?.daily],
   );
-  const maxCategory = Math.max(1, ...(data?.categories ?? []).map((row) => row.totalSpent));
+  const maxCategory = Math.max(1, ...(filteredData?.categories ?? []).map((row) => row.totalSpent));
 
   return (
     <DashboardLayout>
@@ -90,18 +93,36 @@ export default function PurchaseDashboard() {
           </div>
         </div>
 
+        {/* Abas Almoxarifado / Sorvetes */}
+        <div className="flex gap-2 rounded-lg bg-muted/50 p-1">
+          <button
+            onClick={() => setActiveTab("almoxarifado")}
+            className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === "almoxarifado" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <Warehouse className="h-4 w-4" />
+            Almoxarifado
+          </button>
+          <button
+            onClick={() => setActiveTab("sorvetes")}
+            className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === "sorvetes" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <IceCream className="h-4 w-4" />
+            Sorvetes
+          </button>
+        </div>
+
         <Card className="overflow-hidden border-primary/15 bg-gradient-to-r from-primary/[0.06] via-card to-amber-500/[0.05]">
           <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2 text-sm font-semibold"><CalendarRange className="h-4 w-4 text-primary" />Período analisado</div>
               <p className="mt-1 text-sm text-muted-foreground">Selecione um mês que possua notas processadas no sistema.</p>
             </div>
-            <Select value={month ?? data?.month ?? ""} onValueChange={setMonth}>
+            <Select value={month ?? filteredData?.month ?? ""} onValueChange={setMonth}>
               <SelectTrigger className="w-full bg-background md:w-[220px]" aria-label="Mês de análise">
                 <SelectValue placeholder="Selecione o mês" />
               </SelectTrigger>
               <SelectContent>
-                {(data?.availableMonths ?? []).map((value) => (
+                {(filteredData?.availableMonths ?? []).map((value) => (
                   <SelectItem key={value} value={value}>{monthLabel(value)}</SelectItem>
                 ))}
               </SelectContent>
@@ -110,13 +131,13 @@ export default function PurchaseDashboard() {
         </Card>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard icon={ShoppingBasket} label="Valor total" value={money(summary?.totalSpent)} tone="primary" />
-          <MetricCard icon={ReceiptText} label="Ticket médio" value={money(summary?.averageTicket)} hint={`${summary?.invoiceCount ?? 0} nota(s)`} tone="blue" />
-          <MetricCard icon={UsersRound} label="Maior fornecedor" value={`${(summary?.topSupplierShare ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`} hint={summary?.topSupplierName ?? "Sem dados"} tone="amber" />
-          <MetricCard icon={Repeat2} label="Itens recorrentes" value={String(summary?.recurringItemCount ?? 0)} hint="Presentes em 2+ notas" tone="emerald" />
+          <MetricCard icon={ShoppingBasket} label="Valor total" value={money(filteredData?.summary?.totalSpent)} tone="primary" />
+          <MetricCard icon={ReceiptText} label="Ticket médio" value={money(filteredData?.summary?.averageTicket)} hint={`${filteredData?.summary?.invoiceCount ?? 0} nota(s)`} tone="blue" />
+          <MetricCard icon={UsersRound} label="Maior fornecedor" value={`${(filteredData?.summary?.topSupplierShare ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`} hint={filteredData?.summary?.topSupplierName ?? "Sem dados"} tone="amber" />
+          <MetricCard icon={Repeat2} label="Itens recorrentes" value={String(filteredData?.summary?.recurringItemCount ?? 0)} hint="Presentes em 2+ notas" tone="emerald" />
         </div>
 
-        {!isLoading && (summary?.invoiceCount ?? 0) === 0 ? (
+        {!isLoading && (filteredData?.summary?.invoiceCount ?? 0) === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center py-16 text-center">
               <BarChart3 className="mb-4 h-11 w-11 text-muted-foreground/35" />
@@ -130,7 +151,7 @@ export default function PurchaseDashboard() {
             <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-primary" />Compras ao longo do mês</CardTitle>
+                  <CardTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-primary" />{activeTab === "sorvetes" ? "Compras de sorvetes no mês" : "Compras do almoxarifado no mês"}</CardTitle>
                   <p className="text-sm text-muted-foreground">Valor total das notas por dia de emissão.</p>
                 </CardHeader>
                 <CardContent>
@@ -154,7 +175,7 @@ export default function PurchaseDashboard() {
                   <p className="text-sm text-muted-foreground">Participação de cada fornecedor no valor mensal.</p>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  {(data?.suppliers ?? []).slice(0, 6).map((supplier, index) => (
+                  {(filteredData?.suppliers ?? []).slice(0, 6).map((supplier, index) => (
                     <div key={supplier.supplierName} className="space-y-2">
                       <div className="flex items-start justify-between gap-3 text-sm">
                         <div className="min-w-0"><p className="truncate font-semibold">{supplier.supplierName}</p><p className="text-xs text-muted-foreground">{supplier.invoiceCount} nota(s)</p></div>
@@ -178,8 +199,8 @@ export default function PurchaseDashboard() {
                     <table className="w-full min-w-[560px] text-sm">
                       <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3 text-right">Notas</th><th className="px-4 py-3 text-right">Qtd.</th><th className="px-5 py-3 text-right">Valor</th></tr></thead>
                       <tbody>
-                        {(data?.recurringItems ?? []).map((item) => <tr key={item.description} className="border-b"><td className="px-5 py-3 font-medium">{item.description}</td><td className="px-4 py-3 text-right"><Badge variant="outline">{item.invoiceCount}</Badge></td><td className="px-4 py-3 text-right">{item.totalQuantity.toLocaleString("pt-BR")}</td><td className="px-5 py-3 text-right font-semibold">{money(item.totalSpent)}</td></tr>)}
-                        {(data?.recurringItems ?? []).length === 0 && <tr><td colSpan={4} className="px-5 py-10 text-center text-muted-foreground">Ainda não há itens presentes em mais de uma nota.</td></tr>}
+                        {(filteredData?.recurringItems ?? []).map((item) => <tr key={item.description} className="border-b"><td className="px-5 py-3 font-medium">{item.description}</td><td className="px-4 py-3 text-right"><Badge variant="outline">{item.invoiceCount}</Badge></td><td className="px-4 py-3 text-right">{item.totalQuantity.toLocaleString("pt-BR")}</td><td className="px-5 py-3 text-right font-semibold">{money(item.totalSpent)}</td></tr>)}
+                        {(filteredData?.recurringItems ?? []).length === 0 && <tr><td colSpan={4} className="px-5 py-10 text-center text-muted-foreground">Ainda não há itens presentes em mais de uma nota.</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -192,7 +213,7 @@ export default function PurchaseDashboard() {
                   <p className="text-sm text-muted-foreground">Valores extraídos das linhas das notas, sem simular categorias ausentes.</p>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {(data?.categories ?? []).map((category) => (
+                  {(filteredData?.categories ?? []).map((category) => (
                     <div key={category.category} className="grid grid-cols-[minmax(0,1fr)_100px] items-center gap-4">
                       <div className="min-w-0"><div className="mb-1.5 flex items-center justify-between gap-2 text-sm"><span className="truncate font-medium">{CATEGORY_LABELS[category.category] ?? category.category}</span><span className="text-xs text-muted-foreground">{category.itemCount} item(ns)</span></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-amber-500" style={{ width: `${Math.max(3, (category.totalSpent / maxCategory) * 100)}%` }} /></div></div>
                       <p className="text-right text-sm font-semibold">{money(category.totalSpent)}</p>

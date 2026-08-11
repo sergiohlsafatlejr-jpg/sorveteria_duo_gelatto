@@ -599,7 +599,10 @@ export const purchaseInvoicesRouter = router({
     }),
 
   dashboard: protectedProcedure
-    .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null) }).optional())
+    .input(z.object({
+      month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null),
+      supplier: z.enum(["all", "duo_gelatto", "almoxarifado"]).default("all"),
+    }).optional())
     .query(async ({ input }) => {
       const db = await getDb();
       const currentMonth = new Date().toISOString().slice(0, 7);
@@ -641,6 +644,13 @@ export const purchaseInvoicesRouter = router({
         })
         .from(purchaseInvoices)
         .where(monthFilter);
+      // Filtrar por tipo de fornecedor
+      const supplierFilter = input?.supplier ?? "all";
+      const filteredInvoices = supplierFilter === "all" ? invoices
+        : supplierFilter === "duo_gelatto"
+          ? invoices.filter((inv) => (inv.supplierName ?? "").toUpperCase().includes("DUO GELATTO"))
+          : invoices.filter((inv) => !(inv.supplierName ?? "").toUpperCase().includes("DUO GELATTO"));
+      const filteredInvoiceIds = new Set(filteredInvoices.map((inv) => inv.id));
       const items = await db
         .select({
           invoiceId: purchaseInvoiceItems.invoiceId,
@@ -655,7 +665,7 @@ export const purchaseInvoicesRouter = router({
 
       return {
         availableMonths,
-        ...buildPurchaseDashboard(invoices, items, selectedMonth),
+        ...buildPurchaseDashboard(filteredInvoices, items.filter((item) => filteredInvoiceIds.has(item.invoiceId)), selectedMonth),
       };
     }),
 });
