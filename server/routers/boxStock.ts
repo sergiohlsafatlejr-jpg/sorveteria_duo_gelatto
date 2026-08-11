@@ -142,21 +142,18 @@ export const boxStockRouter = router({
       if (!db) throw new Error("DB unavailable");
       const since = new Date();
       if (input.months === 0) { since.setDate(since.getDate() - 7); } else { since.setMonth(since.getMonth() - input.months); }
-      const rows = await db.select({
-        boxId: boxStockMovements.boxId,
-        month: sql<string>`DATE_FORMAT(${boxStockMovements.createdAt}, '%Y-%m')`,
-        totalQty: sql<number>`SUM(${boxStockMovements.quantity})`,
-      }).from(boxStockMovements)
-        .where(and(
-          eq(boxStockMovements.type, "saida"),
-          gte(boxStockMovements.createdAt, since)
-        ))
-        .groupBy(boxStockMovements.boxId, sql`DATE_FORMAT(${boxStockMovements.createdAt}, '%Y-%m')`)
-        .orderBy(sql`DATE_FORMAT(${boxStockMovements.createdAt}, '%Y-%m')`);
-      return rows.map(r => ({
-        boxId: r.boxId,
-        month: r.month,
-        totalQty: Number(r.totalQty) || 0,
+      const sinceStr = since.toISOString().slice(0, 19).replace("T", " ");
+      const rows = await db.execute(sql`
+        SELECT boxId as box_id, DATE_FORMAT(createdAt, '%Y-%m') as month_label, SUM(quantity) as total_qty
+        FROM box_stock_movements
+        WHERE type = 'saida' AND createdAt >= ${sinceStr}
+        GROUP BY boxId, DATE_FORMAT(createdAt, '%Y-%m')
+        ORDER BY DATE_FORMAT(createdAt, '%Y-%m')
+      `);
+      return (rows as any[]).map((r: any) => ({
+        boxId: Number(r.box_id ?? r.boxId),
+        month: String(r.month_label ?? r.month),
+        totalQty: Number(r.total_qty ?? r.totalQty ?? 0),
       }));
     }),
 

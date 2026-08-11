@@ -52,3 +52,6 @@
 - [x] Separar notas importadas: Duo Gelatto (sorvetes) em aba separada, outros fornecedores no Almoxarifado
 - [x] Criar filtro "Sorvetes (Duo Gelatto)" e "Almoxarifado (outros)" na página Compras por Item
 - [x] Criar abas Almoxarifado e Sorvetes na página Painel de Compras (/purchases)
+- [x] Corrigir erro GROUP BY no getMonthlyConsumption do boxStock (only_full_group_by)
+- [x] Implementar formulário completo de pedido manual (fornecedor + itens + quantidade + preço)
+- [x] Implementar sugestão automática de pedido baseada em estoque mínimo

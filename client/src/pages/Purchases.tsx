@@ -137,6 +137,10 @@ export default function Purchases() {
 
   // Orders Data
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
+  const [orderItems, setOrderItems] = useState<Array<{itemId: number; name: string; unit: string; quantity: number; price: number}>>([]);
+  const [newOrderItemId, setNewOrderItemId] = useState("");
+  const [newOrderQty, setNewOrderQty] = useState("");
+  const [newOrderPrice, setNewOrderPrice] = useState("");
   const { data: orders = [] } = trpc.purchases.orders.list.useQuery();
   const filteredOrders = orders.filter(o => orderStatusFilter === "all" || o.status === orderStatusFilter);
 
@@ -786,21 +790,107 @@ export default function Purchases() {
                   <DialogHeader>
                     <DialogTitle>Novo Pedido de Compra</DialogTitle>
                   </DialogHeader>
-                  <div className="p-4 border rounded-md bg-slate-50 dark:bg-slate-900 text-center">
-                     <p className="text-slate-500 mb-4">Funcionalidade de criação detalhada em desenvolvimento.</p>
-                     <Button type="button" onClick={() => {
-                        createOrderMutation.mutate({
-                          supplierId: suppliers[0]?.id || 1, // fallback
-                          notes: "Pedido gerado via sistema",
-                          items: [
-                             { itemId: items[0]?.id || 1, quantity: 10, estimatedUnitPrice: 50.00, unit: 'un' }
-                          ]
-                        });
-                     }}>Criar Pedido de Teste</Button>
-                  </div>
+                  <form className="space-y-4" onSubmit={(e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.currentTarget);
+                    const supplierId = Number(formData.get('supplierId'));
+                    const notes = formData.get('notes') as string || '';
+                    if (!supplierId) { toast.error('Selecione um fornecedor'); return; }
+                    if (orderItems.length === 0) { toast.error('Adicione pelo menos um item'); return; }
+                    createOrderMutation.mutate({
+                      supplierId,
+                      notes,
+                      items: orderItems.map(oi => ({
+                        itemId: oi.itemId,
+                        quantity: oi.quantity,
+                        estimatedUnitPrice: oi.price,
+                        unit: oi.unit,
+                      })),
+                    });
+                    setOrderItems([]);
+                  }}>
+                    <div className="space-y-2">
+                      <Label>Fornecedor</Label>
+                      <Select name="supplierId">
+                        <SelectTrigger><SelectValue placeholder="Selecione o fornecedor" /></SelectTrigger>
+                        <SelectContent>
+                          {suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Itens do Pedido</Label>
+                      <div className="flex gap-2">
+                        <Select value={newOrderItemId} onValueChange={setNewOrderItemId}>
+                          <SelectTrigger className="flex-1"><SelectValue placeholder="Selecione item" /></SelectTrigger>
+                          <SelectContent>
+                            {items.map(i => <SelectItem key={i.id} value={String(i.id)}>{i.name} ({i.unit})</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Input type="number" placeholder="Qtd" className="w-20" value={newOrderQty} onChange={(e) => setNewOrderQty(e.target.value)} />
+                        <Input type="number" step="0.01" placeholder="Preço" className="w-24" value={newOrderPrice} onChange={(e) => setNewOrderPrice(e.target.value)} />
+                        <Button type="button" variant="outline" size="sm" onClick={() => {
+                          if (!newOrderItemId || !newOrderQty) return;
+                          const item = items.find(i => i.id === Number(newOrderItemId));
+                          if (!item) return;
+                          setOrderItems(prev => [...prev, { itemId: item.id, name: item.name, unit: item.unit, quantity: Number(newOrderQty), price: Number(newOrderPrice) || 0 }]);
+                          setNewOrderItemId(''); setNewOrderQty(''); setNewOrderPrice('');
+                        }}><Plus className="h-4 w-4" /></Button>
+                      </div>
+                      {orderItems.length > 0 && (
+                        <div className="border rounded-md divide-y text-sm">
+                          {orderItems.map((oi, idx) => (
+                            <div key={idx} className="flex justify-between items-center px-3 py-2">
+                              <span>{oi.name} — {oi.quantity} {oi.unit} × R$ {oi.price.toFixed(2)}</span>
+                              <Button type="button" variant="ghost" size="sm" onClick={() => setOrderItems(prev => prev.filter((_, i) => i !== idx))}>✕</Button>
+                            </div>
+                          ))}
+                          <div className="px-3 py-2 font-semibold bg-slate-50 dark:bg-slate-900">
+                            Total estimado: R$ {orderItems.reduce((s, oi) => s + oi.quantity * oi.price, 0).toFixed(2)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Observações</Label>
+                      <Input name="notes" placeholder="Observações do pedido (opcional)" />
+                    </div>
+                    <DialogFooter>
+                      <Button type="submit" disabled={createOrderMutation.isPending}>
+                        {createOrderMutation.isPending ? "Criando..." : "Criar Pedido"}
+                      </Button>
+                    </DialogFooter>
+                  </form>
                 </DialogContent>
               </Dialog>
             </div>
+            {lowStockItems.length > 0 && (
+              <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2 text-amber-700 dark:text-amber-400"><AlertTriangle className="h-4 w-4" /> Sugestão de Pedido — {lowStockItems.length} item(ns) com estoque baixo</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="divide-y divide-amber-200 dark:divide-amber-800">
+                    {lowStockItems.slice(0, 5).map((item: any) => (
+                      <div key={item.id} className="flex justify-between items-center py-2 text-sm">
+                        <span className="font-medium">{item.name}</span>
+                        <span className="text-amber-700 dark:text-amber-400">Estoque: {Number(item.currentStock)} / Mín: {Number(item.minStock)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <Button variant="outline" size="sm" className="mt-3 border-amber-400 text-amber-700 hover:bg-amber-100" onClick={() => {
+                    setOrderItems(lowStockItems.map((item: any) => ({
+                      itemId: item.id,
+                      name: item.name,
+                      unit: item.unit || "un",
+                      quantity: Math.max(1, Number(item.minStock) - Number(item.currentStock)),
+                      price: Number(item.referencePrice) || 0,
+                    })));
+                    toast.info("Itens adicionados ao formulário de pedido. Clique em Novo Pedido para finalizar.");
+                  }}>Gerar pedido sugerido</Button>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <div className="overflow-x-auto">
