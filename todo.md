@@ -55,3 +55,4 @@
 - [x] Corrigir erro GROUP BY no getMonthlyConsumption do boxStock (only_full_group_by)
 - [x] Implementar formulário completo de pedido manual (fornecedor + itens + quantidade + preço)
 - [x] Implementar sugestão automática de pedido baseada em estoque mínimo
+- [x] Adicionar botão de exportar Excel na aba Compras por Item (/purchases/items)

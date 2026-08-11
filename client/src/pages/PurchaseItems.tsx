@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
-import { Boxes, CalendarRange, ChevronLeft, ChevronRight, FileSearch, PackageSearch, Search, ShoppingBasket } from "lucide-react";
+import { Boxes, CalendarRange, ChevronLeft, ChevronRight, Download, FileSearch, PackageSearch, Search, ShoppingBasket } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -14,6 +14,25 @@ const CATEGORY_LABELS: Record<string, string> = {
   descartaveis: "Descartáveis", embalagens: "Embalagens", manutencao: "Manutenção",
   insumos: "Insumos", outros: "Outros itens",
 };
+
+async function exportToExcel(items: any[], supplier: string) {
+  const XLSX = await import("xlsx");
+  const data = items.map((item: any) => ({
+    "Produto": item.description,
+    "Fornecedor": item.supplierName || "N/I",
+    "Nota": item.invoiceNumber || "",
+    "Data": item.issueDate ? item.issueDate.split("-").reverse().join("/") : "",
+    "Categoria": item.category || "",
+    "Quantidade": Number(item.quantity),
+    "Unidade": item.unit || "UN",
+    "Preço Unit.": Number(Number(item.unitPrice).toFixed(2)),
+    "Total": Number(Number(item.totalPrice).toFixed(2)),
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Compras por Item");
+  XLSX.writeFile(wb, `compras_por_item_${supplier}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
 
 function money(value: string | number | null | undefined) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value ?? 0));
@@ -61,7 +80,10 @@ export default function PurchaseItems() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div><div className="mb-2 flex items-center gap-2 text-sm font-medium text-primary"><ShoppingBasket className="h-4 w-4" /> Compras Internas</div><h1 className="text-3xl font-bold tracking-tight">Compras abertas por item</h1><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Analise cada produto da Sorvefort ou de todos os fornecedores, com origem, quantidade e preço.</p></div>
-          <Button variant="outline" onClick={() => setLocation("/purchases/invoices")}><FileSearch className="mr-2 h-4 w-4" />Histórico de notas</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => exportToExcel(items, supplier)} disabled={items.length === 0}><Download className="mr-2 h-4 w-4" />Exportar Excel</Button>
+            <Button variant="outline" onClick={() => setLocation("/purchases/invoices")}><FileSearch className="mr-2 h-4 w-4" />Histórico de notas</Button>
+          </div>
         </div>
 
         <Card className="border-primary/15">
