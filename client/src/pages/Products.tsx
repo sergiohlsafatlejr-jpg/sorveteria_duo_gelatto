@@ -478,6 +478,26 @@ function Products() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" className="gap-2" disabled={!products?.length} onClick={() => {
+              exportToExcel(
+                (products || []).map((p: any) => ({
+                  "Produto": p.name,
+                  "Descrição": p.description ?? "",
+                  "SKU": p.sku ?? "",
+                  "Código de Barras": p.barcode ?? "",
+                  "Categoria": p.categoryName ?? "",
+                  "Estoque Atual": p.currentStock ?? 0,
+                  "Estoque Mínimo": p.minStock ?? 0,
+                  "Unidade": p.unit ?? "",
+                  "Preço Custo": fmtMoeda(p.costPrice ?? 0),
+                  "Preço Venda": fmtMoeda(p.salePrice ?? 0),
+                })),
+                `Produtos_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}`
+              );
+            }}>
+              <FileSpreadsheet className="h-4 w-4" />
+              Exportar Excel
+            </Button>
             <Button variant="outline" onClick={() => navigate("/nfe-import")} className="gap-2">
               <FileText className="h-4 w-4" />
               Importar NF-e

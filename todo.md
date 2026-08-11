@@ -57,3 +57,4 @@
 - [x] Implementar sugestão automática de pedido baseada em estoque mínimo
 - [x] Adicionar botão de exportar Excel na aba Compras por Item (/purchases/items)
 - [x] Adicionar botão de ajuste de estoque (quantidade atual) em cada card do Almoxarifado (/purchases)
+- [x] Adicionar botão de exportar Excel na página de Produtos (/products)
