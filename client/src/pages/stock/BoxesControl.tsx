@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import BackButton from "@/components/BackButton";
@@ -64,6 +64,16 @@ export default function BoxesControl() {
   const [adjustQty, setAdjustQty] = useState("");
   const [inoveSearch, setInoveSearch] = useState("10");
   const [showInove, setShowInove] = useState(false);
+  const [purchaseSearch, setPurchaseSearch] = useState("");
+  const [purchaseDateFrom, setPurchaseDateFrom] = useState("");
+  const [purchaseDateTo, setPurchaseDateTo] = useState("");
+  const boxPurchaseInput = useMemo(() => ({
+    search: purchaseSearch,
+    dateFrom: purchaseDateFrom || null,
+    dateTo: purchaseDateTo || null,
+    limit: 250,
+  }), [purchaseSearch, purchaseDateFrom, purchaseDateTo]);
+  const { data: purchaseAnalysis, isLoading: loadingPurchaseAnalysis } = trpc.purchaseInvoices.boxPurchaseHistory.useQuery(boxPurchaseInput);
   const { data: inoveProducts } = trpc.inove.getStock.useQuery(
     { search: inoveSearch, page: 1, pageSize: 20 },
     { enabled: showInove && inoveSearch.length >= 2 }
@@ -87,7 +97,7 @@ export default function BoxesControl() {
               Entrada e saída de caixas de sorvete 10 litros
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => setShowHistory(!showHistory)}>
               <History className="w-4 h-4 mr-1" /> Histórico
             </Button>
@@ -101,7 +111,7 @@ export default function BoxesControl() {
               <PackagePlus className="w-4 h-4 mr-1" /> Nova Caixa
             </Button>
             <Button size="sm" variant="default" onClick={() => syncFromInove.mutate()} disabled={syncFromInove.isPending}>
-              <RefreshCw className={`w-4 h-4 mr-1 ${syncFromInove.isPending ? "animate-spin" : ""}`} /> Importar INOVE
+              <RefreshCw className={`w-4 h-4 mr-1 ${syncFromInove.isPending ? "animate-spin" : ""}`} /> Sincronizar PDV INOVE
             </Button>
           </div>
         </div>
@@ -130,6 +140,106 @@ export default function BoxesControl() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader className="space-y-3">
+            <div>
+              <CardTitle className="text-base">Compras de caixas de 10 L por nota fiscal</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                Histórico de preço, quantidade e frequência dos itens confirmados a partir dos PDFs.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px_160px]">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  placeholder="Buscar sabor ou fornecedor"
+                  value={purchaseSearch}
+                  onChange={(event) => setPurchaseSearch(event.target.value)}
+                />
+              </div>
+              <Input type="date" aria-label="Data inicial das compras" value={purchaseDateFrom} onChange={(event) => setPurchaseDateFrom(event.target.value)} />
+              <Input type="date" aria-label="Data final das compras" value={purchaseDateTo} onChange={(event) => setPurchaseDateTo(event.target.value)} />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="rounded-xl bg-blue-50 p-3">
+                <p className="text-xs text-blue-700">Quantidade comprada</p>
+                <p className="mt-1 text-xl font-bold text-blue-950">{purchaseAnalysis?.summary.totalQuantity.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) ?? "0"}</p>
+                <p className="text-xs text-blue-700">caixas / unidades</p>
+              </div>
+              <div className="rounded-xl bg-emerald-50 p-3">
+                <p className="text-xs text-emerald-700">Valor investido</p>
+                <p className="mt-1 text-xl font-bold text-emerald-950">{fmt(purchaseAnalysis?.summary.totalSpent ?? 0)}</p>
+                <p className="text-xs text-emerald-700">no período filtrado</p>
+              </div>
+              <div className="rounded-xl bg-amber-50 p-3">
+                <p className="text-xs text-amber-700">Preço médio ponderado</p>
+                <p className="mt-1 text-xl font-bold text-amber-950">{fmt(purchaseAnalysis?.summary.weightedAveragePrice ?? 0)}</p>
+                <p className="text-xs text-amber-700">por caixa / unidade</p>
+              </div>
+              <div className="rounded-xl bg-violet-50 p-3">
+                <p className="text-xs text-violet-700">Frequência</p>
+                <p className="mt-1 text-xl font-bold text-violet-950">{purchaseAnalysis?.summary.invoiceCount ?? 0} nota(s)</p>
+                <p className="text-xs text-violet-700">{purchaseAnalysis?.summary.supplierCount ?? 0} fornecedor(es)</p>
+              </div>
+            </div>
+
+            {loadingPurchaseAnalysis ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">Carregando histórico de compras...</div>
+            ) : !purchaseAnalysis || purchaseAnalysis.rows.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-6 text-center">
+                <History className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
+                <p className="font-medium">Nenhuma compra de 10 L confirmada neste período.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Envie o PDF da nota, revise os itens e confirme a entrada para alimentar este histórico.</p>
+              </div>
+            ) : (
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)]">
+                <div className="h-64 rounded-xl border p-3">
+                  <p className="mb-2 text-sm font-medium">Valor por fornecedor</p>
+                  <ResponsiveContainer width="100%" height="90%">
+                    <BarChart data={purchaseAnalysis.bySupplier} layout="vertical" margin={{ left: 8, right: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" tickFormatter={(value) => `R$ ${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}`} fontSize={11} />
+                      <YAxis type="category" dataKey="supplierName" width={110} fontSize={11} />
+                      <Tooltip formatter={(value) => fmt(Number(value))} />
+                      <Bar dataKey="totalSpent" name="Valor comprado" fill="#2563eb" radius={[0, 6, 6, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="overflow-x-auto rounded-xl border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2">Data</th>
+                        <th className="px-3 py-2">Fornecedor / item</th>
+                        <th className="px-3 py-2 text-right">Qtd.</th>
+                        <th className="px-3 py-2 text-right">Preço</th>
+                        <th className="px-3 py-2 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {purchaseAnalysis.rows.map((row) => (
+                        <tr key={row.id} className="border-t align-top">
+                          <td className="whitespace-nowrap px-3 py-2">{row.issueDate ? new Date(`${row.issueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—"}</td>
+                          <td className="min-w-52 px-3 py-2">
+                            <p className="font-medium">{row.description}</p>
+                            <p className="text-xs text-muted-foreground">{row.supplierName || "Fornecedor não identificado"} · NF {row.invoiceNumber || "—"}</p>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{Number(row.quantity).toLocaleString("pt-BR", { maximumFractionDigits: 3 })} {row.unit}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right">{fmt(Number(row.unitPrice))}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right font-medium">{fmt(Number(row.totalPrice))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Alertas */}
         {alertas.length > 0 && (
@@ -226,9 +336,9 @@ export default function BoxesControl() {
             <CardContent className="p-8 text-center text-muted-foreground">
               <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
               <p>Nenhuma caixa cadastrada.</p>
-              <p className="text-sm mt-1">Clique em "Importar INOVE" para buscar automaticamente as caixas 10L do sistema.</p>
+              <p className="text-sm mt-1">Sincronize com o PDV/estoque INOVE para buscar automaticamente as caixas de 10 L cadastradas no sistema.</p>
               <Button className="mt-3" onClick={() => syncFromInove.mutate()} disabled={syncFromInove.isPending}>
-                <RefreshCw className={`w-4 h-4 mr-1 ${syncFromInove.isPending ? "animate-spin" : ""}`} /> Importar Caixas do INOVE
+                <RefreshCw className={`w-4 h-4 mr-1 ${syncFromInove.isPending ? "animate-spin" : ""}`} /> Sincronizar Caixas do PDV
               </Button>
             </CardContent>
           </Card>
@@ -419,14 +529,14 @@ export default function BoxesControl() {
           <DialogContent>
             <DialogHeader><DialogTitle>Cadastrar Nova Caixa 10L</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              {/* Busca INOVE */}
+              {/* Busca no sistema INOVE */}
               <div>
-                <label className="text-sm font-medium">Buscar no INOVE</label>
+                <label className="text-sm font-medium">Buscar no sistema INOVE</label>
                 <div className="flex gap-2 mt-1">
                   <div className="relative flex-1">
                     <Search className="absolute left-2 top-2.5 w-4 h-4 text-muted-foreground" />
                     <Input
-                      placeholder="Buscar produto 10L no INOVE..."
+                      placeholder="Buscar produto 10 L no PDV/estoque INOVE..."
                       value={inoveSearch}
                       onChange={e => { setInoveSearch(e.target.value); setShowInove(true); }}
                       onFocus={() => setShowInove(true)}

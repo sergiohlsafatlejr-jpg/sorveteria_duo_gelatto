@@ -1,0 +1,657 @@
+import { createHash } from "node:crypto";
+import { TRPCError } from "@trpc/server";
+import { and, asc, desc, eq, gte, like, lte, or } from "drizzle-orm";
+import { z } from "zod";
+import {
+  operationalSuppliers,
+  purchaseInvoiceItems,
+  purchaseInvoices,
+} from "../../drizzle/schema";
+import { protectedProcedure, router } from "../_core/trpc";
+import { getDb } from "../db";
+import {
+  buildBoxPurchaseHistory,
+  buildPurchaseDashboard,
+  buildPurchaseItemsSummary,
+} from "../purchase-invoice-analytics";
+import { confirmPurchaseInvoiceStock } from "../purchase-invoice-confirmation";
+import { findOperationalSupplierId } from "../purchase-invoice-domain";
+import { extractPurchaseInvoicePdf, matchesPurchaseItemFilters } from "../purchase-invoice-extraction";
+import { storageGet, storagePut } from "../storage";
+
+const MAX_PDF_BYTES = 15 * 1024 * 1024;
+type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+const itemReviewSchema = z.object({
+  id: z.number().int().positive(),
+  supplierCode: z.string().max(100).nullable(),
+  description: z.string().min(1).max(500),
+  category: z.enum(["limpeza", "guloseimas", "caldas", "descartaveis", "embalagens", "manutencao", "insumos", "outros"]),
+  quantity: z.number().nonnegative(),
+  unit: z.string().min(1).max(20),
+  unitPrice: z.number().nonnegative(),
+  totalPrice: z.number().nonnegative(),
+});
+
+function normalize(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+}
+
+function decodePdf(base64: string): Buffer {
+  const payload = base64.includes(",") ? base64.slice(base64.indexOf(",") + 1) : base64;
+  const buffer = Buffer.from(payload, "base64");
+  if (buffer.length === 0 || buffer.length > MAX_PDF_BYTES) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "O PDF deve ter entre 1 byte e 15 MB.",
+    });
+  }
+  if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "O arquivo enviado não é um PDF válido." });
+  }
+  return buffer;
+}
+
+async function resolveSupplierId(
+  db: Database,
+  name: string,
+  cnpj: string,
+): Promise<number | null> {
+  const suppliers = await db
+    .select({ id: operationalSuppliers.id, name: operationalSuppliers.name, cnpj: operationalSuppliers.cnpj })
+    .from(operationalSuppliers)
+    .where(eq(operationalSuppliers.active, true));
+
+  return findOperationalSupplierId(suppliers, name, cnpj);
+}
+
+async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
+  const sourceRows = await db
+    .select()
+    .from(purchaseInvoices)
+    .where(eq(purchaseInvoices.id, invoiceId))
+    .limit(1);
+  const source = sourceRows[0];
+  if (!source) throw new TRPCError({ code: "NOT_FOUND", message: "Documento fiscal não encontrado." });
+  const documentHash = source.documentHash ?? source.fileHash;
+
+  await db
+    .update(purchaseInvoices)
+    .set({ status: "processing", errorMessage: null, documentHash })
+    .where(or(eq(purchaseInvoices.documentHash, documentHash), eq(purchaseInvoices.id, invoiceId)));
+
+  const startedAt = Date.now();
+  try {
+    const signedFile = await storageGet(fileKey);
+    const extraction = await extractPurchaseInvoicePdf(signedFile.url);
+    const supplierIds = await Promise.all(
+      extraction.invoices.map((invoice) => resolveSupplierId(db, invoice.supplier_name, invoice.supplier_cnpj)),
+    );
+    const existing = await db
+      .select({ id: purchaseInvoices.id, documentIndex: purchaseInvoices.documentIndex, status: purchaseInvoices.status })
+      .from(purchaseInvoices)
+      .where(or(eq(purchaseInvoices.documentHash, documentHash), eq(purchaseInvoices.id, invoiceId)));
+
+    const invoiceIds: number[] = [];
+    await db.transaction(async (tx) => {
+      for (let position = 0; position < extraction.invoices.length; position += 1) {
+        const invoice = extraction.invoices[position];
+        const documentIndex = position + 1;
+        let targetId = existing.find((row) => row.documentIndex === documentIndex)?.id;
+
+        if (!targetId && documentIndex === 1) targetId = invoiceId;
+        if (!targetId) {
+          const childHash = createHash("sha256").update(`${documentHash}:${documentIndex}`).digest("hex");
+          const inserted = await tx
+            .insert(purchaseInvoices)
+            .values({
+              source: source.source,
+              fileName: source.fileName,
+              fileKey: source.fileKey,
+              fileUrl: source.fileUrl,
+              fileHash: childHash,
+              documentHash,
+              documentIndex,
+              fileSize: source.fileSize,
+              uploadedBy: source.uploadedBy,
+              status: "processing",
+            })
+            .$returningId();
+          targetId = inserted[0]?.id;
+        }
+        if (!targetId) throw new Error(`Falha ao registrar a nota ${documentIndex} do documento.`);
+        invoiceIds.push(targetId);
+
+        await tx.delete(purchaseInvoiceItems).where(eq(purchaseInvoiceItems.invoiceId, targetId));
+        await tx.insert(purchaseInvoiceItems).values(
+          invoice.items.map((item) => ({
+            invoiceId: targetId,
+            lineNumber: item.line_number,
+            supplierCode: item.supplier_code || null,
+            description: item.description,
+            category: item.category,
+            quantity: item.quantity.toFixed(3),
+            unit: item.unit,
+            unitPrice: item.unit_price.toFixed(4),
+            totalPrice: item.total_price.toFixed(2),
+            confidence: item.confidence.toFixed(4),
+            rawData: item,
+          })),
+        );
+
+        await tx
+          .update(purchaseInvoices)
+          .set({
+            documentHash,
+            documentIndex,
+            status: invoice.suggestedStatus,
+            supplierName: invoice.supplier_name || null,
+            supplierCnpj: invoice.supplier_cnpj || null,
+            operationalSupplierId: supplierIds[position],
+            invoiceNumber: invoice.invoice_number || null,
+            accessKey: invoice.access_key || null,
+            issueDate: invoice.issue_date || null,
+            totalAmount: invoice.total_amount.toFixed(2),
+            itemSubtotal: invoice.itemSubtotal.toFixed(2),
+            totalItems: invoice.items.length,
+            confidence: invoice.confidence.toFixed(4),
+            model: extraction.model,
+            promptTokens: position === 0 ? extraction.promptTokens : 0,
+            completionTokens: position === 0 ? extraction.completionTokens : 0,
+            durationMs: position === 0 ? Date.now() - startedAt : 0,
+            validationErrors: invoice.validationErrors,
+            processedAt: new Date(),
+            errorMessage: null,
+          })
+          .where(eq(purchaseInvoices.id, targetId));
+      }
+
+      for (const stale of existing.filter((row) => row.documentIndex > extraction.invoices.length && row.status !== "confirmed")) {
+        await tx
+          .update(purchaseInvoices)
+          .set({ status: "error", errorMessage: "Esta nota não foi localizada no último reprocessamento do PDF." })
+          .where(eq(purchaseInvoices.id, stale.id));
+      }
+    });
+
+    const validationErrors = extraction.invoices.flatMap((invoice, index) =>
+      invoice.validationErrors.map((error) => `Nota ${index + 1}: ${error}`),
+    );
+    const status = extraction.invoices.some((invoice) => invoice.suggestedStatus === "review_required")
+      ? "review_required"
+      : "extracted";
+    return { invoiceId: invoiceIds[0] ?? invoiceId, invoiceIds, documentInvoiceCount: invoiceIds.length, status, validationErrors };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha desconhecida na extração.";
+    await db
+      .update(purchaseInvoices)
+      .set({ status: "error", errorMessage: message, durationMs: Date.now() - startedAt, processedAt: new Date() })
+      .where(eq(purchaseInvoices.id, invoiceId));
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Não foi possível extrair a nota: ${message}` });
+  }
+}
+
+export const purchaseInvoicesRouter = router({
+  uploadAndExtract: protectedProcedure
+    .input(z.object({
+      fileName: z.string().min(1).max(255),
+      mimeType: z.literal("application/pdf"),
+      base64: z.string().min(8).max(22_000_000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!input.fileName.toLowerCase().endsWith(".pdf")) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Envie um arquivo com extensão .pdf." });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
+
+      const buffer = decodePdf(input.base64);
+      const hash = createHash("sha256").update(buffer).digest("hex");
+      const duplicate = await db
+        .select({ id: purchaseInvoices.id, fileName: purchaseInvoices.fileName })
+        .from(purchaseInvoices)
+        .where(eq(purchaseInvoices.fileHash, hash))
+        .limit(1);
+      if (duplicate[0]) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Este PDF já foi enviado como ${duplicate[0].fileName}.`,
+        });
+      }
+
+      const now = new Date();
+      const key = `purchase-invoices/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${hash}.pdf`;
+      const stored = await storagePut(key, buffer, "application/pdf");
+      const inserted = await db
+        .insert(purchaseInvoices)
+        .values({
+          fileName: input.fileName.replace(/[\\/]/g, "_").trim(),
+          fileKey: stored.key,
+          fileUrl: stored.url,
+          fileHash: hash,
+          documentHash: hash,
+          documentIndex: 1,
+          fileSize: buffer.length,
+          uploadedBy: ctx.user.id,
+          status: "pending",
+        })
+        .$returningId();
+      const invoiceId = inserted[0]?.id;
+      if (!invoiceId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao registrar o PDF." });
+
+      return runExtraction(db, invoiceId, stored.key);
+    }),
+
+  reprocess: protectedProcedure
+    .input(z.object({ invoiceId: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
+      const rows = await db
+        .select({
+          id: purchaseInvoices.id,
+          fileKey: purchaseInvoices.fileKey,
+          fileHash: purchaseInvoices.fileHash,
+          documentHash: purchaseInvoices.documentHash,
+          documentIndex: purchaseInvoices.documentIndex,
+          status: purchaseInvoices.status,
+        })
+        .from(purchaseInvoices)
+        .where(eq(purchaseInvoices.id, input.invoiceId))
+        .limit(1);
+      if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada." });
+      const documentHash = rows[0].documentHash ?? rows[0].fileHash;
+      const documentRows = await db
+        .select({ id: purchaseInvoices.id, fileKey: purchaseInvoices.fileKey, documentIndex: purchaseInvoices.documentIndex, status: purchaseInvoices.status })
+        .from(purchaseInvoices)
+        .where(or(eq(purchaseInvoices.documentHash, documentHash), eq(purchaseInvoices.id, rows[0].id)))
+        .orderBy(asc(purchaseInvoices.documentIndex));
+      if (documentRows.some((row) => row.status === "confirmed")) {
+        throw new TRPCError({ code: "CONFLICT", message: "Uma nota confirmada não pode ser reprocessada, pois já gerou movimentos de estoque." });
+      }
+      const root = documentRows.find((row) => row.documentIndex === 1) ?? documentRows[0];
+      return runExtraction(db, root.id, root.fileKey);
+    }),
+
+  list: protectedProcedure
+    .input(z.object({
+      status: z.enum(["all", "pending", "processing", "extracted", "review_required", "confirmed", "error"]).default("all"),
+      search: z.string().max(100).default(""),
+      limit: z.number().int().min(1).max(100).default(50),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const filters = [];
+      if (input?.status && input.status !== "all") filters.push(eq(purchaseInvoices.status, input.status));
+      if (input?.search?.trim()) {
+        const search = `%${input.search.trim()}%`;
+        filters.push(or(
+          like(purchaseInvoices.supplierName, search),
+          like(purchaseInvoices.invoiceNumber, search),
+          like(purchaseInvoices.fileName, search),
+        ));
+      }
+      return db
+        .select()
+        .from(purchaseInvoices)
+        .where(filters.length ? and(...filters) : undefined)
+        .orderBy(desc(purchaseInvoices.createdAt))
+        .limit(input?.limit ?? 50);
+    }),
+
+  getById: protectedProcedure
+    .input(z.object({ invoiceId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const invoices = await db
+        .select()
+        .from(purchaseInvoices)
+        .where(eq(purchaseInvoices.id, input.invoiceId))
+        .limit(1);
+      if (!invoices[0]) return null;
+      const items = await db
+        .select()
+        .from(purchaseInvoiceItems)
+        .where(eq(purchaseInvoiceItems.invoiceId, input.invoiceId));
+      return { invoice: invoices[0], items };
+    }),
+
+  getFileUrl: protectedProcedure
+    .input(z.object({ invoiceId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
+      const rows = await db
+        .select({ fileKey: purchaseInvoices.fileKey })
+        .from(purchaseInvoices)
+        .where(eq(purchaseInvoices.id, input.invoiceId))
+        .limit(1);
+      if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada." });
+      return storageGet(rows[0].fileKey);
+    }),
+
+  saveReview: protectedProcedure
+    .input(z.object({
+      invoiceId: z.number().int().positive(),
+      supplierName: z.string().min(1).max(255),
+      supplierCnpj: z.string().max(20).nullable(),
+      invoiceNumber: z.string().min(1).max(100),
+      issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      totalAmount: z.number().positive(),
+      items: z.array(itemReviewSchema).min(1).max(500),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
+
+      const invoiceRows = await db
+        .select({ status: purchaseInvoices.status })
+        .from(purchaseInvoices)
+        .where(eq(purchaseInvoices.id, input.invoiceId))
+        .limit(1);
+      if (!invoiceRows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada." });
+      if (invoiceRows[0].status === "confirmed") {
+        throw new TRPCError({ code: "CONFLICT", message: "Esta nota já foi confirmada e não pode mais ser editada." });
+      }
+
+      const existingItems = await db
+        .select({ id: purchaseInvoiceItems.id })
+        .from(purchaseInvoiceItems)
+        .where(eq(purchaseInvoiceItems.invoiceId, input.invoiceId));
+      const allowedIds = new Set(existingItems.map((item) => item.id));
+      if (input.items.some((item) => !allowedIds.has(item.id))) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Há um item que não pertence a esta nota." });
+      }
+
+      const itemSubtotal = Math.round(input.items.reduce((sum, item) => sum + item.totalPrice, 0) * 100) / 100;
+      const tolerance = Math.max(2, input.totalAmount * 0.02);
+      const validationErrors: string[] = [];
+      for (const item of input.items) {
+        const calculated = Math.round(item.quantity * item.unitPrice * 100) / 100;
+        if (Math.abs(calculated - item.totalPrice) > Math.max(0.05, item.totalPrice * 0.01)) {
+          validationErrors.push(`Item ${item.description}: quantidade × preço não fecha com o total.`);
+        }
+      }
+      if (Math.abs(itemSubtotal - input.totalAmount) > tolerance) {
+        validationErrors.push("A soma dos itens diverge mais de 2% (ou R$ 2,00) do total da nota.");
+      }
+
+      for (const item of input.items) {
+        await db
+          .update(purchaseInvoiceItems)
+          .set({
+            supplierCode: item.supplierCode?.trim() || null,
+            description: item.description.trim(),
+            category: item.category,
+            quantity: item.quantity.toFixed(3),
+            unit: item.unit.trim().toUpperCase(),
+            unitPrice: item.unitPrice.toFixed(4),
+            totalPrice: item.totalPrice.toFixed(2),
+          })
+          .where(and(eq(purchaseInvoiceItems.id, item.id), eq(purchaseInvoiceItems.invoiceId, input.invoiceId)));
+      }
+
+      const supplierId = await resolveSupplierId(db, input.supplierName, input.supplierCnpj ?? "");
+      await db
+        .update(purchaseInvoices)
+        .set({
+          supplierName: input.supplierName.trim(),
+          supplierCnpj: input.supplierCnpj?.replace(/\D/g, "") || null,
+          operationalSupplierId: supplierId,
+          invoiceNumber: input.invoiceNumber.trim(),
+          issueDate: input.issueDate,
+          totalAmount: input.totalAmount.toFixed(2),
+          itemSubtotal: itemSubtotal.toFixed(2),
+          totalItems: input.items.length,
+          status: validationErrors.length === 0 ? "extracted" : "review_required",
+          validationErrors,
+          reviewedBy: ctx.user.id,
+          reviewedAt: new Date(),
+        })
+        .where(eq(purchaseInvoices.id, input.invoiceId));
+
+      return {
+        status: validationErrors.length === 0 ? "extracted" as const : "review_required" as const,
+        itemSubtotal,
+        validationErrors,
+      };
+    }),
+
+  confirm: protectedProcedure
+    .input(z.object({ invoiceId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
+      return confirmPurchaseInvoiceStock(db, input.invoiceId, ctx.user.id);
+    }),
+
+  itemsBySupplier: protectedProcedure
+    .input(z.object({
+      supplier: z.enum(["all", "sorvefort"]).default("all"),
+      search: z.string().max(100).default(""),
+      dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
+      dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
+      category: z.enum(["all", "limpeza", "guloseimas", "caldas", "descartaveis", "embalagens", "manutencao", "insumos", "outros"]).default("all"),
+      limit: z.number().int().min(1).max(500).default(250),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const filters = [or(
+        eq(purchaseInvoices.status, "extracted"),
+        eq(purchaseInvoices.status, "review_required"),
+        eq(purchaseInvoices.status, "confirmed"),
+      )];
+      if (input.supplier === "sorvefort") filters.push(like(purchaseInvoices.supplierName, "%SORVEFORT%"));
+      if (input.search.trim()) {
+        const search = `%${input.search.trim()}%`;
+        filters.push(or(
+          like(purchaseInvoiceItems.description, search),
+          like(purchaseInvoiceItems.supplierCode, search),
+        ));
+      }
+      if (input.dateFrom) filters.push(gte(purchaseInvoices.issueDate, input.dateFrom));
+      if (input.dateTo) filters.push(lte(purchaseInvoices.issueDate, input.dateTo));
+      if (input.category !== "all") filters.push(eq(purchaseInvoiceItems.category, input.category));
+
+      const rows = await db
+        .select({
+          id: purchaseInvoiceItems.id,
+          invoiceId: purchaseInvoiceItems.invoiceId,
+          supplierName: purchaseInvoices.supplierName,
+          invoiceNumber: purchaseInvoices.invoiceNumber,
+          issueDate: purchaseInvoices.issueDate,
+          status: purchaseInvoices.status,
+          description: purchaseInvoiceItems.description,
+          supplierCode: purchaseInvoiceItems.supplierCode,
+          category: purchaseInvoiceItems.category,
+          quantity: purchaseInvoiceItems.quantity,
+          unit: purchaseInvoiceItems.unit,
+          unitPrice: purchaseInvoiceItems.unitPrice,
+          totalPrice: purchaseInvoiceItems.totalPrice,
+          confidence: purchaseInvoiceItems.confidence,
+        })
+        .from(purchaseInvoiceItems)
+        .innerJoin(purchaseInvoices, eq(purchaseInvoiceItems.invoiceId, purchaseInvoices.id))
+        .where(and(...filters))
+        .orderBy(desc(purchaseInvoices.issueDate), asc(purchaseInvoiceItems.lineNumber))
+        .limit(input.limit);
+      return rows.filter((row) => matchesPurchaseItemFilters(row, input));
+    }),
+
+  boxPurchaseHistory: protectedProcedure
+    .input(z.object({
+      search: z.string().max(100).default(""),
+      dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
+      dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
+      limit: z.number().int().min(1).max(500).default(250),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return {
+        rows: [],
+        summary: { totalQuantity: 0, totalSpent: 0, weightedAveragePrice: 0, supplierCount: 0, invoiceCount: 0 },
+        bySupplier: [],
+      };
+
+      const filters = [
+        eq(purchaseInvoices.status, "confirmed"),
+        eq(purchaseInvoiceItems.linkStatus, "linked"),
+      ];
+      if (input.dateFrom) filters.push(gte(purchaseInvoices.issueDate, input.dateFrom));
+      if (input.dateTo) filters.push(lte(purchaseInvoices.issueDate, input.dateTo));
+
+      const rows = await db
+        .select({
+          id: purchaseInvoiceItems.id,
+          invoiceId: purchaseInvoiceItems.invoiceId,
+          linkedBoxId: purchaseInvoiceItems.boxStockId,
+          supplierName: purchaseInvoices.supplierName,
+          invoiceNumber: purchaseInvoices.invoiceNumber,
+          issueDate: purchaseInvoices.issueDate,
+          description: purchaseInvoiceItems.description,
+          quantity: purchaseInvoiceItems.quantity,
+          unit: purchaseInvoiceItems.unit,
+          unitPrice: purchaseInvoiceItems.unitPrice,
+          totalPrice: purchaseInvoiceItems.totalPrice,
+        })
+        .from(purchaseInvoiceItems)
+        .innerJoin(purchaseInvoices, eq(purchaseInvoiceItems.invoiceId, purchaseInvoices.id))
+        .where(and(...filters))
+        .orderBy(desc(purchaseInvoices.issueDate), asc(purchaseInvoiceItems.description))
+        .limit(input.limit);
+
+      return buildBoxPurchaseHistory(rows, input.search);
+    }),
+
+  monthlyItemsSummary: protectedProcedure
+    .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      if (!db) return {
+        availableMonths: [],
+        ...buildPurchaseItemsSummary([], [], input?.month ?? currentMonth),
+      };
+
+      const validStatusFilter = or(
+        eq(purchaseInvoices.status, "extracted"),
+        eq(purchaseInvoices.status, "review_required"),
+        eq(purchaseInvoices.status, "confirmed"),
+      );
+      const dateRows = await db
+        .select({ issueDate: purchaseInvoices.issueDate })
+        .from(purchaseInvoices)
+        .where(validStatusFilter);
+      const availableMonths = Array.from(new Set(
+        dateRows
+          .map((row) => row.issueDate?.slice(0, 7))
+          .filter((month): month is string => Boolean(month)),
+      )).sort((a, b) => b.localeCompare(a));
+      const selectedMonth = input?.month ?? availableMonths[0] ?? currentMonth;
+      const [year, monthNumber] = selectedMonth.split("-").map(Number);
+      const lastDay = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+      const monthFilter = and(
+        validStatusFilter,
+        gte(purchaseInvoices.issueDate, `${selectedMonth}-01`),
+        lte(purchaseInvoices.issueDate, lastDay),
+      );
+
+      const invoices = await db
+        .select({
+          id: purchaseInvoices.id,
+          supplierName: purchaseInvoices.supplierName,
+          invoiceNumber: purchaseInvoices.invoiceNumber,
+          issueDate: purchaseInvoices.issueDate,
+          status: purchaseInvoices.status,
+        })
+        .from(purchaseInvoices)
+        .where(monthFilter);
+      const items = await db
+        .select({
+          id: purchaseInvoiceItems.id,
+          invoiceId: purchaseInvoiceItems.invoiceId,
+          description: purchaseInvoiceItems.description,
+          category: purchaseInvoiceItems.category,
+          quantity: purchaseInvoiceItems.quantity,
+          unit: purchaseInvoiceItems.unit,
+          unitPrice: purchaseInvoiceItems.unitPrice,
+          totalPrice: purchaseInvoiceItems.totalPrice,
+        })
+        .from(purchaseInvoiceItems)
+        .innerJoin(purchaseInvoices, eq(purchaseInvoiceItems.invoiceId, purchaseInvoices.id))
+        .where(monthFilter);
+
+      return {
+        availableMonths,
+        ...buildPurchaseItemsSummary(invoices, items, selectedMonth),
+      };
+    }),
+
+  dashboard: protectedProcedure
+    .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      if (!db) return {
+        availableMonths: [],
+        ...buildPurchaseDashboard([], [], input?.month ?? currentMonth),
+      };
+
+      const validStatusFilter = or(
+        eq(purchaseInvoices.status, "extracted"),
+        eq(purchaseInvoices.status, "review_required"),
+        eq(purchaseInvoices.status, "confirmed"),
+      );
+      const dateRows = await db
+        .select({ issueDate: purchaseInvoices.issueDate })
+        .from(purchaseInvoices)
+        .where(validStatusFilter);
+      const availableMonths = Array.from(new Set(
+        dateRows
+          .map((row) => row.issueDate?.slice(0, 7))
+          .filter((month): month is string => Boolean(month)),
+      )).sort((a, b) => b.localeCompare(a));
+      const selectedMonth = input?.month ?? availableMonths[0] ?? currentMonth;
+      const [year, monthNumber] = selectedMonth.split("-").map(Number);
+      const lastDay = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+      const monthFilter = and(
+        validStatusFilter,
+        gte(purchaseInvoices.issueDate, `${selectedMonth}-01`),
+        lte(purchaseInvoices.issueDate, lastDay),
+      );
+
+      const invoices = await db
+        .select({
+          id: purchaseInvoices.id,
+          supplierName: purchaseInvoices.supplierName,
+          issueDate: purchaseInvoices.issueDate,
+          totalAmount: purchaseInvoices.totalAmount,
+          status: purchaseInvoices.status,
+        })
+        .from(purchaseInvoices)
+        .where(monthFilter);
+      const items = await db
+        .select({
+          invoiceId: purchaseInvoiceItems.invoiceId,
+          description: purchaseInvoiceItems.description,
+          category: purchaseInvoiceItems.category,
+          quantity: purchaseInvoiceItems.quantity,
+          totalPrice: purchaseInvoiceItems.totalPrice,
+        })
+        .from(purchaseInvoiceItems)
+        .innerJoin(purchaseInvoices, eq(purchaseInvoiceItems.invoiceId, purchaseInvoices.id))
+        .where(monthFilter);
+
+      return {
+        availableMonths,
+        ...buildPurchaseDashboard(invoices, items, selectedMonth),
+      };
+    }),
+});

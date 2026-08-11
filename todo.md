@@ -48,3 +48,4 @@
 - [x] Cron automático no dia 1 para salvar snapshot do estoque (estoque inicial do mês)
 - [x] Resumo mensal: card com estoque inicial + entradas - saídas = estoque final
 - [x] Botão de ajuste de estoque (contagem física) com cálculo de diferença
+- [x] Integrar upload e extração por IA de notas fiscais em PDF, revisão humana, confirmação de estoque, indicadores mensais e itens por categoria no Painel de Compras

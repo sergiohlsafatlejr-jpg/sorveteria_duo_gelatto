@@ -66,6 +66,7 @@ import {
   FileText,
   Clock,
   GitMerge,
+  ListTree,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -102,6 +103,9 @@ const menuGroups: MenuGroup[] = [
     label: "Compras Internas",
     items: [
       { icon: ClipboardList, label: "Painel de Compras", path: "/purchases" },
+      { icon: BarChart3, label: "Indicadores Mensais", path: "/purchases/dashboard" },
+      { icon: FileText, label: "Notas Fiscais PDF", path: "/purchases/invoices" },
+      { icon: ListTree, label: "Compras por Item", path: "/purchases/items" },
     ],
   },
   {

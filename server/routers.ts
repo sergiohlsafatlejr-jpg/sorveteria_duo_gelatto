@@ -32,6 +32,7 @@ import { redeRouter } from "./routers/rede";
 import { purchasesRouter } from "./routers/purchases";
 import { productGoalsRouter } from "./routers/productGoals";
 import { boxStockRouter } from "./routers/boxStock";
+import { purchaseInvoicesRouter } from "./routers/purchase-invoices";
 
 // ─── App Router ───────────────────────────────────────────────────────────────
 export const appRouter = router({
@@ -65,6 +66,7 @@ export const appRouter = router({
   rede: redeRouter,
   purchases: purchasesRouter,
   boxStock: boxStockRouter,
+  purchaseInvoices: purchaseInvoicesRouter,
   productGoals: productGoalsRouter,
   cron: router({
     // Listar últimas execuções dos cron jobs

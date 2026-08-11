@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
+import { buildPurchaseWarehouseCatalog } from "@/lib/purchase-warehouse";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -14,18 +15,33 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Package, ShoppingCart, Store, ClipboardList, BarChart3, Plus, Search,
   AlertTriangle, ArrowDown, ArrowUp, Minus, Edit, Trash2, Check, X,
-  TrendingDown, RefreshCw, FileText, Phone, ChevronRight,
+  TrendingDown, RefreshCw, FileText, Phone, ChevronRight, CalendarDays,
+  Candy, Droplets, Utensils, Boxes, Wrench, Sparkles, ShoppingBasket,
+  ReceiptText, Layers3, Loader2,
 } from "lucide-react";
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  limpeza: { label: "Limpeza", color: "bg-blue-500/10 text-blue-600 border-blue-500/20", icon: Package },
-  guloseimas: { label: "Guloseimas", color: "bg-pink-500/10 text-pink-600 border-pink-500/20", icon: Package },
-  caldas: { label: "Caldas", color: "bg-amber-500/10 text-amber-600 border-amber-500/20", icon: Package },
-  descartaveis: { label: "Descartáveis", color: "bg-slate-500/10 text-slate-600 border-slate-500/20", icon: Package },
-  embalagens: { label: "Embalagens", color: "bg-purple-500/10 text-purple-600 border-purple-500/20", icon: Package },
-  manutencao: { label: "Manutenção", color: "bg-orange-500/10 text-orange-600 border-orange-500/20", icon: Package },
+  limpeza: { label: "Material de limpeza", color: "bg-blue-500/10 text-blue-600 border-blue-500/20", icon: Sparkles },
+  guloseimas: { label: "Guloseimas", color: "bg-pink-500/10 text-pink-600 border-pink-500/20", icon: Candy },
+  caldas: { label: "Caldas", color: "bg-amber-500/10 text-amber-700 border-amber-500/20", icon: Droplets },
+  descartaveis: { label: "Utensílios/Descartáveis", color: "bg-slate-500/10 text-slate-700 border-slate-500/20", icon: Utensils },
+  embalagens: { label: "Embalagens", color: "bg-purple-500/10 text-purple-600 border-purple-500/20", icon: Boxes },
+  manutencao: { label: "Manutenção", color: "bg-orange-500/10 text-orange-600 border-orange-500/20", icon: Wrench },
   insumos: { label: "Insumos", color: "bg-green-500/10 text-green-600 border-green-500/20", icon: Package },
+  outros: { label: "Outros itens", color: "bg-zinc-500/10 text-zinc-600 border-zinc-500/20", icon: ShoppingBasket },
 };
+
+const INTERNAL_PURCHASE_GROUPS: Record<string, string> = {
+  limpeza: "Material de limpeza",
+  guloseimas: "Guloseimas",
+  outros: "Outros itens",
+};
+
+function getInternalPurchaseGroup(category: string): keyof typeof INTERNAL_PURCHASE_GROUPS {
+  if (category === "limpeza") return "limpeza";
+  if (category === "guloseimas") return "guloseimas";
+  return "outros";
+}
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   draft: { label: "Rascunho", color: "bg-gray-500/10 text-gray-600 border-gray-500/20" },
@@ -46,22 +62,73 @@ function formatDate(dateStr: string | Date | null | undefined) {
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(dateStr));
 }
 
+function formatInvoiceDate(dateStr: string | null | undefined) {
+  if (!dateStr) return "Sem data";
+  const [year, month, day] = dateStr.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : dateStr;
+}
+
+function formatMonthLabel(month: string | null | undefined) {
+  if (!month) return "Mês não informado";
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (!year || !monthNumber) return month;
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" })
+    .format(new Date(Date.UTC(year, monthNumber - 1, 1)));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function formatQuantity(value: number | string | null | undefined) {
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 3 }).format(Number(value ?? 0));
+}
+
 export default function Purchases() {
   const utils = trpc.useContext();
-  const [activeTab, setActiveTab] = useState("resumo");
+  const [activeTab, setActiveTab] = useState(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    return ["resumo", "almoxarifado", "pedidos", "baixas", "fornecedores", "templates"].includes(requestedTab ?? "")
+      ? requestedTab!
+      : "resumo";
+  });
+  const [purchaseMonth, setPurchaseMonth] = useState<string | null>(null);
+  const [expandedPurchaseCategories, setExpandedPurchaseCategories] = useState<Record<string, boolean>>({});
 
   // Dashboard Data
   const { data: dashboard } = trpc.purchases.dashboard.useQuery(undefined, { enabled: activeTab === 'resumo' });
+  const monthlyItemsInput = useMemo(() => ({ month: purchaseMonth }), [purchaseMonth]);
+  const {
+    data: monthlyItemsSummary,
+    isLoading: isMonthlyItemsLoading,
+    isError: isMonthlyItemsError,
+  } = trpc.purchaseInvoices.monthlyItemsSummary.useQuery(monthlyItemsInput, {
+    enabled: activeTab === "resumo" || activeTab === "almoxarifado" || activeTab === "baixas",
+  });
   
   // Items Data
   const [itemSearch, setItemSearch] = useState("");
   const [itemCategory, setItemCategory] = useState("all");
   const { data: items = [] } = trpc.purchases.items.list.useQuery();
   const { data: lowStockItems = [] } = trpc.purchases.items.lowStock.useQuery();
-  const filteredItems = items.filter(item => 
-    item.name.toLowerCase().includes(itemSearch.toLowerCase()) && 
-    (itemCategory === "all" || item.category === itemCategory)
+  const warehouseItems = useMemo(
+    () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], items),
+    [monthlyItemsSummary?.categories, items],
   );
+  const filteredWarehouseItems = warehouseItems.filter(item =>
+    item.name.toLowerCase().includes(itemSearch.toLowerCase()) &&
+    (itemCategory === "all" || getInternalPurchaseGroup(item.category) === itemCategory)
+  );
+  const warehousePurchaseSummary = useMemo(() => warehouseItems.reduce((summary, item) => ({
+    purchasedProducts: summary.purchasedProducts + (item.purchasedQuantity > 0 ? 1 : 0),
+    purchasedQuantity: summary.purchasedQuantity + item.purchasedQuantity,
+    purchasedValue: summary.purchasedValue + item.purchasedValue,
+    stockConfigured: summary.stockConfigured + (item.stockConfigured ? 1 : 0),
+    availableForConsumption: summary.availableForConsumption + (item.stockConfigured && Number(item.currentStock) > 0 ? 1 : 0),
+  }), {
+    purchasedProducts: 0,
+    purchasedQuantity: 0,
+    purchasedValue: 0,
+    stockConfigured: 0,
+    availableForConsumption: 0,
+  }), [warehouseItems]);
 
   // Orders Data
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
@@ -128,48 +195,254 @@ export default function Purchases() {
       <div className="flex flex-col h-full space-y-6 max-w-7xl mx-auto w-full">
         
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid grid-cols-6 mb-8 h-auto p-1 bg-slate-100 dark:bg-slate-800">
-            <TabsTrigger value="resumo" className="py-2"><BarChart3 className="w-4 h-4 mr-2"/> Resumo</TabsTrigger>
-            <TabsTrigger value="almoxarifado" className="py-2"><Package className="w-4 h-4 mr-2"/> Almoxarifado</TabsTrigger>
-            <TabsTrigger value="pedidos" className="py-2"><ShoppingCart className="w-4 h-4 mr-2"/> Pedidos</TabsTrigger>
-            <TabsTrigger value="baixas" className="py-2"><TrendingDown className="w-4 h-4 mr-2"/> Baixas</TabsTrigger>
-            <TabsTrigger value="fornecedores" className="py-2"><Store className="w-4 h-4 mr-2"/> Fornecedores</TabsTrigger>
-            <TabsTrigger value="templates" className="py-2"><ClipboardList className="w-4 h-4 mr-2"/> Templates</TabsTrigger>
+          <TabsList className="mb-8 grid h-auto grid-cols-2 gap-1 bg-slate-100 p-1 sm:grid-cols-3 lg:grid-cols-6 dark:bg-slate-800">
+            <TabsTrigger value="resumo" className="py-2 text-xs sm:text-sm"><BarChart3 className="mr-2 h-4 w-4"/> Resumo</TabsTrigger>
+            <TabsTrigger value="almoxarifado" className="py-2 text-xs sm:text-sm"><Package className="mr-2 h-4 w-4"/> Almoxarifado</TabsTrigger>
+            <TabsTrigger value="pedidos" className="py-2 text-xs sm:text-sm"><ShoppingCart className="mr-2 h-4 w-4"/> Pedidos</TabsTrigger>
+            <TabsTrigger value="baixas" className="py-2 text-xs sm:text-sm"><TrendingDown className="mr-2 h-4 w-4"/> Baixas</TabsTrigger>
+            <TabsTrigger value="fornecedores" className="py-2 text-xs sm:text-sm"><Store className="mr-2 h-4 w-4"/> Fornecedores</TabsTrigger>
+            <TabsTrigger value="templates" className="py-2 text-xs sm:text-sm"><ClipboardList className="mr-2 h-4 w-4"/> Templates</TabsTrigger>
           </TabsList>
 
           {/* TAB: RESUMO */}
           <TabsContent value="resumo" className="space-y-6">
+            <Card className="overflow-hidden border-emerald-200/70 shadow-sm dark:border-emerald-900/70">
+              <CardHeader className="border-b border-emerald-100 bg-gradient-to-r from-emerald-50 via-white to-amber-50 dark:border-emerald-950 dark:from-emerald-950/50 dark:via-slate-950 dark:to-amber-950/30">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-xl bg-emerald-600 p-2.5 text-white shadow-sm">
+                      <ReceiptText className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-xl">Compras encontradas nas notas fiscais</CardTitle>
+                      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                        Quantidades e produtos extraídos dos PDFs, organizados por categoria e nota de origem.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="w-full sm:w-[230px]">
+                    <Label className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <CalendarDays className="h-3.5 w-3.5" /> Mês de referência
+                    </Label>
+                    <Select
+                      value={purchaseMonth ?? monthlyItemsSummary?.month ?? undefined}
+                      onValueChange={setPurchaseMonth}
+                    >
+                      <SelectTrigger className="bg-white dark:bg-slate-950">
+                        <SelectValue placeholder="Selecione o mês" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(monthlyItemsSummary?.availableMonths ?? []).map((month) => (
+                          <SelectItem key={month} value={month}>{formatMonthLabel(month)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6 p-4 sm:p-6">
+                {isMonthlyItemsLoading ? (
+                  <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="h-5 w-5 animate-spin text-emerald-600" /> Consolidando os itens das notas...
+                  </div>
+                ) : isMonthlyItemsError ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                    <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" /> Não foi possível carregar o resumo mensal.</div>
+                    <p className="mt-1">Tente atualizar a página. As notas e os PDFs permanecem preservados.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        {formatMonthLabel(monthlyItemsSummary?.month)}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Considera notas extraídas, em revisão ou confirmadas no mês selecionado.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                      <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
+                        <div className="flex items-center justify-between gap-2 text-emerald-700 dark:text-emerald-300">
+                          <span className="text-xs font-semibold uppercase tracking-wide">Unidades compradas</span>
+                          <ShoppingBasket className="h-4 w-4" />
+                        </div>
+                        <p className="mt-2 text-2xl font-bold tabular-nums">{formatQuantity(monthlyItemsSummary?.summary.totalQuantity)}</p>
+                        <p className="mt-1 text-xs text-slate-500">Soma das quantidades dos itens</p>
+                      </div>
+                      <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900 dark:bg-blue-950/30">
+                        <div className="flex items-center justify-between gap-2 text-blue-700 dark:text-blue-300">
+                          <span className="text-xs font-semibold uppercase tracking-wide">Produtos distintos</span>
+                          <Layers3 className="h-4 w-4" />
+                        </div>
+                        <p className="mt-2 text-2xl font-bold tabular-nums">{monthlyItemsSummary?.summary.distinctProducts ?? 0}</p>
+                        <p className="mt-1 text-xs text-slate-500">Descrições únicas encontradas</p>
+                      </div>
+                      <div className="rounded-xl border border-violet-100 bg-violet-50/70 p-4 dark:border-violet-900 dark:bg-violet-950/30">
+                        <div className="flex items-center justify-between gap-2 text-violet-700 dark:text-violet-300">
+                          <span className="text-xs font-semibold uppercase tracking-wide">Notas do mês</span>
+                          <FileText className="h-4 w-4" />
+                        </div>
+                        <p className="mt-2 text-2xl font-bold tabular-nums">{monthlyItemsSummary?.summary.invoiceCount ?? 0}</p>
+                        <p className="mt-1 text-xs text-slate-500">Documentos fiscais considerados</p>
+                      </div>
+                      <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+                        <div className="flex items-center justify-between gap-2 text-amber-700 dark:text-amber-300">
+                          <span className="text-xs font-semibold uppercase tracking-wide">Valor dos itens</span>
+                          <BarChart3 className="h-4 w-4" />
+                        </div>
+                        <p className="mt-2 text-xl font-bold tabular-nums sm:text-2xl">{formatCurrency(monthlyItemsSummary?.summary.totalSpent)}</p>
+                        <p className="mt-1 text-xs text-slate-500">Subtotal das linhas das notas</p>
+                      </div>
+                    </div>
+
+                    {(monthlyItemsSummary?.categories.length ?? 0) === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center dark:border-slate-700 dark:bg-slate-900/50">
+                        <FileText className="mx-auto h-9 w-9 text-slate-400" />
+                        <p className="mt-3 font-semibold">Nenhum item encontrado neste mês</p>
+                        <p className="mt-1 text-sm text-slate-500">Envie ou revise as notas fiscais para que os itens apareçam neste resumo.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                          <div>
+                            <h3 className="font-semibold text-slate-900 dark:text-slate-100">Itens por categoria</h3>
+                            <p className="text-sm text-slate-500">Abra cada grupo para conferir quantidades, valores e notas de origem.</p>
+                          </div>
+                          <Badge variant="outline" className="w-fit">
+                            {monthlyItemsSummary?.summary.categoryCount ?? 0} categorias
+                          </Badge>
+                        </div>
+
+                        {monthlyItemsSummary?.categories.map((category, index) => {
+                          const categoryInfo = CATEGORY_LABELS[category.category] ?? CATEGORY_LABELS.outros;
+                          const CategoryIcon = categoryInfo.icon;
+                          const isExpanded = expandedPurchaseCategories[category.category] ?? false;
+                          return (
+                            <div key={category.category} className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedPurchaseCategories((current) => ({
+                                  ...current,
+                                  [category.category]: !isExpanded,
+                                }))}
+                                aria-expanded={isExpanded}
+                                className="flex w-full items-center gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-900 sm:px-5"
+                              >
+                                <span className={`rounded-lg border p-2 ${categoryInfo.color}`}>
+                                  <CategoryIcon className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block font-semibold text-slate-900 dark:text-slate-100">{categoryInfo.label}</span>
+                                  <span className="block text-xs text-slate-500">
+                                    {category.productCount} produtos em {category.invoiceCount} notas
+                                  </span>
+                                </span>
+                                <span className="hidden text-right sm:block">
+                                  <span className="block font-semibold tabular-nums">{formatQuantity(category.totalQuantity)} unidades</span>
+                                  <span className="block text-xs text-slate-500">{formatCurrency(category.totalSpent)}</span>
+                                </span>
+                                <ChevronRight className={`h-5 w-5 shrink-0 text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`} />
+                              </button>
+
+                              {isExpanded && (
+                                <div className="border-t border-slate-200 dark:border-slate-800">
+                                  <div className="flex items-center justify-between bg-slate-50 px-4 py-2 text-xs sm:hidden dark:bg-slate-900">
+                                    <span className="font-semibold">{formatQuantity(category.totalQuantity)} unidades</span>
+                                    <span className="text-slate-500">{formatCurrency(category.totalSpent)}</span>
+                                  </div>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[780px] text-sm">
+                                      <thead className="bg-slate-50/80 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900/70">
+                                        <tr>
+                                          <th className="px-4 py-3 sm:px-5">Produto</th>
+                                          <th className="px-4 py-3 text-right">Quantidade</th>
+                                          <th className="px-4 py-3 text-right">Valor</th>
+                                          <th className="px-4 py-3 sm:px-5">Notas de origem</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100 dark:divide-slate-900">
+                                        {category.items.map((item) => (
+                                          <tr key={`${category.category}-${item.description}-${item.unit}`} className="align-top hover:bg-slate-50/70 dark:hover:bg-slate-900/50">
+                                            <td className="px-4 py-3 sm:px-5">
+                                              <p className="font-medium text-slate-900 dark:text-slate-100">{item.description}</p>
+                                              <p className="mt-0.5 text-xs text-slate-500">Unidade: {item.unit} · preço médio {formatCurrency(item.averageUnitPrice)}</p>
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                              {formatQuantity(item.totalQuantity)} <span className="text-xs font-normal text-slate-500">{item.unit}</span>
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-medium tabular-nums">{formatCurrency(item.totalSpent)}</td>
+                                            <td className="px-4 py-3 sm:px-5">
+                                              <div className="space-y-1.5">
+                                                {item.sources.map((source) => (
+                                                  <div key={source.invoiceId} className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs dark:bg-slate-900">
+                                                    <span className="min-w-0">
+                                                      <span className="font-semibold text-slate-700 dark:text-slate-200">NF {source.invoiceNumber || `#${source.invoiceId}`}</span>
+                                                      <span className="ml-1.5 text-slate-500">· {formatInvoiceDate(source.issueDate)}</span>
+                                                      <span className="block truncate text-[11px] text-slate-400">{source.supplierName}</span>
+                                                    </span>
+                                                    <span className="shrink-0 font-medium tabular-nums">{formatQuantity(source.quantity)} {item.unit}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Compras internas e saldo físico</h2>
+              <p className="text-sm text-slate-500">Os itens das notas aparecem imediatamente; o saldo só é exibido quando uma entrada foi conferida.</p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card className="border-l-4 border-l-red-500">
+              <Card className="border-l-4 border-l-fuchsia-500">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-slate-500">Itens em Falta</CardTitle>
+                  <CardTitle className="text-sm font-medium text-slate-500">Produtos nas Notas</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-red-600">{dashboard?.lowStockItems || 0}</div>
+                  <div className="text-2xl font-bold text-fuchsia-600">{warehousePurchaseSummary.purchasedProducts}</div>
+                  <p className="mt-1 text-xs text-slate-500">Sem caixas de 10 L</p>
                 </CardContent>
               </Card>
-              <Card className="border-l-4 border-l-yellow-500">
+              <Card className="border-l-4 border-l-amber-500">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-slate-500">Pedidos Pendentes</CardTitle>
+                  <CardTitle className="text-sm font-medium text-slate-500">Unidades Compradas</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-yellow-600">{dashboard?.pendingOrders || 0}</div>
+                  <div className="text-2xl font-bold text-amber-600">{formatQuantity(warehousePurchaseSummary.purchasedQuantity)}</div>
+                  <p className="mt-1 text-xs text-slate-500">Em {formatMonthLabel(monthlyItemsSummary?.month)}</p>
                 </CardContent>
               </Card>
               <Card className="border-l-4 border-l-green-500">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-slate-500">Gasto do Mês</CardTitle>
+                  <CardTitle className="text-sm font-medium text-slate-500">Valor das Compras</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-green-600">{formatCurrency(dashboard?.monthlySpend?.reduce((s: number, r: any) => s + Number(r.total || 0), 0) || 0)}</div>
+                  <div className="text-2xl font-bold text-green-600">{formatCurrency(warehousePurchaseSummary.purchasedValue)}</div>
+                  <p className="mt-1 text-xs text-slate-500">Itens de consumo interno</p>
                 </CardContent>
               </Card>
               <Card className="border-l-4 border-l-blue-500">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-slate-500">Total de Itens</CardTitle>
+                  <CardTitle className="text-sm font-medium text-slate-500">Saldos Conferidos</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-blue-600">{items.length}</div>
+                  <div className="text-2xl font-bold text-blue-600">{warehousePurchaseSummary.stockConfigured}</div>
+                  <p className="mt-1 text-xs text-slate-500">Itens prontos para movimentação</p>
                 </CardContent>
               </Card>
             </div>
@@ -261,13 +534,13 @@ export default function Purchases() {
                   />
                 </div>
                 <Select value={itemCategory} onValueChange={setItemCategory}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Categoria" />
+                  <SelectTrigger className="w-[210px]">
+                    <SelectValue placeholder="Grupo de compra" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todas</SelectItem>
-                    {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                    <SelectItem value="all">Todos os grupos</SelectItem>
+                    {Object.entries(INTERNAL_PURCHASE_GROUPS).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -345,38 +618,57 @@ export default function Purchases() {
               </Dialog>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {filteredItems.map(item => (
-                <Card key={item.id} className="overflow-hidden">
-                  <div className={`h-1 w-full ${Number(item.currentStock) <= Number(item.minStock) ? 'bg-red-500' : Number(item.currentStock) <= Number(item.minStock) * 2 ? 'bg-yellow-400' : 'bg-green-500'}`} />
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filteredWarehouseItems.map(item => {
+                const currentStock = Number(item.currentStock ?? 0);
+                const minStock = Number(item.minStock ?? 0);
+                const stockLow = item.stockConfigured && minStock > 0 && currentStock <= minStock;
+                return (
+                <Card key={item.key} className="overflow-hidden">
+                  <div className={`h-1 w-full ${!item.stockConfigured ? 'bg-cyan-500' : stockLow ? 'bg-red-500' : currentStock <= minStock * 2 ? 'bg-yellow-400' : 'bg-green-500'}`} />
                   <CardHeader className="pb-2">
-                    <div className="flex justify-between items-start">
+                    <div className="flex justify-between items-start gap-3">
                       <CardTitle className="text-base">{item.name}</CardTitle>
-                      <Badge variant="outline" className={CATEGORY_LABELS[item.category]?.color}>
-                        {CATEGORY_LABELS[item.category]?.label || item.category}
-                      </Badge>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <Badge variant="outline" className={CATEGORY_LABELS[item.category]?.color}>
+                          {CATEGORY_LABELS[item.category]?.label || item.category}
+                        </Badge>
+                        <Badge variant="secondary" className={!item.stockConfigured ? "bg-cyan-50 text-cyan-700" : ""}>
+                          {item.stockConfigured ? "Saldo conferido" : "Encontrado nas notas"}
+                        </Badge>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="flex justify-between items-end mb-4">
+                    <div className="mb-4 grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                       <div>
-                        <p className="text-sm text-slate-500 mb-1">Estoque</p>
-                        <div className="flex items-baseline space-x-1">
-                          <span className={`text-2xl font-bold ${item.currentStock <= item.minStock ? 'text-red-600' : ''}`}>
-                            {item.currentStock}
-                          </span>
-                          <span className="text-sm text-slate-500">/ {item.minStock} {item.unit}</span>
-                        </div>
+                        <p className="mb-1 text-xs text-slate-500">Comprado no período</p>
+                        <p className="text-xl font-bold">{formatQuantity(item.purchasedQuantity)} <span className="text-xs font-medium text-slate-500">{item.unit}</span></p>
+                        <p className="mt-1 text-xs text-slate-500">{item.invoiceCount} nota(s) · {formatCurrency(item.purchasedValue)}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs text-slate-500">Ref.</p>
-                        <p className="font-medium">{formatCurrency(item.referencePrice)}</p>
+                      <div className="border-l pl-3">
+                        <p className="mb-1 text-xs text-slate-500">Saldo físico atual</p>
+                        {item.stockConfigured ? (
+                          <>
+                            <p className={`text-xl font-bold ${stockLow ? 'text-red-600' : ''}`}>{formatQuantity(currentStock)} <span className="text-xs font-medium text-slate-500">{item.unit}</span></p>
+                            <p className="mt-1 text-xs text-slate-500">Mínimo: {formatQuantity(minStock)}</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-sm font-semibold text-cyan-700">Aguardando conferência</p>
+                            <p className="mt-1 text-xs text-slate-500">Não calculado pelas notas históricas</p>
+                          </>
+                        )}
                       </div>
                     </div>
+                    <div className="mb-3 flex items-center justify-between text-xs text-slate-500">
+                      <span>Preço de referência</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(item.referencePrice)}</span>
+                    </div>
                     <div className="flex space-x-2">
-                      <Dialog>
+                      {item.operationalItemId ? <Dialog>
                         <DialogTrigger asChild>
-                          <Button variant="outline" className="flex-1" size="sm"><Minus className="w-3 h-3 mr-2"/> Baixa</Button>
+                          <Button variant="outline" className="flex-1" size="sm" disabled={currentStock <= 0}><Minus className="w-3 h-3 mr-2"/> Registrar baixa</Button>
                         </DialogTrigger>
                         <DialogContent>
                           <DialogHeader>
@@ -386,7 +678,7 @@ export default function Purchases() {
                             e.preventDefault();
                             const formData = new FormData(e.currentTarget);
                             registerConsumptionMutation.mutate({
-                              itemId: item.id,
+                              itemId: item.operationalItemId!,
                               quantity: Number(formData.get('quantity')),
                               type: formData.get('type') as 'consumption' | 'loss',
                               reason: formData.get('reason') as string,
@@ -395,7 +687,7 @@ export default function Purchases() {
                             <div className="grid grid-cols-2 gap-4">
                               <div className="space-y-2">
                                 <Label>Quantidade ({item.unit})</Label>
-                                <Input type="number" step="0.01" name="quantity" max={item.currentStock} required />
+                                <Input type="number" step="0.01" name="quantity" max={currentStock} required />
                               </div>
                               <div className="space-y-2">
                                 <Label>Tipo</Label>
@@ -417,12 +709,21 @@ export default function Purchases() {
                             </DialogFooter>
                           </form>
                         </DialogContent>
-                      </Dialog>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500"><Edit className="w-4 h-4"/></Button>
+                      </Dialog> : (
+                        <Button asChild variant="outline" className="flex-1" size="sm">
+                          <a href="/purchases/invoices"><ReceiptText className="mr-2 h-3 w-3"/> Conferir entrada</a>
+                        </Button>
+                      )}
+                      {item.operationalItemId && <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500"><Edit className="w-4 h-4"/></Button>}
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+              )})}
+              {filteredWarehouseItems.length === 0 && (
+                <Card className="md:col-span-2 xl:col-span-3">
+                  <CardContent className="py-12 text-center text-slate-500">Nenhum item encontrado para os filtros selecionados.</CardContent>
+                </Card>
+              )}
             </div>
           </TabsContent>
 
@@ -572,6 +873,53 @@ export default function Purchases() {
 
           {/* TAB: BAIXAS */}
           <TabsContent value="baixas" className="space-y-6">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <Card className="border-l-4 border-l-fuchsia-500">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-slate-500">Produtos de Consumo Interno</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-fuchsia-600">{warehousePurchaseSummary.purchasedProducts}</div>
+                  <p className="mt-1 text-xs text-slate-500">Encontrados nas notas de {formatMonthLabel(monthlyItemsSummary?.month)}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-amber-500">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-slate-500">Unidades Compradas</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-amber-600">{formatQuantity(warehousePurchaseSummary.purchasedQuantity)}</div>
+                  <p className="mt-1 text-xs text-slate-500">Compras internas, sem caixas de 10 L</p>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-blue-500">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-slate-500">Disponíveis para Baixa</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-600">{warehousePurchaseSummary.availableForConsumption}</div>
+                  <p className="mt-1 text-xs text-slate-500">Itens com saldo físico positivo</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {warehousePurchaseSummary.purchasedProducts > 0 && warehousePurchaseSummary.availableForConsumption === 0 && (
+              <Card className="border-cyan-200 bg-cyan-50/70 dark:border-cyan-900 dark:bg-cyan-950/20">
+                <CardContent className="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-cyan-700" />
+                    <div>
+                      <p className="font-semibold text-cyan-950 dark:text-cyan-100">As compras foram encontradas, mas o saldo físico ainda não foi conferido</p>
+                      <p className="mt-1 text-sm text-cyan-800 dark:text-cyan-300">As notas históricas aparecem no Almoxarifado sem virar estoque automaticamente. Confirme uma entrada antes de registrar consumo ou perda.</p>
+                    </div>
+                  </div>
+                  <Button asChild variant="outline" className="shrink-0 border-cyan-300 bg-white/80 text-cyan-800 hover:bg-white dark:bg-cyan-950">
+                    <a href="/purchases/invoices"><ReceiptText className="mr-2 h-4 w-4" /> Conferir notas</a>
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="bg-slate-50 dark:bg-slate-900 border-dashed">
               <CardContent className="pt-6">
                 <form className="flex flex-col md:flex-row gap-4 items-end" onSubmit={(e) => {
@@ -587,20 +935,20 @@ export default function Purchases() {
                 }}>
                   <div className="space-y-2 flex-1 w-full">
                     <Label>Item</Label>
-                    <Select name="itemId" required>
+                    <Select name="itemId" required disabled={warehousePurchaseSummary.availableForConsumption === 0}>
                       <SelectTrigger><SelectValue placeholder="Selecione um item..."/></SelectTrigger>
                       <SelectContent>
-                        {items.map(i => <SelectItem key={i.id} value={i.id.toString()}>{i.name} (Est: {i.currentStock} {i.unit})</SelectItem>)}
+                        {items.filter(i => Number(i.currentStock) > 0).map(i => <SelectItem key={i.id} value={i.id.toString()}>{i.name} (Est: {i.currentStock} {i.unit})</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2 w-full md:w-32">
                     <Label>Quantidade</Label>
-                    <Input type="number" step="0.01" name="quantity" required />
+                    <Input type="number" step="0.01" name="quantity" required disabled={warehousePurchaseSummary.availableForConsumption === 0} />
                   </div>
                   <div className="space-y-2 w-full md:w-48">
                     <Label>Tipo</Label>
-                    <Select name="type" defaultValue="consumption">
+                    <Select name="type" defaultValue="consumption" disabled={warehousePurchaseSummary.availableForConsumption === 0}>
                       <SelectTrigger><SelectValue/></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="consumption">Consumo</SelectItem>
@@ -610,9 +958,9 @@ export default function Purchases() {
                   </div>
                   <div className="space-y-2 flex-1 w-full">
                     <Label>Motivo</Label>
-                    <Input name="reason" placeholder="Opcional..." />
+                    <Input name="reason" placeholder="Opcional..." disabled={warehousePurchaseSummary.availableForConsumption === 0} />
                   </div>
-                  <Button type="submit" disabled={registerConsumptionMutation.isPending} className="w-full md:w-auto"><Minus className="w-4 h-4 mr-2"/> Registrar Baixa</Button>
+                  <Button type="submit" disabled={registerConsumptionMutation.isPending || warehousePurchaseSummary.availableForConsumption === 0} className="w-full md:w-auto"><Minus className="w-4 h-4 mr-2"/> Registrar Baixa</Button>
                 </form>
               </CardContent>
             </Card>

@@ -58,6 +58,9 @@ import InoveCostMargin from "./pages/InoveCostMargin";
 import InoveManagerial from "./pages/InoveManagerial";
 import PublicLoyalty from "./pages/PublicLoyalty";
 import Purchases from "./pages/Purchases";
+import PurchaseInvoices from "./pages/PurchaseInvoices";
+import PurchaseItems from "./pages/PurchaseItems";
+import PurchaseDashboard from "./pages/PurchaseDashboard";
 // Novos relatórios consolidados
 import ReportSales from "./pages/reports/ReportSales";
 import ReportCMV from "./pages/reports/ReportCMV";
@@ -81,6 +84,9 @@ function Router() {
       <Route path="/purchase-suggestion">{() => <ProtectedRoute path="/purchase-suggestion"><PurchaseSuggestion /></ProtectedRoute>}</Route>
       <Route path="/smart-purchase-plan">{() => <ProtectedRoute path="/smart-purchase-plan"><SmartPurchasePlanner /></ProtectedRoute>}</Route>
       <Route path="/purchases">{() => <ProtectedRoute path="/purchases"><Purchases /></ProtectedRoute>}</Route>
+      <Route path="/purchases/dashboard">{() => <ProtectedRoute path="/purchases/dashboard"><PurchaseDashboard /></ProtectedRoute>}</Route>
+      <Route path="/purchases/invoices">{() => <ProtectedRoute path="/purchases/invoices"><PurchaseInvoices /></ProtectedRoute>}</Route>
+      <Route path="/purchases/items">{() => <ProtectedRoute path="/purchases/items"><PurchaseItems /></ProtectedRoute>}</Route>
       <Route path="/reports">{() => <ProtectedRoute path="/reports"><Reports /></ProtectedRoute>}</Route>
       <Route path="/gerencial">{() => <ProtectedRoute path="/gerencial"><GerencialReports /></ProtectedRoute>}</Route>
       {/* Novos relatórios consolidados */}

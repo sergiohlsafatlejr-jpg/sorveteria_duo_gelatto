@@ -559,6 +559,76 @@ export const nfeImports = mysqlTable("nfe_imports", {
 export type NfeImport = typeof nfeImports.$inferSelect;
 export type InsertNfeImport = typeof nfeImports.$inferInsert;
 
+// ─── Purchase Invoice PDFs (upload, extração por IA e revisão) ────────────────
+export const purchaseInvoices = mysqlTable("purchase_invoices", {
+  id: int("id").autoincrement().primaryKey(),
+  source: mysqlEnum("source", ["pdf", "xml"]).default("pdf").notNull(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  fileKey: varchar("fileKey", { length: 500 }).notNull(),
+  fileUrl: varchar("fileUrl", { length: 1000 }).notNull(),
+  fileHash: varchar("fileHash", { length: 64 }).notNull().unique(),
+  documentHash: varchar("documentHash", { length: 64 }),
+  documentIndex: int("documentIndex").default(1).notNull(),
+  fileSize: int("fileSize").notNull(),
+  status: mysqlEnum("status", [
+    "pending", "processing", "extracted", "review_required", "confirmed", "error",
+  ]).default("pending").notNull(),
+  supplierName: varchar("supplierName", { length: 255 }),
+  supplierCnpj: varchar("supplierCnpj", { length: 20 }),
+  operationalSupplierId: int("operationalSupplierId"),
+  invoiceNumber: varchar("invoiceNumber", { length: 30 }),
+  accessKey: varchar("accessKey", { length: 44 }),
+  issueDate: varchar("issueDate", { length: 10 }), // YYYY-MM-DD
+  totalAmount: decimal("totalAmount", { precision: 14, scale: 2 }),
+  itemSubtotal: decimal("itemSubtotal", { precision: 14, scale: 2 }),
+  totalItems: int("totalItems").default(0).notNull(),
+  confidence: decimal("confidence", { precision: 5, scale: 4 }),
+  model: varchar("model", { length: 100 }),
+  promptTokens: int("promptTokens"),
+  completionTokens: int("completionTokens"),
+  durationMs: int("durationMs"),
+  validationErrors: json("validationErrors"),
+  errorMessage: text("errorMessage"),
+  uploadedBy: int("uploadedBy").notNull(),
+  reviewedBy: int("reviewedBy"),
+  reviewedAt: timestamp("reviewedAt"),
+  processedAt: timestamp("processedAt"),
+  confirmedAt: timestamp("confirmedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  documentInvoiceUnique: uniqueIndex("purchase_invoice_document_idx").on(table.documentHash, table.documentIndex),
+}));
+export type PurchaseInvoice = typeof purchaseInvoices.$inferSelect;
+export type InsertPurchaseInvoice = typeof purchaseInvoices.$inferInsert;
+
+export const purchaseInvoiceItems = mysqlTable("purchase_invoice_items", {
+  id: int("id").autoincrement().primaryKey(),
+  invoiceId: int("invoiceId").notNull(),
+  lineNumber: int("lineNumber").notNull(),
+  supplierCode: varchar("supplierCode", { length: 100 }),
+  description: varchar("description", { length: 500 }).notNull(),
+  category: varchar("category", { length: 50 }).default("insumos").notNull(),
+  quantity: decimal("quantity", { precision: 14, scale: 3 }).notNull(),
+  unit: varchar("unit", { length: 20 }).default("UN").notNull(),
+  unitPrice: decimal("unitPrice", { precision: 14, scale: 4 }).notNull(),
+  totalPrice: decimal("totalPrice", { precision: 14, scale: 2 }).notNull(),
+  confidence: decimal("confidence", { precision: 5, scale: 4 }),
+  productId: int("productId"),
+  operationalItemId: int("operationalItemId"),
+  boxStockId: int("boxStockId"),
+  linkStatus: mysqlEnum("linkStatus", ["pending", "linked", "ignored"])
+    .default("pending")
+    .notNull(),
+  rawData: json("rawData"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  invoiceLineUnique: uniqueIndex("purchase_invoice_line_idx").on(table.invoiceId, table.lineNumber),
+}));
+export type PurchaseInvoiceItem = typeof purchaseInvoiceItems.$inferSelect;
+export type InsertPurchaseInvoiceItem = typeof purchaseInvoiceItems.$inferInsert;
+
 // ─── Sales Imports (Importação de Vendas via XLS) ──────────────────────────────
 export const salesImports = mysqlTable("sales_imports", {
   id: int("id").autoincrement().primaryKey(),
