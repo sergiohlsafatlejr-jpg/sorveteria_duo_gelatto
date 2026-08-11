@@ -18,6 +18,7 @@ import {
   TrendingDown, RefreshCw, FileText, Phone, ChevronRight, CalendarDays,
   Candy, Droplets, Utensils, Boxes, Wrench, Sparkles, ShoppingBasket,
   ReceiptText, Layers3, Loader2,
+  IceCream,
 } from "lucide-react";
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string; icon: React.ElementType }> = {
@@ -109,8 +110,12 @@ export default function Purchases() {
   const { data: items = [] } = trpc.purchases.items.list.useQuery();
   const { data: lowStockItems = [] } = trpc.purchases.items.lowStock.useQuery();
   const warehouseItems = useMemo(
-    () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], items),
+    () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], items, "almoxarifado"),
     [monthlyItemsSummary?.categories, items],
+  );
+  const warehouseItemsSorvetes = useMemo(
+    () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], [], "duo_gelatto"),
+    [monthlyItemsSummary?.categories],
   );
   const filteredWarehouseItems = warehouseItems.filter(item =>
     item.name.toLowerCase().includes(itemSearch.toLowerCase()) &&
@@ -198,6 +203,7 @@ export default function Purchases() {
           <TabsList className="mb-8 grid h-auto grid-cols-2 gap-1 bg-slate-100 p-1 sm:grid-cols-3 lg:grid-cols-6 dark:bg-slate-800">
             <TabsTrigger value="resumo" className="py-2 text-xs sm:text-sm"><BarChart3 className="mr-2 h-4 w-4"/> Resumo</TabsTrigger>
             <TabsTrigger value="almoxarifado" className="py-2 text-xs sm:text-sm"><Package className="mr-2 h-4 w-4"/> Almoxarifado</TabsTrigger>
+            <TabsTrigger value="sorvetes" className="py-2 text-xs sm:text-sm"><IceCream className="mr-2 h-4 w-4"/> Sorvetes</TabsTrigger>
             <TabsTrigger value="pedidos" className="py-2 text-xs sm:text-sm"><ShoppingCart className="mr-2 h-4 w-4"/> Pedidos</TabsTrigger>
             <TabsTrigger value="baixas" className="py-2 text-xs sm:text-sm"><TrendingDown className="mr-2 h-4 w-4"/> Baixas</TabsTrigger>
             <TabsTrigger value="fornecedores" className="py-2 text-xs sm:text-sm"><Store className="mr-2 h-4 w-4"/> Fornecedores</TabsTrigger>
@@ -728,6 +734,40 @@ export default function Purchases() {
           </TabsContent>
 
           {/* TAB: PEDIDOS */}
+          <TabsContent value="sorvetes" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><IceCream className="h-5 w-5 text-pink-500" />Sorvetes — Itens da Duo Gelatto</CardTitle>
+                <p className="text-sm text-muted-foreground">Itens comprados da Duo Gelatto (apenas visualização — controle pelo INOVE).</p>
+              </CardHeader>
+              <CardContent>
+                {warehouseItemsSorvetes.length === 0 ? (
+                  <div className="py-10 text-center text-muted-foreground">
+                    <IceCream className="mx-auto mb-3 h-9 w-9 text-muted-foreground/40" />
+                    <p className="font-medium">Nenhum item de sorvete encontrado</p>
+                    <p className="mt-1 text-sm">Importe notas da Duo Gelatto para ver os itens aqui.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[600px] text-sm">
+                      <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd. Comprada</th><th className="px-4 py-3 text-right">Valor Total</th><th className="px-5 py-3 text-right">Preço Médio</th></tr></thead>
+                      <tbody>
+                        {warehouseItemsSorvetes.map((item) => (
+                          <tr key={item.key} className="border-b hover:bg-muted/20">
+                            <td className="px-5 py-3 font-medium">{item.name}</td>
+                            <td className="px-4 py-3"><Badge variant="outline">{item.category}</Badge></td>
+                            <td className="px-4 py-3 text-right">{item.purchasedQuantity.toLocaleString("pt-BR")} {item.unit}</td>
+                            <td className="px-4 py-3 text-right font-semibold">{formatCurrency(item.purchasedValue)}</td>
+                            <td className="px-5 py-3 text-right">{formatCurrency(item.referencePrice)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
           <TabsContent value="pedidos" className="space-y-6">
             <div className="flex justify-between items-center">
               <div className="flex space-x-2 overflow-x-auto pb-2">

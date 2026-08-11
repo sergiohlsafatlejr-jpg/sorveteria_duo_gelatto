@@ -1,5 +1,6 @@
 export type PurchaseWarehouseSource = {
   invoiceId: number;
+  supplierName?: string;
 };
 
 export type PurchaseWarehouseInvoiceItem = {
@@ -58,12 +59,20 @@ export function isTenLiterPurchaseItem(description: string): boolean {
 export function buildPurchaseWarehouseCatalog(
   categories: PurchaseWarehouseCategory[],
   operationalItems: PurchaseWarehouseOperationalItem[],
+  supplierFilter?: "all" | "duo_gelatto" | "almoxarifado",
 ): PurchaseWarehouseItem[] {
+  const filter = supplierFilter ?? "all";
   const catalog = new Map<string, PurchaseWarehouseItem>();
 
   for (const category of categories) {
     for (const item of category.items) {
       if (isTenLiterPurchaseItem(item.description)) continue;
+      // Filtrar por fornecedor
+      if (filter !== "all" && item.sources.length > 0) {
+        const isDuo = item.sources.some((s: any) => ((s as any).supplierName ?? "").toUpperCase().includes("DUO GELATTO"));
+        if (filter === "duo_gelatto" && !isDuo) continue;
+        if (filter === "almoxarifado" && isDuo) continue;
+      }
       const normalizedName = normalizePurchaseWarehouseName(item.description);
       if (!normalizedName) continue;
       const existing = catalog.get(normalizedName);
