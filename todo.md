@@ -56,3 +56,4 @@
 - [x] Implementar formulário completo de pedido manual (fornecedor + itens + quantidade + preço)
 - [x] Implementar sugestão automática de pedido baseada em estoque mínimo
 - [x] Adicionar botão de exportar Excel na aba Compras por Item (/purchases/items)
+- [x] Adicionar botão de ajuste de estoque (quantidade atual) em cada card do Almoxarifado (/purchases)

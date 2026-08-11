@@ -198,6 +198,10 @@ export default function Purchases() {
   const rejectOrderMutation = trpc.purchases.orders.reject.useMutation(orderMutationOpts);
   const markPurchasedMutation = trpc.purchases.orders.markPurchased.useMutation(orderMutationOpts);
   const deliverOrderMutation = trpc.purchases.orders.deliver.useMutation(orderMutationOpts);
+  const adjustStockMutation = trpc.purchases.stock.adjust.useMutation({
+    onSuccess: () => { toast.success("Estoque ajustado!"); utils.purchases.invalidate(); },
+    onError: (err) => toast.error(err.message),
+  });
 
   return (
     <DashboardLayout>
@@ -724,7 +728,7 @@ export default function Purchases() {
                           <a href="/purchases/invoices"><ReceiptText className="mr-2 h-3 w-3"/> Conferir entrada</a>
                         </Button>
                       )}
-                      {item.operationalItemId && <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500"><Edit className="w-4 h-4"/></Button>}
+                      {item.operationalItemId && <Dialog><DialogTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500" title="Ajustar estoque"><Edit className="w-4 h-4"/></Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Ajustar Estoque - {item.name}</DialogTitle></DialogHeader><form className="space-y-4" onSubmit={(e) => { e.preventDefault(); const qty = Number(new FormData(e.currentTarget).get("qty")); adjustStockMutation.mutate({ itemId: item.operationalItemId!, quantity: qty, reason: "Contagem física" }); }}><div className="space-y-2"><Label>Quantidade atual em estoque ({item.unit})</Label><Input type="number" step="0.01" name="qty" defaultValue={currentStock} required /><p className="text-xs text-muted-foreground">Informe a quantidade real que você tem hoje.</p></div><DialogFooter><Button type="submit" disabled={adjustStockMutation.isPending}>Salvar</Button></DialogFooter></form></DialogContent></Dialog>}
                     </div>
                   </CardContent>
                 </Card>
