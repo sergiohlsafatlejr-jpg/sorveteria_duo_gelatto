@@ -168,7 +168,8 @@ function InoveStockTab() {
     search: search || undefined,
     grupo: grupo || undefined,
     lowStock: lowStock || undefined,
-  });
+  }, { refetchInterval: 5 * 60 * 1000 });
+
 
   const fmt = (v: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -212,6 +213,38 @@ function InoveStockTab() {
         >
           {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Atualizar
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 shrink-0 text-green-700 border-green-300 hover:bg-green-50"
+          disabled={isFetching || total === 0}
+          onClick={async () => {
+            try {
+              const res = await utils.inove.exportStock.fetch({
+                search: search || undefined,
+                grupo: grupo || undefined,
+                lowStock: lowStock || undefined,
+              });
+              if (res.items.length === 0) { toast.info("Nenhum item para exportar"); return; }
+              exportToExcel(
+                res.items.map((p) => ({
+                  "Produto": p.nome,
+                  "Grupo": p.grupo,
+                  "Saldo Atual": p.saldo_atual,
+                  "Preço Venda": fmtMoeda(p.preco_venda),
+                  "Preço Custo": fmtMoeda(p.preco_custo),
+                })),
+                `Estoque_INOVE_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}`
+              );
+              toast.success(`${res.items.length} produtos exportados!`);
+            } catch (e: any) {
+              toast.error(e.message || "Erro ao exportar");
+            }
+          }}
+        >
+          <FileSpreadsheet className="h-4 w-4" />
+          Exportar Excel
         </Button>
         <Select value={grupo} onValueChange={(v) => { setGrupo(v === "__all__" ? "" : v); setPage(1); }}>
           <SelectTrigger className="w-48">

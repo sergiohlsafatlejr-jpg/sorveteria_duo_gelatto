@@ -619,7 +619,7 @@ export const inoveRouter = router({
       pageSize: z.number().int().min(1).max(100).default(50),
       lowStock: z.boolean().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
       const rows = await db.select().from(inoveConnectorConfig).limit(1);
@@ -686,6 +686,52 @@ export const inoveRouter = router({
           total: (countResult.recordset[0] as { total: number }).total,
           grupos: (gruposResult.recordset as Array<{ grupo: string }>).map(r => r.grupo),
         };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(msg);
+      }
+    }),
+
+  exportStock: protectedProcedure
+    .input(z.object({
+      search: z.string().optional(),
+      grupo: z.string().optional(),
+      lowStock: z.boolean().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (rows.length === 0 || !rows[0].active) return { items: [] };
+      const config = rows[0];
+      try {
+        const pool = await createInovePool(config);
+        const searchFilter = input.search ? `AND p.PRO_NOME LIKE '%${input.search.replace(/'/g, "''")}%'` : '';
+        const grupoFilter = input.grupo ? `AND g.GRU_NOME = '${input.grupo.replace(/'/g, "''")}'` : '';
+        const lowStockFilter = input.lowStock ? 'AND saldo.saldo_atual <= 5' : '';
+        const result = await pool.request().query(`
+          WITH SaldoAtual AS (
+            SELECT PRODUTO,
+              (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
+               WHERE PRODUTO = p2.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC) as saldo_atual
+            FROM PRODUTOS p2
+            WHERE p2.PRO_ATIVO = 'S' AND p2.PRO_ESTOQUE = 'S'
+          )
+          SELECT
+            p.PRO_NOME as nome,
+            ISNULL(g.GRU_NOME, 'Sem Grupo') as grupo,
+            CAST(p.PRO_VENDA as float) as preco_venda,
+            CAST(ISNULL(p.PRO_CUSTO, 0) as float) as preco_custo,
+            CAST(ISNULL(saldo.saldo_atual, 0) as float) as saldo_atual
+          FROM PRODUTOS p
+          LEFT JOIN GRUPOS_DE_PRODUTOS g ON p.GRUPO_DE_PRODUTOS = g.GRUPO_DE_PRODUTOS
+          LEFT JOIN SaldoAtual saldo ON saldo.PRODUTO = p.PRODUTO
+          WHERE p.PRO_ATIVO = 'S' AND p.PRO_ESTOQUE = 'S'
+            ${searchFilter} ${grupoFilter} ${lowStockFilter}
+          ORDER BY p.PRO_NOME
+        `);
+        await pool.close();
+        return { items: result.recordset as Array<{ nome: string; grupo: string; preco_venda: number; preco_custo: number; saldo_atual: number }> };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(msg);
