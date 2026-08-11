@@ -266,7 +266,7 @@ export function isTenLiterItem(description: string): boolean {
 }
 
 export type PurchaseItemFilterInput = {
-  supplier: "all" | "sorvefort";
+  supplier: "all" | "sorvefort" | "duo_gelatto" | "outros";
   search: string;
   dateFrom: string | null;
   dateTo: string | null;

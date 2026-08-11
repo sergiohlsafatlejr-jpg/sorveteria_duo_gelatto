@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gte, like, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   operationalSuppliers,
@@ -433,7 +433,7 @@ export const purchaseInvoicesRouter = router({
 
   itemsBySupplier: protectedProcedure
     .input(z.object({
-      supplier: z.enum(["all", "sorvefort"]).default("all"),
+      supplier: z.enum(["all", "sorvefort", "duo_gelatto", "outros"]).default("all"),
       search: z.string().max(100).default(""),
       dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
       dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
@@ -449,6 +449,10 @@ export const purchaseInvoicesRouter = router({
         eq(purchaseInvoices.status, "confirmed"),
       )];
       if (input.supplier === "sorvefort") filters.push(like(purchaseInvoices.supplierName, "%SORVEFORT%"));
+      if (input.supplier === "duo_gelatto") filters.push(like(purchaseInvoices.supplierName, "%DUO GELATTO%"));
+      if (input.supplier === "outros") {
+        filters.push(sql`${purchaseInvoices.supplierName} NOT LIKE '%DUO GELATTO%' AND ${purchaseInvoices.supplierName} NOT LIKE '%SORVEFORT%'`);
+      }
       if (input.search.trim()) {
         const search = `%${input.search.trim()}%`;
         filters.push(or(

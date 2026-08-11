@@ -28,7 +28,7 @@ function dateOnly(value: string | null | undefined) {
 export default function PurchaseItems() {
   const [, setLocation] = useLocation();
   const [page, setPage] = useState(1);
-  const [supplier, setSupplier] = useState<"all" | "sorvefort">("sorvefort");
+  const [supplier, setSupplier] = useState<"all" | "sorvefort" | "duo_gelatto" | "outros">("outros");
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -66,7 +66,7 @@ export default function PurchaseItems() {
 
         <Card className="border-primary/15">
           <CardContent className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-5">
-            <Select value={supplier} onValueChange={(value) => { setSupplier(value as typeof supplier); setPage(1); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="sorvefort">Somente Sorvefort</SelectItem><SelectItem value="all">Todos os fornecedores</SelectItem></SelectContent></Select>
+            <Select value={supplier} onValueChange={(value) => { setSupplier(value as typeof supplier); setPage(1); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="outros">Almoxarifado (outros)</SelectItem><SelectItem value="duo_gelatto">Sorvetes (Duo Gelatto)</SelectItem><SelectItem value="sorvefort">Somente Sorvefort</SelectItem><SelectItem value="all">Todos os fornecedores</SelectItem></SelectContent></Select>
             <div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><Input className="pl-9" placeholder="Produto ou código" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} /></div>
             <Input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} aria-label="Data inicial" />
             <Input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} aria-label="Data final" />
@@ -82,7 +82,7 @@ export default function PurchaseItems() {
         </div>
 
         <Card>
-          <CardHeader><CardTitle>{supplier === "sorvefort" ? "Itens comprados da Sorvefort" : "Itens de todos os fornecedores"}</CardTitle><p className="text-sm text-muted-foreground">{items.length} linha(s) encontrada(s) nos filtros atuais.</p></CardHeader>
+          <CardHeader><CardTitle>{supplier === "sorvefort" ? "Itens comprados da Sorvefort" : supplier === "duo_gelatto" ? "Sorvetes (Duo Gelatto)" : supplier === "outros" ? "Almoxarifado — Itens operacionais" : "Itens de todos os fornecedores"}</CardTitle><p className="text-sm text-muted-foreground">{items.length} linha(s) encontrada(s) nos filtros atuais.</p></CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-sm"><thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Nota / data</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd.</th><th className="px-4 py-3 text-right">Preço unit.</th><th className="px-5 py-3 text-right">Total</th></tr></thead><tbody>{isLoading ? <tr><td colSpan={6} className="py-12 text-center text-muted-foreground">Carregando itens...</td></tr> : paginatedItems.map((item) => <tr key={item.id} className="border-b transition-colors hover:bg-muted/20"><td className="px-5 py-4"><p className="font-semibold">{item.description}</p><p className="text-xs text-muted-foreground">{item.supplierName || "Fornecedor não identificado"} • cód. {item.supplierCode || "—"}</p></td><td className="px-4 py-4"><p className="font-medium">NF {item.invoiceNumber || "—"}</p><p className="text-xs text-muted-foreground">{dateOnly(item.issueDate)}</p></td><td className="px-4 py-4"><Badge variant="outline">{CATEGORY_LABELS[item.category] || item.category}</Badge></td><td className="px-4 py-4 text-right">{Number(item.quantity).toLocaleString("pt-BR")} {item.unit}</td><td className="px-4 py-4 text-right">{money(item.unitPrice)}</td><td className="px-5 py-4 text-right font-semibold">{money(item.totalPrice)}</td></tr>)}{!isLoading && items.length === 0 && <tr><td colSpan={6} className="py-14 text-center"><PackageSearch className="mx-auto mb-3 h-9 w-9 text-muted-foreground/40" /><p className="font-medium">Nenhum item encontrado</p><p className="mt-1 text-sm text-muted-foreground">Envie uma nota em PDF ou ajuste os filtros.</p></td></tr>}</tbody></table></div>
             {!isLoading && items.length > 0 && <div className="flex flex-col gap-3 border-t px-5 py-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between"><p>Exibindo {firstItem}–{lastItem} de {items.length} itens.</p><div className="flex items-center gap-2"><Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft className="mr-1 h-4 w-4" />Anterior</Button><span className="min-w-20 text-center">Página {currentPage} de {totalPages}</span><Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Próxima<ChevronRight className="ml-1 h-4 w-4" /></Button></div></div>}
