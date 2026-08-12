@@ -633,43 +633,37 @@ export const inoveRouter = router({
         const lowStockFilter = input.lowStock ? 'AND saldo.saldo_atual <= 5' : '';
 
         const result = await pool.request().query(`
-          WITH SaldoAtual AS (
-            SELECT PRODUTO,
-              (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
-               WHERE PRODUTO = p2.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC) as saldo_atual
-            FROM PRODUTOS p2
-            WHERE p2.PRO_ATIVO = 'S' AND p2.PRO_ESTOQUE = 'S'
-          )
           SELECT
             p.PRODUTO as id,
             p.PRO_NOME as nome,
             ISNULL(g.GRU_NOME, 'Sem Grupo') as grupo,
             CAST(p.PRO_VENDA as float) as preco_venda,
             CAST(ISNULL(p.PRO_CUSTO, 0) as float) as preco_custo,
-            CAST(ISNULL(saldo.saldo_atual, 0) as float) as saldo_atual
+            CAST(ISNULL(me.MVE_SALDO_ATUAL, 0) as float) as saldo_atual
           FROM PRODUTOS p
           LEFT JOIN GRUPOS_DE_PRODUTOS g ON p.GRUPO_DE_PRODUTOS = g.GRUPO_DE_PRODUTOS
-          LEFT JOIN SaldoAtual saldo ON saldo.PRODUTO = p.PRODUTO
+          LEFT JOIN (
+            SELECT PRODUTO, MAX(MOVIMENTO_ESTOQUE) as ultimo_mov
+            FROM MOVIMENTOS_ESTOQUES GROUP BY PRODUTO
+          ) ult ON ult.PRODUTO = p.PRODUTO
+          LEFT JOIN MOVIMENTOS_ESTOQUES me ON me.MOVIMENTO_ESTOQUE = ult.ultimo_mov
           WHERE p.PRO_ATIVO = 'S' AND p.PRO_ESTOQUE = 'S'
-            ${searchFilter} ${grupoFilter} ${lowStockFilter}
+            ${searchFilter} ${grupoFilter} ${input.lowStock ? 'AND ISNULL(me.MVE_SALDO_ATUAL, 0) <= 5' : ''}
           ORDER BY p.PRO_NOME
           OFFSET ${offset} ROWS FETCH NEXT ${input.pageSize} ROWS ONLY
         `);
 
         const countResult = await pool.request().query(`
-          WITH SaldoAtual AS (
-            SELECT PRODUTO,
-              (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
-               WHERE PRODUTO = p2.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC) as saldo_atual
-            FROM PRODUTOS p2
-            WHERE p2.PRO_ATIVO = 'S' AND p2.PRO_ESTOQUE = 'S'
-          )
           SELECT COUNT(*) as total
           FROM PRODUTOS p
           LEFT JOIN GRUPOS_DE_PRODUTOS g ON p.GRUPO_DE_PRODUTOS = g.GRUPO_DE_PRODUTOS
-          LEFT JOIN SaldoAtual saldo ON saldo.PRODUTO = p.PRODUTO
+          LEFT JOIN (
+            SELECT PRODUTO, MAX(MOVIMENTO_ESTOQUE) as ultimo_mov
+            FROM MOVIMENTOS_ESTOQUES GROUP BY PRODUTO
+          ) ult ON ult.PRODUTO = p.PRODUTO
+          LEFT JOIN MOVIMENTOS_ESTOQUES me ON me.MOVIMENTO_ESTOQUE = ult.ultimo_mov
           WHERE p.PRO_ATIVO = 'S' AND p.PRO_ESTOQUE = 'S'
-            ${searchFilter} ${grupoFilter} ${lowStockFilter}
+            ${searchFilter} ${grupoFilter} ${input.lowStock ? 'AND ISNULL(me.MVE_SALDO_ATUAL, 0) <= 5' : ''}
         `);
 
         const gruposResult = await pool.request().query(`
@@ -708,26 +702,22 @@ export const inoveRouter = router({
         const pool = await createInovePool(config);
         const searchFilter = input.search ? `AND p.PRO_NOME LIKE '%${input.search.replace(/'/g, "''")}%'` : '';
         const grupoFilter = input.grupo ? `AND g.GRU_NOME = '${input.grupo.replace(/'/g, "''")}'` : '';
-        const lowStockFilter = input.lowStock ? 'AND saldo.saldo_atual <= 5' : '';
         const result = await pool.request().query(`
-          WITH SaldoAtual AS (
-            SELECT PRODUTO,
-              (SELECT TOP 1 MVE_SALDO_ATUAL FROM MOVIMENTOS_ESTOQUES
-               WHERE PRODUTO = p2.PRODUTO ORDER BY MOVIMENTO_ESTOQUE DESC) as saldo_atual
-            FROM PRODUTOS p2
-            WHERE p2.PRO_ATIVO = 'S' AND p2.PRO_ESTOQUE = 'S'
-          )
           SELECT
             p.PRO_NOME as nome,
             ISNULL(g.GRU_NOME, 'Sem Grupo') as grupo,
             CAST(p.PRO_VENDA as float) as preco_venda,
             CAST(ISNULL(p.PRO_CUSTO, 0) as float) as preco_custo,
-            CAST(ISNULL(saldo.saldo_atual, 0) as float) as saldo_atual
+            CAST(ISNULL(me.MVE_SALDO_ATUAL, 0) as float) as saldo_atual
           FROM PRODUTOS p
           LEFT JOIN GRUPOS_DE_PRODUTOS g ON p.GRUPO_DE_PRODUTOS = g.GRUPO_DE_PRODUTOS
-          LEFT JOIN SaldoAtual saldo ON saldo.PRODUTO = p.PRODUTO
+          LEFT JOIN (
+            SELECT PRODUTO, MAX(MOVIMENTO_ESTOQUE) as ultimo_mov
+            FROM MOVIMENTOS_ESTOQUES GROUP BY PRODUTO
+          ) ult ON ult.PRODUTO = p.PRODUTO
+          LEFT JOIN MOVIMENTOS_ESTOQUES me ON me.MOVIMENTO_ESTOQUE = ult.ultimo_mov
           WHERE p.PRO_ATIVO = 'S' AND p.PRO_ESTOQUE = 'S'
-            ${searchFilter} ${grupoFilter} ${lowStockFilter}
+            ${searchFilter} ${grupoFilter} ${input.lowStock ? 'AND ISNULL(me.MVE_SALDO_ATUAL, 0) <= 5' : ''}
           ORDER BY p.PRO_NOME
         `);
         await pool.close();
