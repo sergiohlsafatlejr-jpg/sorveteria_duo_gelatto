@@ -616,21 +616,22 @@ function RedeTab() {
 
     setIsImporting(true);
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      // Converter para base64 para enviar de forma compacta via tRPC
-      let binary = '';
-      for (let i = 0; i < uint8Array.length; i++) {
-        binary += String.fromCharCode(uint8Array[i]);
-      }
-      const base64 = btoa(binary);
-      
-      const result = await importMutation.mutateAsync({
-        fileBuffer: base64,
-        fileName: file.name,
-        periodStart: new Date(periodStart),
-        periodEnd: new Date(periodEnd),
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("periodStart", periodStart);
+      formData.append("periodEnd", periodEnd);
+
+      const response = await fetch("/api/rede/upload", {
+        method: "POST",
+        body: formData,
       });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Erro ao importar");
+      }
+
+      const result = await response.json();
 
       setImportFileId(result.importFileId);
       setFile(null);

@@ -8,6 +8,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { salesImportExpressRouter } from "../routers/sales-import";
+import { redeExpressRouter } from "../routers/rede";
 import { scheduledRouter } from "../routers/scheduledRoutes";
 import { registerCronJobs } from "../cron";
 
@@ -40,6 +41,7 @@ async function startServer() {
   registerOAuthRoutes(app);
   // Sales import file upload
   app.use(salesImportExpressRouter);
+  app.use(redeExpressRouter);
   // Scheduled tasks endpoints
   app.use(scheduledRouter);
   // tRPC API

@@ -141,7 +141,6 @@ export const redeRouter = router({
         } else {
           buffer = Buffer.from(input.fileBuffer);
         }
-          buffer = Buffer.from(input.fileBuffer);
 
         // Parse do arquivo
         const sales = await parseRedeExcel(buffer);
@@ -689,4 +688,88 @@ export const redeRouter = router({
 
       return stats;
     }),
+});
+import { Router } from "express";
+import multer from "multer";
+
+// ─── Express Router para upload de arquivo Rede (evita limite tRPC) ──────────
+const redeUpload = multer({ dest: "/tmp/rede-uploads/" });
+export const redeExpressRouter = Router();
+
+redeExpressRouter.post("/api/rede/upload", redeUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    const fs = await import("fs");
+    const buffer = fs.readFileSync(req.file.path);
+    fs.unlinkSync(req.file.path);
+    const periodStart = req.body.periodStart;
+    const periodEnd = req.body.periodEnd;
+    if (!periodStart || !periodEnd) return res.status(400).json({ error: "Período não informado" });
+
+    
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not available" });
+
+    // Parse do arquivo
+    const sales = await parseRedeExcel(buffer);
+    if (sales.length === 0) return res.status(400).json({ error: "Nenhuma venda encontrada no arquivo" });
+
+    // Upload do arquivo para S3
+    const fileKey = `rede-imports/${Date.now()}-${req.file.originalname}`;
+    const { url: fileUrl } = await storagePut(fileKey, buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+    // Salvar no banco
+    const [importFile] = await db.insert(redeImportFiles).values({
+      fileName: req.file.originalname,
+      fileUrl,
+      periodStart: new Date(periodStart),
+      periodEnd: new Date(periodEnd),
+      totalRecords: sales.length,
+      totalValue: String(sales.reduce((sum, s) => sum + (s.valorDaVendaOriginal || 0), 0).toFixed(2)),
+      importedBy: 0,
+    }).$returningId();
+
+    // Inserir vendas em lotes
+    const batchSize = 100;
+    for (let i = 0; i < sales.length; i += batchSize) {
+      const batch = sales.slice(i, i + batchSize).map((s: any) => ({
+        importFileId: importFile.id,
+        dataDaVenda: s.dataDaVenda,
+        horaDaVenda: s.horaDaVenda,
+        statusDaVenda: s.statusDaVenda || "aprovada",
+        valorDaVendaOriginal: String(s.valorDaVendaOriginal || 0),
+        valorDaVendaAtualizado: String(s.valorDaVendaAtualizado || 0),
+        modalidade: s.modalidade || "desconhecido",
+        tipo: s.tipo,
+        bandeira: s.bandeira,
+        numeroDeParcelas: s.numeroDeParcelas,
+        taxaMDR: s.taxaMDR != null ? String(s.taxaMDR) : undefined,
+        valorMDR: String(s.valorMDR || 0),
+        taxaRecebimentoAutomatico: s.taxaRecebimentoAutomatico != null ? String(s.taxaRecebimentoAutomatico) : undefined,
+        valorTaxaRecebimentoAutomatico: String(s.valorTaxaRecebimentoAutomatico || 0),
+        valorTotalTaxas: String(s.valorTotalTaxas || 0),
+        valorLiquido: s.valorLiquido != null ? String(s.valorLiquido) : undefined,
+        nsuCV: s.nsuCV || "",
+        idTransacao: s.idTransacao,
+        numeroAutorizacao: s.numeroAutorizacao,
+        prazoDeRecebimento: s.prazoDeRecebimento,
+        numeroDoEstabelecimento: s.numeroDoEstabelecimento || "",
+        nomeDoEstabelecimento: s.nomeDoEstabelecimento,
+        cnpj: s.cnpj,
+        numeroDoCartao: s.numeroDoCartao,
+        codigoDaMaquininha: s.codigoDaMaquininha,
+        tipoDeMaquininha: s.tipoDeMaquininha,
+        canceladaPeloEstabelecimento: s.canceladaPeloEstabelecimento || false,
+        dataDoCancelamento: s.dataDoCancelamento,
+        valorCancelado: s.valorCancelado != null ? String(s.valorCancelado) : undefined,
+        emDisputaDeChargeback: s.emDisputaDeChargeback || false,
+      }));
+      await db.insert(redeSalesImport).values(batch);
+    }
+
+    res.json({ importFileId: importFile.id, totalRecords: sales.length });
+  } catch (err: any) {
+    console.error("[rede/upload] Error:", err.message);
+    res.status(500).json({ error: err.message || "Erro interno" });
+  }
 });
