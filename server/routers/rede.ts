@@ -132,11 +132,16 @@ export const redeRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database not available");
-
       try {
-        const buffer = Buffer.isBuffer(input.fileBuffer)
-          ? input.fileBuffer
-          : Buffer.from(input.fileBuffer);
+        let buffer: Buffer;
+        if (Buffer.isBuffer(input.fileBuffer)) {
+          buffer = input.fileBuffer;
+        } else if (typeof input.fileBuffer === "string") {
+          buffer = Buffer.from(input.fileBuffer, "base64");
+        } else {
+          buffer = Buffer.from(input.fileBuffer);
+        }
+          buffer = Buffer.from(input.fileBuffer);
 
         // Parse do arquivo
         const sales = await parseRedeExcel(buffer);
