@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { trpc } from "@/lib/trpc";
 import BackButton from "@/components/BackButton";
 import { Badge } from "@/components/ui/badge";
@@ -457,12 +457,11 @@ export default function FinBankReconciliation() {
                           item.status === "divergente" ? "hover:bg-amber-50/30" :
                           item.status === "sem_venda" ? "hover:bg-red-50/30" :
                           "hover:bg-muted/30";
-                        return (
-                          <>
+                       return (
+                          <Fragment key={item.dia}>
                             <tr
-                              key={item.dia}
-                              className={`border-b transition-colors cursor-pointer ${rowBg}`}
-                              onClick={() => item.bankEntries.length > 0 && toggleDay(item.dia)}
+                             className={`border-b transition-colors cursor-pointer ${rowBg}`}
+                             onClick={() => item.bankEntries.length > 0 && toggleDay(item.dia)}
                             >
                               <td className="px-4 py-3 text-muted-foreground">
                                 {item.bankEntries.length > 0 && (
@@ -528,7 +527,7 @@ export default function FinBankReconciliation() {
                                 <td className="px-4 py-2" colSpan={2}></td>
                               </tr>
                             ))}
-                          </>
+                          </Fragment>
                         );
                       })}
                     </tbody>
