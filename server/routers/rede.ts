@@ -315,48 +315,49 @@ export const redeRouter = router({
             }));
         }
 
-        // Mapear inovePayments por valor para busca rápida
-        const inoveByValue = new Map<string, typeof inovePayments>();
-        for (const payment of inovePayments) {
-          const valKey = payment.valor.toFixed(2);
-          if (!inoveByValue.has(valKey)) {
-            inoveByValue.set(valKey, []);
-          }
-          inoveByValue.get(valKey)!.push(payment);
-        }
-
-        // Fazer conciliação
+        // ═══ CONCILIAÇÃO EM 3 NÍVEIS ═══
         const reconciliations: any[] = [];
         const matchedInoveIds = new Set<number>();
+        const matchedRedeIds = new Set<number>();
 
+        // --- NÍVEL 1: Match por valor + hora (±10 minutos) ---
         for (const redeSale of redeSales) {
-          const redeDateStr = redeSale.dataDaVenda.toISOString().split("T")[0];
+          if (matchedRedeIds.has(redeSale.id)) continue;
+          const redeDate = redeSale.dataDaVenda;
+          const redeHora = redeSale.horaDaVenda; // "HH:MM" ou undefined
           const amount = parseFloat(redeSale.valorDaVendaOriginal);
-          const valKey = amount.toFixed(2);
+          if (!redeHora || isNaN(amount)) continue;
 
-          // Buscar candidatos com o mesmo valor
-          const candidates = inoveByValue.get(valKey) || [];
+          const [rH, rM] = redeHora.split(":").map(Number);
+          const redeMinutes = rH * 60 + rM;
+          const redeDateStr = redeDate.toISOString().split("T")[0];
 
-          // Encontrar o melhor candidato por aproximação de data (tolerância de até 2 dias)
           let bestMatch: typeof inovePayments[0] | null = null;
-          let bestDiffDays = 999;
+          let bestDiffMin = 999;
 
-          for (const cand of candidates) {
+          for (const cand of inovePayments) {
             if (matchedInoveIds.has(cand.vendaId)) continue;
+            const candVal = cand.valor;
+            if (Math.abs(candVal - amount) > 0.02) continue; // tolerância de 2 centavos
 
             const candDateStr = cand.dataHoraVenda.split(" ")[0];
-            const diffDays = Math.abs(
-              (new Date(candDateStr).getTime() - new Date(redeDateStr).getTime()) / (1000 * 60 * 60 * 24)
-            );
+            if (candDateStr !== redeDateStr) continue; // mesmo dia
 
-            if (diffDays <= 2 && diffDays < bestDiffDays) {
-              bestDiffDays = diffDays;
+            const candTime = cand.dataHoraVenda.split(" ")[1]; // "HH:MM:SS"
+            if (!candTime) continue;
+            const [cH, cM] = candTime.split(":").map(Number);
+            const candMinutes = cH * 60 + cM;
+            const diffMin = Math.abs(candMinutes - redeMinutes);
+
+            if (diffMin <= 10 && diffMin < bestDiffMin) {
+              bestDiffMin = diffMin;
               bestMatch = cand;
             }
           }
 
           if (bestMatch) {
             matchedInoveIds.add(bestMatch.vendaId);
+            matchedRedeIds.add(redeSale.id);
             reconciliations.push({
               redeSaleId: redeSale.id,
               redeDate: redeSale.dataDaVenda,
@@ -367,22 +368,117 @@ export const redeRouter = router({
               inoveDate: new Date(bestMatch.dataHoraVenda),
               inoveValue: String(bestMatch.valor),
               status: "matched" as const,
+              matchLevel: "hora",
               reconciliationDate: new Date(),
             });
-          } else {
+          }
+        }
+
+        // --- NÍVEL 2: Match por valor + mesmo dia (sem hora) ---
+        for (const redeSale of redeSales) {
+          if (matchedRedeIds.has(redeSale.id)) continue;
+          const amount = parseFloat(redeSale.valorDaVendaOriginal);
+          if (isNaN(amount)) continue;
+          const redeDateStr = redeSale.dataDaVenda.toISOString().split("T")[0];
+
+          let bestMatch: typeof inovePayments[0] | null = null;
+
+          for (const cand of inovePayments) {
+            if (matchedInoveIds.has(cand.vendaId)) continue;
+            if (Math.abs(cand.valor - amount) > 0.02) continue;
+
+            const candDateStr = cand.dataHoraVenda.split(" ")[0];
+            if (candDateStr === redeDateStr) {
+              bestMatch = cand;
+              break; // primeiro match do dia serve
+            }
+          }
+
+          if (bestMatch) {
+            matchedInoveIds.add(bestMatch.vendaId);
+            matchedRedeIds.add(redeSale.id);
             reconciliations.push({
               redeSaleId: redeSale.id,
               redeDate: redeSale.dataDaVenda,
               redeValue: String(amount),
               redeModalidade: redeSale.modalidade,
               redeBandeira: redeSale.bandeira,
-              inoveSaleId: null,
-              inoveDate: null,
-              inoveValue: null,
-              status: "unmatched_rede" as const,
-              divergenceReason: "Venda não encontrada no INOVE/Local",
+              inoveSaleId: bestMatch.vendaId,
+              inoveDate: new Date(bestMatch.dataHoraVenda),
+              inoveValue: String(bestMatch.valor),
+              status: "matched" as const,
+              matchLevel: "dia",
               reconciliationDate: new Date(),
             });
+          }
+        }
+
+        // --- NÍVEL 3: Totalização diária (soma do dia Rede vs soma do dia INOVE) ---
+        // Agrupar vendas Rede não conciliadas por dia
+        const unmatchedRedeByDay = new Map<string, typeof redeSales>();
+        for (const redeSale of redeSales) {
+          if (matchedRedeIds.has(redeSale.id)) continue;
+          const day = redeSale.dataDaVenda.toISOString().split("T")[0];
+          if (!unmatchedRedeByDay.has(day)) unmatchedRedeByDay.set(day, []);
+          unmatchedRedeByDay.get(day)!.push(redeSale);
+        }
+
+        // Agrupar pagamentos INOVE não conciliados por dia
+        const unmatchedInoveByDay = new Map<string, typeof inovePayments>();
+        for (const cand of inovePayments) {
+          if (matchedInoveIds.has(cand.vendaId)) continue;
+          const day = cand.dataHoraVenda.split(" ")[0];
+          if (!unmatchedInoveByDay.has(day)) unmatchedInoveByDay.set(day, []);
+          unmatchedInoveByDay.get(day)!.push(cand);
+        }
+
+        // Para cada dia com vendas Rede não conciliadas, verificar se o total bate
+        for (const [day, dayRedeSales] of Array.from(unmatchedRedeByDay.entries())) {
+          const dayInove = unmatchedInoveByDay.get(day) || [];
+          const totalRede = dayRedeSales.reduce((s: number, r: any) => s + parseFloat(r.valorDaVendaOriginal), 0);
+          const totalInove = dayInove.reduce((s: number, i: any) => s + i.valor, 0);
+          const diff = Math.abs(totalRede - totalInove);
+          const tolerance = totalRede * 0.02; // 2% de tolerância
+
+          if (diff <= tolerance && dayInove.length > 0) {
+            // Totalização bateu — marcar todas como "matched_total"
+            for (const redeSale of dayRedeSales) {
+              matchedRedeIds.add(redeSale.id);
+              reconciliations.push({
+                redeSaleId: redeSale.id,
+                redeDate: redeSale.dataDaVenda,
+                redeValue: String(parseFloat(redeSale.valorDaVendaOriginal)),
+                redeModalidade: redeSale.modalidade,
+                redeBandeira: redeSale.bandeira,
+                inoveSaleId: null,
+                inoveDate: null,
+                inoveValue: String(totalInove),
+                status: "matched" as const,
+                matchLevel: "total_dia",
+                divergenceReason: `Totalização diária: Rede R$${totalRede.toFixed(2)} vs INOVE R$${totalInove.toFixed(2)}`,
+                reconciliationDate: new Date(),
+              });
+            }
+          } else {
+            // Não bateu — marcar como unmatched
+            for (const redeSale of dayRedeSales) {
+              matchedRedeIds.add(redeSale.id);
+              reconciliations.push({
+                redeSaleId: redeSale.id,
+                redeDate: redeSale.dataDaVenda,
+                redeValue: String(parseFloat(redeSale.valorDaVendaOriginal)),
+                redeModalidade: redeSale.modalidade,
+                redeBandeira: redeSale.bandeira,
+                inoveSaleId: null,
+                inoveDate: null,
+                inoveValue: dayInove.length > 0 ? String(totalInove) : null,
+                status: "unmatched_rede" as const,
+                divergenceReason: dayInove.length > 0
+                  ? `Divergência diária: Rede R$${totalRede.toFixed(2)} vs INOVE R$${totalInove.toFixed(2)} (diff R$${diff.toFixed(2)})`
+                  : "Nenhuma venda de cartão encontrada no INOVE para este dia",
+                reconciliationDate: new Date(),
+              });
+            }
           }
         }
 
