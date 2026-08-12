@@ -49,8 +49,8 @@ async function parseRedeExcel(buffer: Buffer) {
   const sales = rows
     .filter((row: any[]) => row[colMap["data da venda"]])
     .map((row: any[]) => ({
-      dataDaVenda: new Date(row[colMap["data da venda"]]),
-      horaDaVenda: row[colMap["hora da venda"]] ? String(row[colMap["hora da venda"]]) : undefined,
+      dataDaVenda: (() => { const v = row[colMap["data da venda"]]; if (typeof v === "number") return new Date((v - 25569) * 86400000); return new Date(v); })(),
+      horaDaVenda: (() => { const v = row[colMap["hora da venda"]]; if (typeof v === "number" && v < 1) { const totalSec = Math.round(v * 86400); const h = Math.floor(totalSec / 3600); const m = Math.floor((totalSec % 3600) / 60); return `${h.toString().padStart(2,"0")}:${m.toString().padStart(2,"0")}`; } return v ? String(v) : undefined; })(),
       statusDaVenda: String(row[colMap["status da venda"]] || "").trim(),
       valorDaVendaOriginal: parseFloat(row[colMap["valor da venda original"]] || 0),
       valorDaVendaAtualizado: parseFloat(row[colMap["valor da venda atualizado"]] || 0),
@@ -64,13 +64,13 @@ async function parseRedeExcel(buffer: Buffer) {
       valorTaxaRecebimentoAutomatico: parseFloat(row[colMap["valor taxa de recebimento automático"]] || 0),
       valorTotalTaxas: parseFloat(row[colMap["valor total das taxas descontadas (MDR+recebimento automático)"]] || 0),
       valorLiquido: row[colMap["valor líquido"]] ? parseFloat(row[colMap["valor líquido"]]) : undefined,
-      nsuCV: String(row[colMap["NSU/CV"]] || "").trim(),
-      idTransacao: row[colMap["ID Transação"]] ? String(row[colMap["ID Transação"]]).trim() : undefined,
+      nsuCV: String(row[colMap["nsu/cv"]] || "").trim(),
+      idTransacao: row[colMap["id transação"]] ? String(row[colMap["id transação"]]).trim() : undefined,
       numeroAutorizacao: row[colMap["número da autorização (Auto)"]] ? String(row[colMap["número da autorização (Auto)"]]).trim() : undefined,
-      prazoDeRecebimento: row[colMap["Prazo de recebimento"]] ? String(row[colMap["Prazo de recebimento"]]).trim() : undefined,
+      prazoDeRecebimento: row[colMap["prazo de recebimento"]] ? String(row[colMap["prazo de recebimento"]]).trim() : undefined,
       numeroDoEstabelecimento: String(row[colMap["número do estabelecimento"]] || "").trim(),
       nomeDoEstabelecimento: row[colMap["nome do estabelecimento"]] ? String(row[colMap["nome do estabelecimento"]]).trim() : undefined,
-      cnpj: row[colMap["CNPJ"]] ? String(row[colMap["CNPJ"]]).trim() : undefined,
+      cnpj: row[colMap["cnpj"]] ? String(row[colMap["cnpj"]]).trim() : undefined,
       numeroDoCartao: row[colMap["número do cartão"]] ? String(row[colMap["número do cartão"]]).trim() : undefined,
       codigoDaMaquininha: row[colMap["código da maquininha"]] ? String(row[colMap["código da maquininha"]]).trim() : undefined,
       tipoDeMaquininha: row[colMap["tipo de maquininha"]] ? String(row[colMap["tipo de maquininha"]]).trim() : undefined,
@@ -711,7 +711,8 @@ redeExpressRouter.post("/api/rede/upload", redeUpload.single("file"), async (req
     if (!db) return res.status(500).json({ error: "Database not available" });
 
     // Parse do arquivo
-    const sales = await parseRedeExcel(buffer);
+    let sales: any[] = [];
+    try { sales = await parseRedeExcel(buffer); } catch (parseErr: any) { console.error("[rede/upload] Parse error:", parseErr.message); return res.status(400).json({ error: "Erro no parse: " + parseErr.message }); }
     if (sales.length === 0) return res.status(400).json({ error: "Nenhuma venda encontrada no arquivo" });
 
     // Upload do arquivo para S3
