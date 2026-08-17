@@ -76,8 +76,8 @@ export async function createInovePool(config: {
         options: {
         encrypt: false,
         trustServerCertificate: true,
-        connectTimeout: 30000,
-        requestTimeout: 60000,
+        connectTimeout: 10000,
+        requestTimeout: 15000,
       },
     };
     const pool = new PoolClass(mssqlConfig);
@@ -97,8 +97,8 @@ export async function createInovePool(config: {
     options: {
       encrypt: false,
       trustServerCertificate: true,
-      connectTimeout: 30000,
-      requestTimeout: 60000,
+      connectTimeout: 10000,
+      requestTimeout: 15000,
     },
   };
   return connectFn(mssqlConfig);
