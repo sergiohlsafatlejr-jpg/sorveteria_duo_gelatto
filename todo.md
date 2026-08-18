@@ -61,3 +61,5 @@
 - [x] Adicionar botão Exportar Excel específico na aba Estoque INOVE (dados do INOVE, não locais)
 - [x] Adicionar refetchInterval de 5 min na aba Estoque INOVE para atualização automática
 - [x] Melhorar conciliação Rede x INOVE: 3 níveis de match (valor+hora, valor+dia, totalização diária)
+- [x] Reduzir timeout INOVE de 30s para 10s (connectTimeout) e 60s para 15s (requestTimeout) para evitar lentidão
+- [x] Corrigir aba Sorvetes no Painel de Compras não exibindo dados (query não habilitada para tab sorvetes)

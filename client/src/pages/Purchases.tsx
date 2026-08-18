@@ -86,7 +86,7 @@ export default function Purchases() {
   const utils = trpc.useContext();
   const [activeTab, setActiveTab] = useState(() => {
     const requestedTab = new URLSearchParams(window.location.search).get("tab");
-    return ["resumo", "almoxarifado", "pedidos", "baixas", "fornecedores", "templates"].includes(requestedTab ?? "")
+    return ["resumo", "almoxarifado", "sorvetes", "pedidos", "baixas", "fornecedores", "templates"].includes(requestedTab ?? "")
       ? requestedTab!
       : "resumo";
   });
@@ -101,7 +101,7 @@ export default function Purchases() {
     isLoading: isMonthlyItemsLoading,
     isError: isMonthlyItemsError,
   } = trpc.purchaseInvoices.monthlyItemsSummary.useQuery(monthlyItemsInput, {
-    enabled: activeTab === "resumo" || activeTab === "almoxarifado" || activeTab === "baixas",
+    enabled: activeTab === "resumo" || activeTab === "almoxarifado" || activeTab === "sorvetes" || activeTab === "baixas",
   });
   
   // Items Data
