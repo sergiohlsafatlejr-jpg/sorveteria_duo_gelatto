@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { buildPurchaseWarehouseCatalog, SORVETE_CATEGORY_LABELS } from "@/lib/purchase-warehouse";
@@ -83,6 +84,60 @@ function formatQuantity(value: number | string | null | undefined) {
   return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 3 }).format(Number(value ?? 0));
 }
 
+const CHART_COLORS = [
+  "#ec4899", "#8b5cf6", "#3b82f6", "#06b6d4", "#10b981",
+  "#f59e0b", "#ef4444", "#6366f1", "#14b8a6", "#f97316",
+  "#a855f7", "#22c55e", "#e11d48", "#0ea5e9", "#84cc16",
+];
+
+function SorveteCategoryChart() {
+  const { data: trendData } = trpc.purchaseInvoices.monthlyCategoryTrend.useQuery();
+
+  if (!trendData || trendData.months.length === 0 || trendData.series.length === 0) return null;
+
+  const chartData = trendData.months.map((month, idx) => {
+    const entry: Record<string, string | number> = { month: month.split("-").reverse().join("/") };
+    trendData.series.forEach((s) => {
+      entry[SORVETE_CATEGORY_LABELS[s.category] ?? s.category] = Number(s.data[idx].toFixed(2));
+    });
+    return entry;
+  });
+
+  const topSeries = trendData.series.slice(0, 8);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <BarChart3 className="h-5 w-5 text-indigo-500" />
+          Evolução de Gastos por Categoria — Últimos 6 Meses
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="h-[350px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+              <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(value: number) => `R$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {topSeries.map((s, i) => (
+                <Bar
+                  key={s.category}
+                  dataKey={SORVETE_CATEGORY_LABELS[s.category] ?? s.category}
+                  stackId="a"
+                  fill={CHART_COLORS[i % CHART_COLORS.length]}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Purchases() {
   const utils = trpc.useContext();
   const [activeTab, setActiveTab] = useState(() => {
@@ -142,6 +197,7 @@ export default function Purchases() {
 
   // Orders Data
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
+  const [sorveteCategoryFilter, setSorveteCategoryFilter] = useState("all");
   const [orderItems, setOrderItems] = useState<Array<{itemId: number; name: string; unit: string; quantity: number; price: number}>>([]);
   const [newOrderItemId, setNewOrderItemId] = useState("");
   const [newOrderQty, setNewOrderQty] = useState("");
@@ -755,10 +811,25 @@ export default function Purchases() {
                     <CardTitle className="flex items-center gap-2"><IceCream className="h-5 w-5 text-pink-500" />Sorvetes — Itens da Duo Gelatto</CardTitle>
                     <p className="mt-1 text-sm text-muted-foreground">Itens comprados da Duo Gelatto (apenas visualização — controle pelo INOVE).</p>
                   </div>
-                  {warehouseItemsSorvetes.length > 0 && (
-                    <Button variant="outline" size="sm" onClick={async () => {
+                  <div className="flex items-center gap-2">
+                    {warehouseItemsSorvetes.length > 0 && (
+                      <Select value={sorveteCategoryFilter} onValueChange={setSorveteCategoryFilter}>
+                        <SelectTrigger className="w-[180px] h-9">
+                          <SelectValue placeholder="Todas categorias" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todas categorias</SelectItem>
+                          {Array.from(new Set(warehouseItemsSorvetes.map(i => i.category))).sort().map(cat => (
+                            <SelectItem key={cat} value={cat}>{SORVETE_CATEGORY_LABELS[cat] ?? cat}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {warehouseItemsSorvetes.length > 0 && (
+                    <Button variant="outline" size="sm" className="h-9" onClick={async () => {
                       const XLSX = await import("xlsx");
-                      const data = warehouseItemsSorvetes.map((item) => ({
+                      const itemsToExport = sorveteCategoryFilter === "all" ? warehouseItemsSorvetes : warehouseItemsSorvetes.filter(i => i.category === sorveteCategoryFilter);
+                      const data = itemsToExport.map((item) => ({
                         "Produto": item.name,
                         "Categoria": SORVETE_CATEGORY_LABELS[item.category] ?? item.category,
                         "Qtd. Comprada": item.purchasedQuantity,
@@ -775,7 +846,8 @@ export default function Purchases() {
                     }}>
                       <Download className="mr-2 h-4 w-4" />Exportar Excel
                     </Button>
-                  )}
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -810,7 +882,7 @@ export default function Purchases() {
                     <table className="w-full min-w-[700px] text-sm">
                       <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd. Comprada</th><th className="px-4 py-3 text-right">Qtd. Unidades</th><th className="px-4 py-3 text-right">Valor Total</th><th className="px-5 py-3 text-right">Preço Médio</th></tr></thead>
                       <tbody>
-                        {warehouseItemsSorvetes.map((item) => (
+                        {warehouseItemsSorvetes.filter(item => sorveteCategoryFilter === "all" || item.category === sorveteCategoryFilter).map((item) => (
                           <tr key={item.key} className="border-b hover:bg-muted/20">
                             <td className="px-5 py-3 font-medium">{item.name}</td>
                             <td className="px-4 py-3"><Badge variant="outline">{SORVETE_CATEGORY_LABELS[item.category] ?? item.category}</Badge></td>
@@ -829,7 +901,7 @@ export default function Purchases() {
            </Card>
             {/* Alertas de variação de preço */}
             {(priceVariation?.variations?.length ?? 0) > 0 && (
-              <Card className="border-amber-500/30 bg-amber-50/50">
+              <Card className="border-amber-200 bg-amber-50/50">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-amber-700">
                     <TrendingUp className="h-5 w-5" />
@@ -867,6 +939,8 @@ export default function Purchases() {
                 </CardContent>
               </Card>
             )}
+            {/* Gráfico comparativo mensal */}
+            <SorveteCategoryChart />
           </TabsContent>
           <TabsContent value="pedidos" className="space-y-6">
             <div className="flex justify-between items-center">

@@ -688,6 +688,88 @@ export const purchaseInvoicesRouter = router({
       };
     }),
 
+  // Gastos por categoria nos últimos 6 meses (para gráfico comparativo)
+  monthlyCategoryTrend: protectedProcedure
+    .query(async () => {
+      const db = await getDb();
+      if (!db) return { months: [], series: [] };
+
+      const validStatusFilter = or(
+        eq(purchaseInvoices.status, "extracted"),
+        eq(purchaseInvoices.status, "review_required"),
+        eq(purchaseInvoices.status, "confirmed"),
+      );
+
+      // Últimos 6 meses
+      const now = new Date();
+      const months: string[] = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+      }
+
+      const startDate = `${months[0]}-01`;
+      const [lastYear, lastMonth] = months[months.length - 1].split("-").map(Number);
+      const endDate = new Date(Date.UTC(lastYear, lastMonth, 0)).toISOString().slice(0, 10);
+
+      const filter = and(
+        validStatusFilter,
+        gte(purchaseInvoices.issueDate, startDate),
+        lte(purchaseInvoices.issueDate, endDate),
+        sql`UPPER(${purchaseInvoices.supplierName}) LIKE '%DUO GELATTO%'`,
+      );
+
+      const items = await db
+        .select({
+          description: purchaseInvoiceItems.description,
+          totalPrice: purchaseInvoiceItems.totalPrice,
+          issueDate: purchaseInvoices.issueDate,
+        })
+        .from(purchaseInvoiceItems)
+        .innerJoin(purchaseInvoices, eq(purchaseInvoiceItems.invoiceId, purchaseInvoices.id))
+        .where(filter);
+
+      // Agrupar por mês e categoria
+      const categoryMap = new Map<string, Map<string, number>>();
+      for (const item of items) {
+        const month = item.issueDate?.slice(0, 7) ?? "";
+        if (!months.includes(month)) continue;
+        // Categorizar usando mesma lógica do frontend
+        const desc = (item.description ?? "").toUpperCase();
+        let cat = "outros";
+        if (/PICOLE\s*ZERO/i.test(desc)) cat = "picoles_zero";
+        else if (/LINHA\s*ZERO/i.test(desc)) cat = "linha_zero";
+        else if (/LINHA\s*KIDS/i.test(desc)) cat = "linha_kids";
+        else if (/LINHA\s*ESPECIAL/i.test(desc)) cat = "linha_especial";
+        else if (/\bMEGA\b/i.test(desc) || /OURO\s*PRETO/i.test(desc)) cat = "mega";
+        else if (/\bDUOBLITO/i.test(desc)) cat = "duoblito";
+        else if (/\bCAIXA\s*10\s*(L|LT|LITRO|LITROS)\b/i.test(desc) || /\b10\s*LITROS?\b/i.test(desc)) cat = "caixas_10l";
+        else if (/PACK\s*4\s*UND.*1[,.]5\s*LITRO/i.test(desc)) cat = "potes_1_5l";
+        else if (/PACK\s*(6|9)\s*UND.*1\s*(LITRO|LT)/i.test(desc) || /PACK\s*(6|9)\s*UND.*500\s*ML/i.test(desc)) cat = "potes_1l_500ml";
+        else if (/CAIXA\s*5\s*LITRO/i.test(desc) || /5\s*LITROS/i.test(desc)) cat = "caixas_5l";
+        else if (/\b(FRUTA|CAJA)\b/i.test(desc) && /\d+\s*UND/i.test(desc)) cat = "picoles_fruta";
+        else if (/\b(CREME|COALHADA|MILHO|MORANGO|CUPUACU|COCO|TAMARINDO)\b/i.test(desc) && /\d+\s*UND/i.test(desc)) cat = "picoles_creme";
+        else if (/\d+\s*UND.*-\s*(SP|CLASSICOS)/i.test(desc) || /CLASSICOS/i.test(desc)) cat = "picoles_sp";
+        else if (/ACAI/i.test(desc)) cat = "acai";
+        else if (/\d+\s*UND/i.test(desc)) cat = "picoles_outros";
+
+        if (!categoryMap.has(cat)) categoryMap.set(cat, new Map());
+        const monthMap = categoryMap.get(cat)!;
+        monthMap.set(month, (monthMap.get(month) ?? 0) + Number(item.totalPrice ?? 0));
+      }
+
+      const series = Array.from(categoryMap.entries()).map(([category, monthMap]) => ({
+        category,
+        data: months.map(m => monthMap.get(m) ?? 0),
+      })).sort((a, b) => {
+        const totalA = a.data.reduce((s, v) => s + v, 0);
+        const totalB = b.data.reduce((s, v) => s + v, 0);
+        return totalB - totalA;
+      });
+
+      return { months, series };
+    }),
+
   dashboard: protectedProcedure
     .input(z.object({
       month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null),
