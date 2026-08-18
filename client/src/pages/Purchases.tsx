@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
-import { buildPurchaseWarehouseCatalog } from "@/lib/purchase-warehouse";
+import { buildPurchaseWarehouseCatalog, SORVETE_CATEGORY_LABELS } from "@/lib/purchase-warehouse";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -757,14 +757,15 @@ export default function Purchases() {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[600px] text-sm">
-                      <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd. Comprada</th><th className="px-4 py-3 text-right">Valor Total</th><th className="px-5 py-3 text-right">Preço Médio</th></tr></thead>
+                    <table className="w-full min-w-[700px] text-sm">
+                      <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd. Comprada</th><th className="px-4 py-3 text-right">Qtd. Unidades</th><th className="px-4 py-3 text-right">Valor Total</th><th className="px-5 py-3 text-right">Preço Médio</th></tr></thead>
                       <tbody>
                         {warehouseItemsSorvetes.map((item) => (
                           <tr key={item.key} className="border-b hover:bg-muted/20">
                             <td className="px-5 py-3 font-medium">{item.name}</td>
-                            <td className="px-4 py-3"><Badge variant="outline">{item.category}</Badge></td>
+                            <td className="px-4 py-3"><Badge variant="outline">{SORVETE_CATEGORY_LABELS[item.category] ?? item.category}</Badge></td>
                             <td className="px-4 py-3 text-right">{item.purchasedQuantity.toLocaleString("pt-BR")} {item.unit}</td>
+                            <td className="px-4 py-3 text-right font-medium text-primary">{item.totalUnits.toLocaleString("pt-BR")} un</td>
                             <td className="px-4 py-3 text-right font-semibold">{formatCurrency(item.purchasedValue)}</td>
                             <td className="px-5 py-3 text-right">{formatCurrency(item.referencePrice)}</td>
                           </tr>

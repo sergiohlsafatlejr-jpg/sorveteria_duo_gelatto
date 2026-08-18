@@ -42,6 +42,7 @@ export type PurchaseWarehouseItem = {
   invoiceCount: number;
   sourceInvoiceIds: number[];
   stockConfigured: boolean;
+  totalUnits: number;
 };
 
 export function normalizePurchaseWarehouseName(value: string | null | undefined): string {
@@ -55,6 +56,60 @@ export function normalizePurchaseWarehouseName(value: string | null | undefined)
 export function isTenLiterPurchaseItem(description: string): boolean {
   return /\b10\s*(L|LT|LITRO|LITROS)\b/i.test(description);
 }
+
+/**
+ * Extrai a quantidade de unidades por embalagem a partir da descrição do produto.
+ * Ex: "CAJA 30 UND - FRUTA" → 30, "PACK 4 UND NAPOLITANO 1,5 LITROS" → 4
+ */
+export function extractUnitsPerPackage(description: string): number {
+  // Padrões: "30 UND", "24 UND", "PACK 4 UND", "PACK 6 UND", "PACK 9 UND", "20 UND"
+  const match = description.match(/\b(\d+)\s*UND/i);
+  if (match) return Number(match[1]);
+  // Padrão PACK N UND sem "UND" explícito mas com PACK
+  const packMatch = description.match(/PACK\s*(\d+)/i);
+  if (packMatch) return Number(packMatch[1]);
+  return 1;
+}
+
+/**
+ * Categoriza automaticamente itens de sorvete da Duo Gelatto.
+ */
+export function categorizeSorveteItem(description: string): string {
+  const upper = description.toUpperCase();
+  if (/PICOLE\s*ZERO/i.test(upper)) return "picoles_zero";
+  if (/LINHA\s*ZERO/i.test(upper)) return "linha_zero";
+  if (/LINHA\s*KIDS/i.test(upper)) return "linha_kids";
+  if (/LINHA\s*ESPECIAL/i.test(upper)) return "linha_especial";
+  if (/\bMEGA\b/i.test(upper) || /OURO\s*PRETO/i.test(upper)) return "mega";
+  if (/\bDUOBLITO/i.test(upper)) return "duoblito";
+  if (/PACK\s*4\s*UND.*1[,.]5\s*LITRO/i.test(upper)) return "potes_1_5l";
+  if (/PACK\s*(6|9)\s*UND.*1\s*(LITRO|LT)/i.test(upper) || /PACK\s*(6|9)\s*UND.*500\s*ML/i.test(upper)) return "potes_1l_500ml";
+  if (/CAIXA\s*5\s*LITRO/i.test(upper) || /5\s*LITROS/i.test(upper)) return "caixas_5l";
+  if (/\b(FRUTA|CAJA)\b/i.test(upper) && /\d+\s*UND/i.test(upper)) return "picoles_fruta";
+  if (/\b(CREME|COALHADA|MILHO|MORANGO|CUPUACU|COCO|TAMARINDO)\b/i.test(upper) && /\d+\s*UND/i.test(upper)) return "picoles_creme";
+  if (/\d+\s*UND.*-\s*(SP|CLASSICOS)/i.test(upper) || /CLASSICOS/i.test(upper)) return "picoles_sp";
+  if (/ACAI/i.test(upper)) return "acai";
+  if (/\d+\s*UND/i.test(upper)) return "picoles_outros";
+  return "outros";
+}
+
+export const SORVETE_CATEGORY_LABELS: Record<string, string> = {
+  picoles_fruta: "Picolés Fruta",
+  picoles_creme: "Picolés Creme",
+  picoles_sp: "Picolés SP/Clássicos",
+  picoles_zero: "Picolés Zero",
+  picoles_outros: "Picolés Outros",
+  mega: "Mega",
+  duoblito: "Duoblito",
+  linha_zero: "Linha Zero",
+  linha_kids: "Linha Kids",
+  linha_especial: "Linha Especial",
+  potes_1_5l: "Potes 1,5L",
+  potes_1l_500ml: "Potes 1L / 500ml",
+  caixas_5l: "Caixas 5L",
+  acai: "Açaí",
+  outros: "Outros",
+};
 
 export function buildPurchaseWarehouseCatalog(
   categories: PurchaseWarehouseCategory[],
@@ -80,12 +135,18 @@ export function buildPurchaseWarehouseCatalog(
       item.sources.forEach((source) => sourceInvoiceIds.add(source.invoiceId));
       const purchasedQuantity = (existing?.purchasedQuantity ?? 0) + Number(item.totalQuantity || 0);
       const purchasedValue = (existing?.purchasedValue ?? 0) + Number(item.totalSpent || 0);
+      const unitsPerPkg = extractUnitsPerPackage(item.description);
+      const totalUnits = (existing?.totalUnits ?? 0) + (Number(item.totalQuantity || 0) * unitsPerPkg);
+      // Auto-categorizar itens de sorvete quando filtro é duo_gelatto
+      const itemCategory = filter === "duo_gelatto"
+        ? categorizeSorveteItem(item.description)
+        : (existing?.category ?? category.category);
 
       catalog.set(normalizedName, {
         key: `invoice-${normalizedName}`,
         operationalItemId: null,
         name: existing?.name ?? item.description,
-        category: existing?.category ?? category.category,
+        category: itemCategory,
         unit: existing?.unit ?? item.unit,
         currentStock: null,
         minStock: null,
@@ -95,6 +156,7 @@ export function buildPurchaseWarehouseCatalog(
         invoiceCount: sourceInvoiceIds.size,
         sourceInvoiceIds: Array.from(sourceInvoiceIds),
         stockConfigured: false,
+        totalUnits,
       });
     }
   }
@@ -117,6 +179,7 @@ export function buildPurchaseWarehouseCatalog(
       invoiceCount: existing?.invoiceCount ?? 0,
       sourceInvoiceIds: existing?.sourceInvoiceIds ?? [],
       stockConfigured: true,
+      totalUnits: existing?.totalUnits ?? 0,
     });
   }
 

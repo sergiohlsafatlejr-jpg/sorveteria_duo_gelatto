@@ -63,3 +63,7 @@
 - [x] Melhorar conciliação Rede x INOVE: 3 níveis de match (valor+hora, valor+dia, totalização diária)
 - [x] Reduzir timeout INOVE de 30s para 10s (connectTimeout) e 60s para 15s (requestTimeout) para evitar lentidão
 - [x] Corrigir aba Sorvetes no Painel de Compras não exibindo dados (query não habilitada para tab sorvetes)
+- [ ] Adicionar coluna Qtd. Unidades na aba Sorvetes (calcular unidades dentro de caixas: "30 UND" x 4 CX = 120 un)
+- [x] Adicionar coluna Qtd. Unidades na aba Sorvetes (calcular unidades dentro de caixas: "30 UND" x 4 CX = 120 un)
+- [x] Remover notas duplicadas importadas 2 vezes (IDs 150xxx e 180xxx com mesmos valores)
+- [x] Categorizar itens de sorvete automaticamente (picolés, packs, caixas, guloseimas, linha zero)
