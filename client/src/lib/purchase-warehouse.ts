@@ -82,6 +82,7 @@ export function categorizeSorveteItem(description: string): string {
   if (/LINHA\s*ESPECIAL/i.test(upper)) return "linha_especial";
   if (/\bMEGA\b/i.test(upper) || /OURO\s*PRETO/i.test(upper)) return "mega";
   if (/\bDUOBLITO/i.test(upper)) return "duoblito";
+  if (/\bCAIXA\s*10\s*(L|LT|LITRO|LITROS)\b/i.test(upper) || /\b10\s*LITROS?\b/i.test(upper)) return "caixas_10l";
   if (/PACK\s*4\s*UND.*1[,.]5\s*LITRO/i.test(upper)) return "potes_1_5l";
   if (/PACK\s*(6|9)\s*UND.*1\s*(LITRO|LT)/i.test(upper) || /PACK\s*(6|9)\s*UND.*500\s*ML/i.test(upper)) return "potes_1l_500ml";
   if (/CAIXA\s*5\s*LITRO/i.test(upper) || /5\s*LITROS/i.test(upper)) return "caixas_5l";
@@ -107,6 +108,7 @@ export const SORVETE_CATEGORY_LABELS: Record<string, string> = {
   potes_1_5l: "Potes 1,5L",
   potes_1l_500ml: "Potes 1L / 500ml",
   caixas_5l: "Caixas 5L",
+  caixas_10l: "Caixas 10L",
   acai: "Açaí",
   outros: "Outros",
 };
@@ -121,7 +123,8 @@ export function buildPurchaseWarehouseCatalog(
 
   for (const category of categories) {
     for (const item of category.items) {
-      if (isTenLiterPurchaseItem(item.description)) continue;
+      // Filtrar caixas 10L apenas no Almoxarifado (na aba Sorvetes mostra tudo)
+      if (filter !== "duo_gelatto" && isTenLiterPurchaseItem(item.description)) continue;
       // Filtrar por fornecedor
       if (filter !== "all" && item.sources.length > 0) {
         const isDuo = item.sources.some((s: any) => ((s as any).supplierName ?? "").toUpperCase().includes("DUO GELATTO"));

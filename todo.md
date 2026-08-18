@@ -66,7 +66,6 @@
 - [x] Adicionar coluna Qtd. Unidades na aba Sorvetes (calcular unidades dentro de caixas: "30 UND" x 4 CX = 120 un)
 - [x] Remover notas duplicadas importadas 2 vezes (IDs 150xxx e 180xxx com mesmos valores)
 - [x] Categorizar itens de sorvete automaticamente (picolés, packs, caixas, guloseimas, linha zero)
-- [ ] Totalização por categoria na aba Sorvetes (resumo no topo com total gasto por categoria)
 - [x] Totalização por categoria na aba Sorvetes (resumo no topo com total gasto por categoria)
 - [x] Exportar Excel na aba Sorvetes (botão para gerar planilha com todos os itens e quantidades)
 - [x] Alerta de variação de preço (notificar quando preço médio subir >10% vs mês anterior)
