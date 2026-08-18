@@ -90,6 +90,102 @@ const CHART_COLORS = [
   "#a855f7", "#22c55e", "#e11d48", "#0ea5e9", "#84cc16",
 ];
 
+function PriceComparisonCard({ month }: { month: string | null }) {
+  const input = useMemo(() => ({ month }), [month]);
+  const { data, isLoading } = trpc.purchaseInvoices.priceComparison.useQuery(input, {
+    retry: false,
+  });
+
+  if (isLoading) return (
+    <Card>
+      <CardContent className="py-8 text-center text-muted-foreground">
+        <Loader2 className="mx-auto h-6 w-6 animate-spin mb-2" />
+        Carregando comparativo de preços...
+      </CardContent>
+    </Card>
+  );
+
+  if (!data || data.items.length === 0) return null;
+
+  const itemsWithSellPrice = data.items.filter(i => i.sellPrice > 0);
+  const itemsWithoutSellPrice = data.items.filter(i => i.sellPrice === 0);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <TrendingUp className="h-5 w-5 text-emerald-500" />
+          Comparativo Preço de Compra x Preço de Venda
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Margem de lucro por produto — preço médio de compra (notas) vs preço de venda (INOVE).
+        </p>
+      </CardHeader>
+      <CardContent>
+        {itemsWithSellPrice.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px] text-sm">
+              <thead>
+                <tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2">Produto</th>
+                  <th className="px-4 py-2 text-right">Preço Compra</th>
+                  <th className="px-4 py-2 text-right">Preço Venda</th>
+                  <th className="px-4 py-2 text-right">Margem</th>
+                  <th className="px-4 py-2 text-right">Qtd. Comprada</th>
+                  <th className="px-4 py-2 text-right">Total Gasto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {itemsWithSellPrice.map((item) => (
+                  <tr key={item.product} className="border-b hover:bg-muted/20">
+                    <td className="px-4 py-2 font-medium">{item.product}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(item.avgCostPrice)}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(item.sellPrice)}</td>
+                    <td className={`px-4 py-2 text-right font-bold ${item.margin >= 50 ? "text-emerald-600" : item.margin >= 30 ? "text-green-600" : item.margin >= 0 ? "text-amber-600" : "text-red-600"}`}>
+                      {item.margin.toFixed(1)}%
+                    </td>
+                    <td className="px-4 py-2 text-right">{item.totalQty.toLocaleString("pt-BR")}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(item.totalCost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {itemsWithoutSellPrice.length > 0 && (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
+              {itemsWithoutSellPrice.length} itens sem preço de venda no INOVE
+            </summary>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-y bg-muted/20 text-left text-xs uppercase text-muted-foreground">
+                    <th className="px-4 py-2">Produto</th>
+                    <th className="px-4 py-2 text-right">Preço Compra</th>
+                    <th className="px-4 py-2 text-right">Qtd.</th>
+                    <th className="px-4 py-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {itemsWithoutSellPrice.map((item) => (
+                    <tr key={item.product} className="border-b">
+                      <td className="px-4 py-2">{item.product}</td>
+                      <td className="px-4 py-2 text-right">{formatCurrency(item.avgCostPrice)}</td>
+                      <td className="px-4 py-2 text-right">{item.totalQty.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2 text-right">{formatCurrency(item.totalCost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function SorveteCategoryChart() {
   const { data: trendData } = trpc.purchaseInvoices.monthlyCategoryTrend.useQuery();
 
@@ -941,6 +1037,8 @@ export default function Purchases() {
             )}
             {/* Gráfico comparativo mensal */}
             <SorveteCategoryChart />
+            {/* Comparativo preço de compra x venda */}
+            <PriceComparisonCard month={purchaseMonth} />
           </TabsContent>
           <TabsContent value="pedidos" className="space-y-6">
             <div className="flex justify-between items-center">

@@ -770,6 +770,112 @@ export const purchaseInvoicesRouter = router({
       return { months, series };
     }),
 
+  // Comparativo preço de compra x preço de venda (margem)
+  priceComparison: protectedProcedure
+    .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      const currentMonth = input?.month ?? new Date().toISOString().slice(0, 7);
+      if (!db) return { items: [], month: currentMonth };
+
+      const validStatusFilter = or(
+        eq(purchaseInvoices.status, "extracted"),
+        eq(purchaseInvoices.status, "review_required"),
+        eq(purchaseInvoices.status, "confirmed"),
+      );
+
+      const [year, monthNum] = currentMonth.split("-").map(Number);
+      const lastDay = new Date(Date.UTC(year, monthNum, 0)).toISOString().slice(0, 10);
+      const monthFilter = and(
+        validStatusFilter,
+        gte(purchaseInvoices.issueDate, `${currentMonth}-01`),
+        lte(purchaseInvoices.issueDate, lastDay),
+        sql`UPPER(${purchaseInvoices.supplierName}) LIKE '%DUO GELATTO%'`,
+      );
+
+      const items = await db
+        .select({
+          description: purchaseInvoiceItems.description,
+          quantity: purchaseInvoiceItems.quantity,
+          totalPrice: purchaseInvoiceItems.totalPrice,
+          unitPrice: purchaseInvoiceItems.unitPrice,
+        })
+        .from(purchaseInvoiceItems)
+        .innerJoin(purchaseInvoices, eq(purchaseInvoiceItems.invoiceId, purchaseInvoices.id))
+        .where(monthFilter);
+
+      // Agrupar por produto
+      const productMap = new Map<string, { qty: number; totalCost: number }>();
+      for (const item of items) {
+        const key = (item.description ?? "").toUpperCase().trim();
+        if (!key) continue;
+        const cur = productMap.get(key) ?? { qty: 0, totalCost: 0 };
+        cur.qty += Number(item.quantity ?? 0);
+        cur.totalCost += Number(item.totalPrice ?? 0);
+        productMap.set(key, cur);
+      }
+
+      // Buscar preço de venda do INOVE
+      let inoveProducts: Array<{ nome: string; preco_venda: number }> = [];
+      try {
+        const { inoveConnectorConfig: inoveConfig } = await import("../../drizzle/schema");
+        const rows = await db.select().from(inoveConfig).limit(1);
+        if (rows.length > 0 && rows[0].active) {
+          const mssql = await import("mssql");
+          const config = rows[0];
+          const pool = new mssql.default.ConnectionPool({
+            server: config.host ?? "duo-urias.safatle.net.br",
+            port: config.port ?? 55444,
+            user: config.username ?? "sa",
+            password: config.password ?? "",
+            database: config.database ?? "DUOGELATTO",
+            options: { encrypt: false, trustServerCertificate: true, connectTimeout: 10000, requestTimeout: 15000 },
+          });
+          await pool.connect();
+          const result = await pool.request().query(`
+            SELECT PRO_NOME as nome, CAST(PRO_VENDA as float) as preco_venda
+            FROM PRODUTOS WHERE PRO_ATIVO = 'S'
+          `);
+          await pool.close();
+          inoveProducts = result.recordset as Array<{ nome: string; preco_venda: number }>;
+        }
+      } catch {
+        // INOVE offline — continua sem preço de venda
+      }
+
+      // Criar mapa de preço de venda (normalizado)
+      const sellPriceMap = new Map<string, number>();
+      for (const p of inoveProducts) {
+        sellPriceMap.set((p.nome ?? "").toUpperCase().trim(), p.preco_venda ?? 0);
+      }
+
+      // Montar resultado
+      const result = Array.from(productMap.entries()).map(([name, data]) => {
+        const avgCost = data.qty > 0 ? data.totalCost / data.qty : 0;
+        // Tentar encontrar preço de venda por match exato ou parcial
+        let sellPrice = sellPriceMap.get(name) ?? 0;
+        if (sellPrice === 0) {
+          for (const [inoveName, price] of Array.from(sellPriceMap.entries())) {
+            if (inoveName.includes(name) || name.includes(inoveName)) {
+              sellPrice = price;
+              break;
+            }
+          }
+        }
+        const margin = sellPrice > 0 ? ((sellPrice - avgCost) / sellPrice) * 100 : 0;
+        return {
+          product: name,
+          avgCostPrice: avgCost,
+          sellPrice,
+          margin,
+          totalQty: data.qty,
+          totalCost: data.totalCost,
+        };
+      }).sort((a, b) => b.totalCost - a.totalCost);
+
+      return { items: result, month: currentMonth };
+    }),
+
   dashboard: protectedProcedure
     .input(z.object({
       month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null),
