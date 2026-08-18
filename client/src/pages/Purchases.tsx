@@ -20,6 +20,7 @@ import {
   ReceiptText, Layers3, Loader2,
   IceCream,
 } from "lucide-react";
+import { Download, TrendingUp } from "lucide-react";
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   limpeza: { label: "Material de limpeza", color: "bg-blue-500/10 text-blue-600 border-blue-500/20", icon: Sparkles },
@@ -117,6 +118,10 @@ export default function Purchases() {
     () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], [], "duo_gelatto"),
     [monthlyItemsSummary?.categories],
   );
+  const priceVariationInput = useMemo(() => ({ month: purchaseMonth }), [purchaseMonth]);
+  const { data: priceVariation } = trpc.purchaseInvoices.priceVariation.useQuery(priceVariationInput, {
+    enabled: activeTab === "sorvetes",
+  });
   const filteredWarehouseItems = warehouseItems.filter(item =>
     item.name.toLowerCase().includes(itemSearch.toLowerCase()) &&
     (itemCategory === "all" || getInternalPurchaseGroup(item.category) === itemCategory)
@@ -745,8 +750,33 @@ export default function Purchases() {
           <TabsContent value="sorvetes" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><IceCream className="h-5 w-5 text-pink-500" />Sorvetes — Itens da Duo Gelatto</CardTitle>
-                <p className="text-sm text-muted-foreground">Itens comprados da Duo Gelatto (apenas visualização — controle pelo INOVE).</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2"><IceCream className="h-5 w-5 text-pink-500" />Sorvetes — Itens da Duo Gelatto</CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">Itens comprados da Duo Gelatto (apenas visualização — controle pelo INOVE).</p>
+                  </div>
+                  {warehouseItemsSorvetes.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={async () => {
+                      const XLSX = await import("xlsx");
+                      const data = warehouseItemsSorvetes.map((item) => ({
+                        "Produto": item.name,
+                        "Categoria": SORVETE_CATEGORY_LABELS[item.category] ?? item.category,
+                        "Qtd. Comprada": item.purchasedQuantity,
+                        "Unidade": item.unit,
+                        "Qtd. Unidades": item.totalUnits,
+                        "Valor Total": Number(item.purchasedValue.toFixed(2)),
+                        "Preço Médio": Number(item.referencePrice.toFixed(2)),
+                      }));
+                      const ws = XLSX.utils.json_to_sheet(data);
+                      const wb = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(wb, ws, "Sorvetes Duo Gelatto");
+                      XLSX.writeFile(wb, `sorvetes_duo_gelatto_${purchaseMonth ?? new Date().toISOString().slice(0, 7)}.xlsx`);
+                      toast.success("Excel exportado com sucesso!");
+                    }}>
+                      <Download className="mr-2 h-4 w-4" />Exportar Excel
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 {warehouseItemsSorvetes.length === 0 ? (
@@ -756,7 +786,27 @@ export default function Purchases() {
                     <p className="mt-1 text-sm">Importe notas da Duo Gelatto para ver os itens aqui.</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="space-y-4">
+                    {/* Totalização por categoria */}
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                      {Object.entries(
+                        warehouseItemsSorvetes.reduce<Record<string, { total: number; count: number }>>((acc, item) => {
+                          const cat = SORVETE_CATEGORY_LABELS[item.category] ?? item.category;
+                          if (!acc[cat]) acc[cat] = { total: 0, count: 0 };
+                          acc[cat].total += item.purchasedValue;
+                          acc[cat].count += item.totalUnits;
+                          return acc;
+                        }, {})
+                      ).sort((a, b) => b[1].total - a[1].total).map(([cat, data]) => (
+                        <div key={cat} className="rounded-lg border bg-muted/30 p-3">
+                          <p className="text-xs font-medium text-muted-foreground truncate">{cat}</p>
+                          <p className="text-sm font-bold">{formatCurrency(data.total)}</p>
+                          <p className="text-xs text-muted-foreground">{data.count.toLocaleString("pt-BR")} un</p>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Tabela de itens */}
+                    <div className="overflow-x-auto">
                     <table className="w-full min-w-[700px] text-sm">
                       <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd. Comprada</th><th className="px-4 py-3 text-right">Qtd. Unidades</th><th className="px-4 py-3 text-right">Valor Total</th><th className="px-5 py-3 text-right">Preço Médio</th></tr></thead>
                       <tbody>
@@ -773,9 +823,50 @@ export default function Purchases() {
                       </tbody>
                     </table>
                   </div>
+                  </div>
                 )}
-              </CardContent>
-            </Card>
+             </CardContent>
+           </Card>
+            {/* Alertas de variação de preço */}
+            {(priceVariation?.variations?.length ?? 0) > 0 && (
+              <Card className="border-amber-500/30 bg-amber-50/50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-amber-700">
+                    <TrendingUp className="h-5 w-5" />
+                    Alertas de Variação de Preço
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Itens com variação superior a 10% em relação ao mês anterior ({priceVariation?.previousMonth?.split("-").reverse().join("/")}).
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[500px] text-sm">
+                      <thead>
+                        <tr className="border-y bg-amber-100/50 text-left text-xs uppercase tracking-wide text-amber-800">
+                          <th className="px-4 py-2">Produto</th>
+                          <th className="px-4 py-2 text-right">Preço Anterior</th>
+                          <th className="px-4 py-2 text-right">Preço Atual</th>
+                          <th className="px-4 py-2 text-right">Variação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {priceVariation?.variations.map((v) => (
+                          <tr key={v.product} className="border-b">
+                            <td className="px-4 py-2 font-medium">{v.product}</td>
+                            <td className="px-4 py-2 text-right">{formatCurrency(v.previousPrice)}</td>
+                            <td className="px-4 py-2 text-right">{formatCurrency(v.currentPrice)}</td>
+                            <td className={`px-4 py-2 text-right font-bold ${v.variation > 0 ? "text-red-600" : "text-green-600"}`}>
+                              {v.variation > 0 ? "+" : ""}{v.variation.toFixed(1)}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
           <TabsContent value="pedidos" className="space-y-6">
             <div className="flex justify-between items-center">

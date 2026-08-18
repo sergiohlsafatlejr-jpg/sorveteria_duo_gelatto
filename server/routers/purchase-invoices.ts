@@ -598,6 +598,96 @@ export const purchaseInvoicesRouter = router({
       };
     }),
 
+  // Comparação de preços mês atual vs anterior para alertas de variação
+  priceVariation: protectedProcedure
+    .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      const currentMonth = input?.month ?? new Date().toISOString().slice(0, 7);
+      if (!db) return { variations: [], currentMonth, previousMonth: "" };
+
+      // Calcular mês anterior
+      const [year, monthNum] = currentMonth.split("-").map(Number);
+      const prevDate = new Date(Date.UTC(year, monthNum - 2, 1));
+      const previousMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+
+      const validStatusFilter = or(
+        eq(purchaseInvoices.status, "extracted"),
+        eq(purchaseInvoices.status, "review_required"),
+        eq(purchaseInvoices.status, "confirmed"),
+      );
+
+      // Buscar itens do mês atual
+      const [yearCur, monthCur] = currentMonth.split("-").map(Number);
+      const lastDayCur = new Date(Date.UTC(yearCur, monthCur, 0)).toISOString().slice(0, 10);
+      const curFilter = and(validStatusFilter, gte(purchaseInvoices.issueDate, `${currentMonth}-01`), lte(purchaseInvoices.issueDate, lastDayCur));
+
+      // Buscar itens do mês anterior
+      const [yearPrev, monthPrev] = previousMonth.split("-").map(Number);
+      const lastDayPrev = new Date(Date.UTC(yearPrev, monthPrev, 0)).toISOString().slice(0, 10);
+      const prevFilter = and(validStatusFilter, gte(purchaseInvoices.issueDate, `${previousMonth}-01`), lte(purchaseInvoices.issueDate, lastDayPrev));
+
+      const [curItems, prevItems] = await Promise.all([
+        db.select({
+          description: purchaseInvoiceItems.description,
+          quantity: purchaseInvoiceItems.quantity,
+          totalPrice: purchaseInvoiceItems.totalPrice,
+          supplierName: purchaseInvoices.supplierName,
+        }).from(purchaseInvoiceItems)
+          .innerJoin(purchaseInvoices, eq(purchaseInvoiceItems.invoiceId, purchaseInvoices.id))
+          .where(curFilter),
+        db.select({
+          description: purchaseInvoiceItems.description,
+          quantity: purchaseInvoiceItems.quantity,
+          totalPrice: purchaseInvoiceItems.totalPrice,
+          supplierName: purchaseInvoices.supplierName,
+        }).from(purchaseInvoiceItems)
+          .innerJoin(purchaseInvoices, eq(purchaseInvoiceItems.invoiceId, purchaseInvoices.id))
+          .where(prevFilter),
+      ]);
+
+      // Filtrar apenas Duo Gelatto
+      const isDuo = (name: string | null) => (name ?? "").toUpperCase().includes("DUO GELATTO");
+      const curDuo = curItems.filter((i) => isDuo(i.supplierName));
+      const prevDuo = prevItems.filter((i) => isDuo(i.supplierName));
+
+      // Calcular preço médio por produto
+      const avgPrice = (items: typeof curDuo) => {
+        const map = new Map<string, { total: number; qty: number }>();
+        for (const item of items) {
+          const key = (item.description ?? "").toUpperCase().trim();
+          if (!key) continue;
+          const cur = map.get(key) ?? { total: 0, qty: 0 };
+          cur.total += Number(item.totalPrice ?? 0);
+          cur.qty += Number(item.quantity ?? 0);
+          map.set(key, cur);
+        }
+        return map;
+      };
+
+      const curPrices = avgPrice(curDuo);
+      const prevPrices = avgPrice(prevDuo);
+
+      const variations: { product: string; currentPrice: number; previousPrice: number; variation: number }[] = [];
+      for (const [product, cur] of Array.from(curPrices.entries())) {
+        const prev = prevPrices.get(product);
+        if (!prev || prev.qty === 0 || cur.qty === 0) continue;
+        const curAvg = cur.total / cur.qty;
+        const prevAvg = prev.total / prev.qty;
+        if (prevAvg === 0) continue;
+        const variation = ((curAvg - prevAvg) / prevAvg) * 100;
+        if (Math.abs(variation) >= 10) {
+          variations.push({ product, currentPrice: curAvg, previousPrice: prevAvg, variation });
+        }
+      }
+
+      return {
+        variations: variations.sort((a, b) => Math.abs(b.variation) - Math.abs(a.variation)),
+        currentMonth,
+        previousMonth,
+      };
+    }),
+
   dashboard: protectedProcedure
     .input(z.object({
       month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null),
