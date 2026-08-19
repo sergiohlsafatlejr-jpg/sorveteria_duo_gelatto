@@ -72,5 +72,4 @@
 - [x] Filtro por categoria na aba Sorvetes (dropdown para filtrar tabela por categoria específica)
 - [x] Gráfico comparativo mensal de gastos por categoria nos últimos meses
 - [x] Comparativo preço de compra x preço de venda (margem de lucro por produto)
-- [ ] Filtro por mês na aba Sorvetes para ver dados de meses específicos
 - [x] Filtro por mês na aba Sorvetes para ver dados de meses específicos
