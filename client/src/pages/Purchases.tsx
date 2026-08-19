@@ -907,7 +907,21 @@ export default function Purchases() {
                     <CardTitle className="flex items-center gap-2"><IceCream className="h-5 w-5 text-pink-500" />Sorvetes — Itens da Duo Gelatto</CardTitle>
                     <p className="mt-1 text-sm text-muted-foreground">Itens comprados da Duo Gelatto (apenas visualização — controle pelo INOVE).</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={purchaseMonth ?? monthlyItemsSummary?.month ?? undefined}
+                      onValueChange={setPurchaseMonth}
+                    >
+                      <SelectTrigger className="w-[150px] h-9">
+                        <CalendarDays className="mr-2 h-3.5 w-3.5 shrink-0" />
+                        <SelectValue placeholder="Mês" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(monthlyItemsSummary?.availableMonths ?? []).map((m) => (
+                          <SelectItem key={m} value={m}>{formatMonthLabel(m)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     {warehouseItemsSorvetes.length > 0 && (
                       <Select value={sorveteCategoryFilter} onValueChange={setSorveteCategoryFilter}>
                         <SelectTrigger className="w-[180px] h-9">
