@@ -100,6 +100,22 @@ pnpm test
 
 ---
 
+## Recuperação da prévia Vite/esbuild
+
+O erro `The service is no longer running` indica que o processo auxiliar do **esbuild** encerrou durante o desenvolvimento, geralmente após pressão de memória ou reinício incompleto. Esse erro pertence à prévia de desenvolvimento e não significa, por si só, que a versão publicada esteja indisponível.
+
+Procedimento de recuperação:
+
+1. Reiniciar completamente o servidor de desenvolvimento.
+2. Confirmar que `http://127.0.0.1:3000/` responde com HTTP 200.
+3. Executar `pnpm run check` para validar o TypeScript.
+4. Abrir a prévia e confirmar que a sobreposição do Vite não reaparece.
+5. Validar separadamente o domínio publicado antes de uma nova publicação.
+
+Se o erro voltar com frequência, verificar processos Node/TypeScript duplicados e o consumo de memória antes de reinstalar dependências ou alterar a configuração do Vite.
+
+---
+
 ## 🔒 Permissões e Segurança
 
 O sistema possui controle de acesso baseado em cargos (**RBAC**) e permissões granulares por módulo:

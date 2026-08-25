@@ -73,3 +73,4 @@
 - [x] Gráfico comparativo mensal de gastos por categoria nos últimos meses
 - [x] Comparativo preço de compra x preço de venda (margem de lucro por produto)
 - [x] Filtro por mês na aba Sorvetes para ver dados de meses específicos
+- [x] Corrigir erro "The service is no longer running" do Vite/esbuild e validar a abertura da prévia e da produção
