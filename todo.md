@@ -81,8 +81,8 @@
 - [x] Validar visualmente no frontend autenticado Dashboard, Compras, Produtos, Relatórios, Caixas e Forecast
 - [x] Registrar a ordem segura de reconfiguração e reimportação dos dados reais
 - [x] Validar com credenciais reais os fluxos INOVE e Forecast após a sincronização
-- [ ] Validar importação de notas/PDF com um arquivo fiscal real do usuário
-- [ ] Confirmar no banco os registros da nota PDF real importada, sem duplicidades, erros ou placeholders
+- [x] Validar importação de notas/PDF com um arquivo fiscal real do usuário
+- [x] Confirmar no banco os registros da nota PDF real importada, sem duplicidades, erros ou placeholders
 - [ ] Validar importação e conciliação Rede com um arquivo Excel real do usuário
 - [x] Diagnosticar e corrigir o site publicado exibindo "This site is under maintenance"
 - [x] Confirmar configuração ativa e conectividade do conector INOVE no banco novo
@@ -111,3 +111,7 @@
 - [x] Reutilizar no Dashboard Financeiro a mesma fonte de dados e regras da tela Forecast
 - [x] Manter separado o KPI Próx. 7 Dias de contas a pagar para não misturar entradas e despesas
 - [x] Adicionar teste que confirme o valor dos próximos sete dias no Dashboard e no Forecast
+- [x] Calcular na Gestão de Custos o valor realizado mensal de Contas a Pagar por custo vinculado
+- [x] Adicionar colunas Realizado e Divergência em reais mantendo o valor cadastrado como previsto
+- [x] Aplicar cores para gasto acima, economia e igualdade, respeitando o mês selecionado
+- [x] Adicionar teste do cálculo mensal de realizado e divergência por custo

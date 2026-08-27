@@ -10,7 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Edit2, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { buildFinancialNamesByCost, getCostNameComparisonStatus } from "@/lib/cost-comparison";
+import {
+  buildFinancialNamesByCost,
+  filterTransactionsByReferenceMonth,
+  getCostNameComparisonStatus,
+  getMonthlyCostValues,
+} from "@/lib/cost-comparison";
 import { useForm } from "react-hook-form";
 
 const fmtBRL = (v: number) =>
@@ -29,6 +34,10 @@ type CostForm = {
 export default function FinCosts() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
+  const [referenceMonth, setReferenceMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
 
   const utils = trpc.useUtils();
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
@@ -83,10 +92,14 @@ export default function FinCosts() {
   const totalFixed = costs.filter(c => c.type === "fixed").reduce((s, c) => s + Number(c.amount ?? c.value ?? 0), 0);
   const totalVariable = costs.filter(c => c.type === "variable").reduce((s, c) => s + Number(c.amount ?? c.value ?? 0), 0);
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
-  const financialNamesByCost = useMemo(() => buildFinancialNamesByCost(transactions), [transactions]);
+  const monthlyTransactions = useMemo(
+    () => filterTransactionsByReferenceMonth(transactions, referenceMonth),
+    [transactions, referenceMonth],
+  );
+  const financialNamesByCost = useMemo(() => buildFinancialNamesByCost(monthlyTransactions), [monthlyTransactions]);
   const unlinkedFinancialCosts = useMemo(() => {
     const grouped = new Map<string, { count: number; total: number }>();
-    for (const transaction of transactions) {
+    for (const transaction of monthlyTransactions) {
       if (Number(transaction.costId) > 0) continue;
       const name = String(transaction.financialCostName ?? "").trim();
       if (!name) continue;
@@ -97,20 +110,32 @@ export default function FinCosts() {
     }
     return Array.from(grouped, ([name, values]) => ({ name, ...values }))
       .sort((a, b) => b.total - a.total);
-  }, [transactions]);
+  }, [monthlyTransactions]);
 
   return (
     <div className="p-6 space-y-5">
         <BackButton to="/fin/dashboard" />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Gestão de Custos</h1>
-          <p className="text-sm text-muted-foreground">Cadastro e controle de custos fixos e variáveis</p>
+          <p className="text-sm text-muted-foreground">Previsto cadastrado x realizado em Contas a Pagar no mês selecionado</p>
         </div>
-        <Button onClick={openCreate} className="gap-2">
-          <Plus className="h-4 w-4" /> Novo Custo
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="space-y-1">
+            <Label htmlFor="cost-reference-month" className="text-xs text-muted-foreground">Mês de referência</Label>
+            <Input
+              id="cost-reference-month"
+              type="month"
+              value={referenceMonth}
+              onChange={event => setReferenceMonth(event.target.value)}
+              className="w-full sm:w-44"
+            />
+          </div>
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="h-4 w-4" /> Novo Custo
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -134,26 +159,29 @@ export default function FinCosts() {
           Custos Fixos
         </h2>
         <div className="rounded-xl border border-border/50 overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
+          <table className="w-full min-w-[1260px] text-sm">
             <thead className="bg-muted/30 border-b border-border/50">
               <tr>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nome custo financeiro</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Custo vinculado</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Categoria</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Recorrência</th>
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Previsto</th>
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Realizado</th>
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Divergência</th>
                 <th className="text-center px-4 py-3 font-medium text-muted-foreground">Situação</th>
                 <th className="text-center px-4 py-3 font-medium text-muted-foreground">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/30">
               {isLoading || isLoadingTransactions ? (
-                <tr><td colSpan={7} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
+                <tr><td colSpan={9} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
               ) : costs.filter(c => c.type === "fixed").length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-8 text-muted-foreground text-sm">Nenhum custo fixo cadastrado</td></tr>
+                <tr><td colSpan={9} className="text-center py-8 text-muted-foreground text-sm">Nenhum custo fixo cadastrado</td></tr>
               ) : costs.filter(c => c.type === "fixed").map(c => {
                 const comparison = financialNamesByCost.get(c.id);
                 const status = getCostNameComparisonStatus(c.name || c.description || "", comparison);
+                const monthlyValues = getMonthlyCostValues(c.amount ?? c.value, comparison);
                 return <tr key={c.id} className="hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-3 text-xs max-w-[260px]" title={comparison?.names.join(", ") || ""}>
                     {comparison?.names.length ? `${comparison.names.slice(0, 3).join(", ")}${comparison.names.length > 3 ? ` +${comparison.names.length - 3}` : ""}` : "—"}
@@ -165,7 +193,14 @@ export default function FinCosts() {
                   <td className="px-4 py-3 text-xs">
                     <Badge variant="outline">{c.recurrence === "monthly" ? "Mensal" : c.recurrence === "weekly" ? "Semanal" : c.recurrence === "yearly" ? "Anual" : "Único"}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold text-blue-500">{fmtBRL(Number(c.amount ?? c.value ?? 0))}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-blue-500">{fmtBRL(monthlyValues.planned)}</td>
+                  <td className="px-4 py-3 text-right font-semibold">{fmtBRL(monthlyValues.actual)}</td>
+                  <td className={cn(
+                    "px-4 py-3 text-right font-semibold",
+                    monthlyValues.variance > 0 ? "text-red-600" : monthlyValues.variance < 0 ? "text-emerald-600" : "text-muted-foreground",
+                  )}>
+                    {monthlyValues.variance > 0 ? "+" : ""}{fmtBRL(monthlyValues.variance)}
+                  </td>
                   <td className="px-4 py-3 text-center">
                     <Badge variant={status === "divergent" ? "destructive" : status === "corresponds" ? "default" : "outline"}>
                       {status === "corresponds" ? "Corresponde" : status === "divergent" ? "Divergente" : "Sem vínculo"}
@@ -195,26 +230,29 @@ export default function FinCosts() {
           Custos Variáveis
         </h2>
         <div className="rounded-xl border border-border/50 overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
+          <table className="w-full min-w-[1260px] text-sm">
             <thead className="bg-muted/30 border-b border-border/50">
               <tr>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nome custo financeiro</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Custo vinculado</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Categoria</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Recorrência</th>
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Previsto</th>
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Realizado</th>
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Divergência</th>
                 <th className="text-center px-4 py-3 font-medium text-muted-foreground">Situação</th>
                 <th className="text-center px-4 py-3 font-medium text-muted-foreground">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/30">
               {isLoading || isLoadingTransactions ? (
-                <tr><td colSpan={7} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
+                <tr><td colSpan={9} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
               ) : costs.filter(c => c.type === "variable").length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-8 text-muted-foreground text-sm">Nenhum custo variável cadastrado</td></tr>
+                <tr><td colSpan={9} className="text-center py-8 text-muted-foreground text-sm">Nenhum custo variável cadastrado</td></tr>
               ) : costs.filter(c => c.type === "variable").map(c => {
                 const comparison = financialNamesByCost.get(c.id);
                 const status = getCostNameComparisonStatus(c.name || c.description || "", comparison);
+                const monthlyValues = getMonthlyCostValues(c.amount ?? c.value, comparison);
                 return <tr key={c.id} className="hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-3 text-xs max-w-[260px]" title={comparison?.names.join(", ") || ""}>
                     {comparison?.names.length ? `${comparison.names.slice(0, 3).join(", ")}${comparison.names.length > 3 ? ` +${comparison.names.length - 3}` : ""}` : "—"}
@@ -226,7 +264,14 @@ export default function FinCosts() {
                   <td className="px-4 py-3 text-xs">
                     <Badge variant="outline">{c.recurrence === "monthly" ? "Mensal" : c.recurrence === "weekly" ? "Semanal" : c.recurrence === "yearly" ? "Anual" : "Único"}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold text-amber-500">{fmtBRL(Number(c.amount ?? c.value ?? 0))}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-amber-500">{fmtBRL(monthlyValues.planned)}</td>
+                  <td className="px-4 py-3 text-right font-semibold">{fmtBRL(monthlyValues.actual)}</td>
+                  <td className={cn(
+                    "px-4 py-3 text-right font-semibold",
+                    monthlyValues.variance > 0 ? "text-red-600" : monthlyValues.variance < 0 ? "text-emerald-600" : "text-muted-foreground",
+                  )}>
+                    {monthlyValues.variance > 0 ? "+" : ""}{fmtBRL(monthlyValues.variance)}
+                  </td>
                   <td className="px-4 py-3 text-center">
                     <Badge variant={status === "divergent" ? "destructive" : status === "corresponds" ? "default" : "outline"}>
                       {status === "corresponds" ? "Corresponde" : status === "divergent" ? "Divergente" : "Sem vínculo"}

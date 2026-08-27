@@ -4,6 +4,7 @@ export type FinancialTransactionForCostComparison = {
   costId?: number | string | null;
   financialCostName?: string | null;
   amount?: number | string | null;
+  dueDate?: Date | string | number | null;
 };
 
 export type FinancialNamesByCost = {
@@ -27,6 +28,33 @@ export function buildFinancialNamesByCost(
     grouped.set(costId, current);
   }
   return grouped;
+}
+
+export function filterTransactionsByReferenceMonth(
+  transactions: FinancialTransactionForCostComparison[],
+  referenceMonth: string,
+): FinancialTransactionForCostComparison[] {
+  return transactions.filter(transaction => {
+    if (!transaction.dueDate) return false;
+    if (typeof transaction.dueDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(transaction.dueDate)) {
+      return transaction.dueDate.slice(0, 7) === referenceMonth;
+    }
+    const date = transaction.dueDate instanceof Date
+      ? transaction.dueDate
+      : new Date(transaction.dueDate);
+    if (Number.isNaN(date.getTime())) return false;
+    const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    return month === referenceMonth;
+  });
+}
+
+export function getMonthlyCostValues(
+  registeredAmount: number | string | null | undefined,
+  financialNames?: FinancialNamesByCost,
+) {
+  const planned = Number(registeredAmount ?? 0);
+  const actual = financialNames?.total ?? 0;
+  return { planned, actual, variance: actual - planned };
 }
 
 export type CostNameComparisonStatus = "corresponds" | "divergent" | "unlinked";
