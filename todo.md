@@ -74,3 +74,17 @@
 - [x] Comparativo preço de compra x preço de venda (margem de lucro por produto)
 - [x] Filtro por mês na aba Sorvetes para ver dados de meses específicos
 - [x] Corrigir erro "The service is no longer running" do Vite/esbuild e validar a abertura da prévia e da produção
+- [x] Recriar o banco MySQL vazio usando o schema atual do sistema, sem dados fictícios
+- [x] Validar existência das tabelas essenciais e persistência do usuário administrador
+- [x] Validar login OAuth ponta a ponta, sessão autenticada e acesso às rotas protegidas após a recriação do banco
+- [x] Validar via API autenticada os módulos principais com estados vazios seguros
+- [ ] Validar visualmente no frontend autenticado Dashboard, Compras, Produtos, Relatórios, Caixas e Forecast
+- [x] Registrar a ordem segura de reconfiguração e reimportação dos dados reais
+- [ ] Validar com arquivos e credenciais reais os fluxos INOVE, Forecast, notas/PDF e Rede
+- [x] Diagnosticar e corrigir o site publicado exibindo "This site is under maintenance"
+- [x] Confirmar configuração ativa e conectividade do conector INOVE no banco novo
+- [x] Sincronizar e persistir produtos e saldos de estoque reais do INOVE
+- [x] Sincronizar e persistir vendas, faturamento diário e caches reais do INOVE
+- [x] Validar no banco e nas APIs os volumes recuperados após a sincronização do INOVE
+- [x] Corrigir lançamento financeiro que envia costId como NaN e deve persistir NULL quando não houver custo selecionado
+- [x] Adicionar teste de regressão para campos numéricos opcionais no lançamento financeiro

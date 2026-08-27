@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { CheckCircle2, Edit2, Plus, Trash2, XCircle, FileSpreadsheet, Upload, CopyPlus, Square, CheckSquare, Download, Database, Loader2 } from "lucide-react";
 import { exportToExcel } from "@/lib/exportExcel";
 import { cn } from "@/lib/utils";
+import { toOptionalPositiveId } from "@shared/optional-id";
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
@@ -137,8 +138,8 @@ export default function FinPayables() {
         description: `Vendas INOVE ${yStr} — ${forma.forma}`,
         amount: Number(forma.valor),
         dueDate: new Date(yesterday.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }).split("/").reverse().join("-") + "T12:00:00"),
-        categoryId: inoveImportCategoryId !== "none" ? parseInt(inoveImportCategoryId) : undefined,
-        bankId: inoveImportBankId !== "none" ? parseInt(inoveImportBankId) : undefined,
+        categoryId: toOptionalPositiveId(inoveImportCategoryId),
+        bankId: toOptionalPositiveId(inoveImportBankId),
         isPaid: true,
         paymentDate: new Date(yesterday.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }).split("/").reverse().join("-") + "T12:00:00"),
         notes: `Importado automaticamente do PDV INOVE. ${forma.qtd} transações.`,
@@ -163,8 +164,8 @@ export default function FinPayables() {
       if (!base64) { toast.error("Erro ao ler arquivo"); return; }
       importMut.mutate({
         fileBase64: base64,
-        categoryId: importCategoryId !== "none" ? parseInt(importCategoryId) : undefined,
-        bankId: importBankId !== "none" ? parseInt(importBankId) : undefined,
+        categoryId: toOptionalPositiveId(importCategoryId),
+        bankId: toOptionalPositiveId(importBankId),
       });
     };
     reader.readAsDataURL(file);
@@ -202,9 +203,9 @@ export default function FinPayables() {
       description: form.description.trim(),
       amount: Number(form.amount),
       dueDate: dueDateObj,
-      categoryId: form.categoryId ? Number(form.categoryId) : undefined,
-      bankId: form.bankId ? Number(form.bankId) : undefined,
-      costId: form.costId ? Number(form.costId) : undefined,
+      categoryId: toOptionalPositiveId(form.categoryId),
+      bankId: toOptionalPositiveId(form.bankId),
+      costId: toOptionalPositiveId(form.costId),
       isPaid: form.isPaid,
       paymentDate: form.paymentDate ? new Date(form.paymentDate + "T12:00:00") : undefined,
       notes: form.notes || undefined,

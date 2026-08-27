@@ -67,6 +67,17 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { finDailyRevenue } from "../../drizzle/schema";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../db";
+import { toOptionalPositiveId } from "../../shared/optional-id";
+
+const optionalPositiveIdSchema = z.preprocess(
+  toOptionalPositiveId,
+  z.number().int().positive().optional(),
+).optional();
+
+const nullablePositiveIdSchema = z.preprocess(
+  (value) => value === null ? null : toOptionalPositiveId(value),
+  z.number().int().positive().nullable().optional(),
+).optional();
 
 export const finRouter = router({
   // ─── Dashboard ─────────────────────────────────────────────────────────────
@@ -274,10 +285,10 @@ export const finRouter = router({
         description: z.string().min(1),
         amount: z.number().min(0),
         dueDate: z.coerce.date(),
-        categoryId: z.number().optional(),
-        typeId: z.number().optional(),
-        costId: z.number().optional(),
-        bankId: z.number().optional(),
+        categoryId: optionalPositiveIdSchema,
+        typeId: optionalPositiveIdSchema,
+        costId: optionalPositiveIdSchema,
+        bankId: optionalPositiveIdSchema,
         isPaid: z.boolean().default(false),
         paymentDate: z.coerce.date().optional(),
         notes: z.string().optional(),
@@ -303,10 +314,10 @@ export const finRouter = router({
         description: z.string().optional(),
         amount: z.number().optional(),
         dueDate: z.coerce.date().optional(),
-        categoryId: z.number().nullable().optional(),
-        typeId: z.number().nullable().optional(),
-        costId: z.number().nullable().optional(),
-        bankId: z.number().nullable().optional(),
+        categoryId: nullablePositiveIdSchema,
+        typeId: nullablePositiveIdSchema,
+        costId: nullablePositiveIdSchema,
+        bankId: nullablePositiveIdSchema,
         isPaid: z.boolean().optional(),
         paymentDate: z.coerce.date().nullable().optional(),
         notes: z.string().nullable().optional(),
