@@ -101,3 +101,8 @@
 - [x] Auditar os lançamentos importados de setembro/2026 que ficaram sem custo, banco ou categoria
 - [x] Aplicar vínculos automáticos confiáveis de custo, banco e categoria sem alterar valor, vencimento ou status
 - [x] Atualizar o importador para preservar os mesmos vínculos em futuras importações
+- [x] Persistir no banco o nome original do campo Custo importado de Contas a Pagar
+- [x] Retroalimentar o nome financeiro original nos lançamentos existentes usando PagamentoDuo.xlsx
+- [x] Expor na Gestão de Custos o nome financeiro original e o custo cadastrado vinculado em colunas separadas
+- [x] Indicar correspondência, divergência ou ausência de vínculo comparando os dois nomes corretos
+- [x] Adicionar teste garantindo que a comparação usa o campo Custo original, não a descrição do lançamento

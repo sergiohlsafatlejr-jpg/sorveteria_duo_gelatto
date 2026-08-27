@@ -339,6 +339,7 @@ export const finTransactions = mysqlTable("fin_transactions", {
   typeId: int("typeId"),
   costId: int("costId"),
   bankId: int("bankId"),
+  financialCostName: varchar("financialCostName", { length: 255 }),
   description: varchar("description", { length: 500 }).notNull(),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   dueDate: timestamp("dueDate").notNull(),

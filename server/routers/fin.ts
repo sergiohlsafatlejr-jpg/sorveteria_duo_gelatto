@@ -443,6 +443,7 @@ export const finRouter = router({
               isPaid: parsed.isPaid,
               paymentDate: parsed.isPaid ? parsed.dueDate : undefined,
               costId: matchedCostId,
+              financialCostName: parsed.costReference,
               notes,
             });
           }

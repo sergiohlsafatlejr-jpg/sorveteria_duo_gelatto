@@ -1,4 +1,7 @@
 import { toOptionalPositiveId } from "../shared/optional-id";
+import { FINANCIAL_COST_LABEL_ALIASES, normalizeFinancialLabel } from "../shared/financial-labels";
+
+export { normalizeFinancialLabel } from "../shared/financial-labels";
 
 export type ParsedPayableRow = {
   description: string;
@@ -24,13 +27,6 @@ export type FinancialBankReference = {
   name: string;
 };
 
-const COST_LABEL_ALIASES: Record<string, string[]> = {
-  SORVETE: ["SORVETE", "SORVETES", "DUO GELATTO"],
-  GULOSEIMA: ["GULOSEIMA", "GULOSEIMAS"],
-  SEGURO: ["SEGURO", "SEGURO DA LOJA"],
-  "CUSTO PESSOAL": ["CUSTO PESSOAL", "PESSOAL", "SALARIOS"],
-};
-
 const CATEGORY_LABEL_ALIASES: Record<string, string[]> = {
   SORVETE: ["SORVETE", "SORVETES", "DUO GELATTO"],
   GULOSEIMA: ["GULOSEIMA", "GULOSEIMAS"],
@@ -39,22 +35,13 @@ const CATEGORY_LABEL_ALIASES: Record<string, string[]> = {
   SANEAGO: ["SANEAGO", "AGUA"],
 };
 
-export function normalizeFinancialLabel(value: unknown): string {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toUpperCase();
-}
-
 export function findFinancialCostId(
   reference: unknown,
   costs: FinancialCostReference[],
 ): number | undefined {
   const normalizedReference = normalizeFinancialLabel(reference);
   if (!normalizedReference) return undefined;
-  return findUniqueNamedId(normalizedReference, costs, COST_LABEL_ALIASES);
+  return findUniqueNamedId(normalizedReference, costs, FINANCIAL_COST_LABEL_ALIASES);
 }
 
 export function findFinancialCategoryId(

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Edit2, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { buildFinancialNamesByCost, getCostNameComparisonStatus } from "@/lib/cost-comparison";
 import { useForm } from "react-hook-form";
 
 const fmtBRL = (v: number) =>
@@ -32,6 +33,7 @@ export default function FinCosts() {
   const utils = trpc.useUtils();
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
   const { data: costs = [], isLoading } = trpc.fin.costs.list.useQuery();
+  const { data: transactions = [], isLoading: isLoadingTransactions } = trpc.fin.transactions.list.useQuery();
 
   const createMut = trpc.fin.costs.create.useMutation({
     onSuccess: () => { utils.fin.costs.list.invalidate(); toast.success("Custo criado!"); setModalOpen(false); },
@@ -81,6 +83,21 @@ export default function FinCosts() {
   const totalFixed = costs.filter(c => c.type === "fixed").reduce((s, c) => s + Number(c.amount ?? c.value ?? 0), 0);
   const totalVariable = costs.filter(c => c.type === "variable").reduce((s, c) => s + Number(c.amount ?? c.value ?? 0), 0);
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+  const financialNamesByCost = useMemo(() => buildFinancialNamesByCost(transactions), [transactions]);
+  const unlinkedFinancialCosts = useMemo(() => {
+    const grouped = new Map<string, { count: number; total: number }>();
+    for (const transaction of transactions) {
+      if (Number(transaction.costId) > 0) continue;
+      const name = String(transaction.financialCostName ?? "").trim();
+      if (!name) continue;
+      const current = grouped.get(name) ?? { count: 0, total: 0 };
+      current.count += 1;
+      current.total += Number(transaction.amount ?? 0);
+      grouped.set(name, current);
+    }
+    return Array.from(grouped, ([name, values]) => ({ name, ...values }))
+      .sort((a, b) => b.total - a.total);
+  }, [transactions]);
 
   return (
     <div className="p-6 space-y-5">
@@ -116,24 +133,31 @@ export default function FinCosts() {
           <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
           Custos Fixos
         </h2>
-        <div className="rounded-xl border border-border/50 overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-border/50 overflow-x-auto">
+          <table className="w-full min-w-[980px] text-sm">
             <thead className="bg-muted/30 border-b border-border/50">
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nome</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nome custo financeiro</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Custo vinculado</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Categoria</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Recorrência</th>
                 <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
+                <th className="text-center px-4 py-3 font-medium text-muted-foreground">Situação</th>
                 <th className="text-center px-4 py-3 font-medium text-muted-foreground">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/30">
-              {isLoading ? (
-                <tr><td colSpan={5} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
+              {isLoading || isLoadingTransactions ? (
+                <tr><td colSpan={7} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
               ) : costs.filter(c => c.type === "fixed").length === 0 ? (
-                <tr><td colSpan={5} className="text-center py-8 text-muted-foreground text-sm">Nenhum custo fixo cadastrado</td></tr>
-              ) : costs.filter(c => c.type === "fixed").map(c => (
-                <tr key={c.id} className="hover:bg-muted/20 transition-colors">
+                <tr><td colSpan={7} className="text-center py-8 text-muted-foreground text-sm">Nenhum custo fixo cadastrado</td></tr>
+              ) : costs.filter(c => c.type === "fixed").map(c => {
+                const comparison = financialNamesByCost.get(c.id);
+                const status = getCostNameComparisonStatus(c.name || c.description || "", comparison);
+                return <tr key={c.id} className="hover:bg-muted/20 transition-colors">
+                  <td className="px-4 py-3 text-xs max-w-[260px]" title={comparison?.names.join(", ") || ""}>
+                    {comparison?.names.length ? `${comparison.names.slice(0, 3).join(", ")}${comparison.names.length > 3 ? ` +${comparison.names.length - 3}` : ""}` : "—"}
+                  </td>
                   <td className="px-4 py-3 font-medium">{c.name || c.description}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {c.categoryId ? categoryMap.get(c.categoryId) : "—"}
@@ -142,6 +166,11 @@ export default function FinCosts() {
                     <Badge variant="outline">{c.recurrence === "monthly" ? "Mensal" : c.recurrence === "weekly" ? "Semanal" : c.recurrence === "yearly" ? "Anual" : "Único"}</Badge>
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-blue-500">{fmtBRL(Number(c.amount ?? c.value ?? 0))}</td>
+                  <td className="px-4 py-3 text-center">
+                    <Badge variant={status === "divergent" ? "destructive" : status === "corresponds" ? "default" : "outline"}>
+                      {status === "corresponds" ? "Corresponde" : status === "divergent" ? "Divergente" : "Sem vínculo"}
+                    </Badge>
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(c)}>
@@ -152,8 +181,8 @@ export default function FinCosts() {
                       </Button>
                     </div>
                   </td>
-                </tr>
-              ))}
+                </tr>;
+              })}
             </tbody>
           </table>
         </div>
@@ -165,24 +194,31 @@ export default function FinCosts() {
           <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
           Custos Variáveis
         </h2>
-        <div className="rounded-xl border border-border/50 overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-border/50 overflow-x-auto">
+          <table className="w-full min-w-[980px] text-sm">
             <thead className="bg-muted/30 border-b border-border/50">
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nome</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nome custo financeiro</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Custo vinculado</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Categoria</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Recorrência</th>
                 <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
+                <th className="text-center px-4 py-3 font-medium text-muted-foreground">Situação</th>
                 <th className="text-center px-4 py-3 font-medium text-muted-foreground">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/30">
-              {isLoading ? (
-                <tr><td colSpan={5} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
+              {isLoading || isLoadingTransactions ? (
+                <tr><td colSpan={7} className="px-4 py-3"><div className="h-4 bg-muted/30 rounded animate-pulse" /></td></tr>
               ) : costs.filter(c => c.type === "variable").length === 0 ? (
-                <tr><td colSpan={5} className="text-center py-8 text-muted-foreground text-sm">Nenhum custo variável cadastrado</td></tr>
-              ) : costs.filter(c => c.type === "variable").map(c => (
-                <tr key={c.id} className="hover:bg-muted/20 transition-colors">
+                <tr><td colSpan={7} className="text-center py-8 text-muted-foreground text-sm">Nenhum custo variável cadastrado</td></tr>
+              ) : costs.filter(c => c.type === "variable").map(c => {
+                const comparison = financialNamesByCost.get(c.id);
+                const status = getCostNameComparisonStatus(c.name || c.description || "", comparison);
+                return <tr key={c.id} className="hover:bg-muted/20 transition-colors">
+                  <td className="px-4 py-3 text-xs max-w-[260px]" title={comparison?.names.join(", ") || ""}>
+                    {comparison?.names.length ? `${comparison.names.slice(0, 3).join(", ")}${comparison.names.length > 3 ? ` +${comparison.names.length - 3}` : ""}` : "—"}
+                  </td>
                   <td className="px-4 py-3 font-medium">{c.name || c.description}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {c.categoryId ? categoryMap.get(c.categoryId) : "—"}
@@ -191,6 +227,11 @@ export default function FinCosts() {
                     <Badge variant="outline">{c.recurrence === "monthly" ? "Mensal" : c.recurrence === "weekly" ? "Semanal" : c.recurrence === "yearly" ? "Anual" : "Único"}</Badge>
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-amber-500">{fmtBRL(Number(c.amount ?? c.value ?? 0))}</td>
+                  <td className="px-4 py-3 text-center">
+                    <Badge variant={status === "divergent" ? "destructive" : status === "corresponds" ? "default" : "outline"}>
+                      {status === "corresponds" ? "Corresponde" : status === "divergent" ? "Divergente" : "Sem vínculo"}
+                    </Badge>
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(c)}>
@@ -201,12 +242,42 @@ export default function FinCosts() {
                       </Button>
                     </div>
                   </td>
-                </tr>
-              ))}
+                </tr>;
+              })}
             </tbody>
           </table>
         </div>
       </div>
+
+      {unlinkedFinancialCosts.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Nomes financeiros sem custo vinculado</h2>
+          <div className="rounded-xl border border-amber-500/30 overflow-x-auto">
+            <table className="w-full min-w-[620px] text-sm">
+              <thead className="bg-amber-500/10 border-b border-amber-500/20">
+                <tr>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nome custo financeiro</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Custo vinculado</th>
+                  <th className="text-right px-4 py-3 font-medium text-muted-foreground">Lançamentos</th>
+                  <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
+                  <th className="text-center px-4 py-3 font-medium text-muted-foreground">Situação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/30">
+                {unlinkedFinancialCosts.map(item => (
+                  <tr key={item.name}>
+                    <td className="px-4 py-3 font-medium">{item.name}</td>
+                    <td className="px-4 py-3 text-muted-foreground">—</td>
+                    <td className="px-4 py-3 text-right">{item.count}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{fmtBRL(item.total)}</td>
+                    <td className="px-4 py-3 text-center"><Badge variant="outline">Sem vínculo</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <Dialog open={modalOpen} onOpenChange={v => { setModalOpen(v); if (!v) setEditId(null); }}>
         <DialogContent className="max-w-md">

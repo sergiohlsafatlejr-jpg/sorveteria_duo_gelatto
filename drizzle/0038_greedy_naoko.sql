@@ -1,0 +1,1 @@
+ALTER TABLE `fin_transactions` ADD `financialCostName` varchar(255);
