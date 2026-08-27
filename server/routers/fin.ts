@@ -68,6 +68,11 @@ import { finDailyRevenue } from "../../drizzle/schema";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { toOptionalPositiveId } from "../../shared/optional-id";
+import {
+  findFinancialCostId,
+  normalizeFinancialLabel,
+  parsePayableSpreadsheetRow,
+} from "../finance-import";
 
 const optionalPositiveIdSchema = z.preprocess(
   toOptionalPositiveId,
@@ -373,8 +378,9 @@ export const finRouter = router({
     importExcel: protectedProcedure
       .input(z.object({
         fileBase64: z.string(), // arquivo Excel em base64
-        categoryId: z.number().optional(),
-        bankId: z.number().optional(),
+        categoryId: optionalPositiveIdSchema,
+        bankId: optionalPositiveIdSchema,
+        dryRun: z.boolean().default(false),
       }))
       .mutation(async ({ ctx, input }) => {
         const buffer = Buffer.from(input.fileBase64, "base64");
@@ -384,54 +390,65 @@ export const finRouter = router({
         const sheet = workbook.Sheets[sheetName];
         const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet!, { defval: "" });
 
-        // Mapeamento flexível de colunas (aceita português e inglês)
-        const parseRow = (row: Record<string, unknown>) => {
-          const get = (...keys: string[]) => {
-            for (const k of keys) {
-              const found = Object.keys(row).find(rk => rk.toLowerCase().replace(/[^a-z0-9]/g, "") === k.toLowerCase().replace(/[^a-z0-9]/g, ""));
-              if (found && row[found] !== undefined && row[found] !== "") return row[found];
-            }
-            return undefined;
-          };
-          const desc = String(get("descricao", "description", "nome", "name", "historico") ?? "").trim();
-          if (!desc) return null;
-          const rawAmount = get("valor", "amount", "value", "vlr", "vl");
-          const amount = rawAmount ? parseFloat(String(rawAmount).replace(/[^0-9.,]/g, "").replace(",", ".")) : 0;
-          const rawDate = get("vencimento", "duedate", "data", "date", "datadevencimento");
-          let dueDate: Date;
-          if (rawDate instanceof Date) {
-            dueDate = rawDate;
-          } else if (typeof rawDate === "number") {
-            dueDate = XLSX.SSF.parse_date_code(rawDate) ? new Date(rawDate) : new Date();
-          } else {
-            const parsed = rawDate ? new Date(String(rawDate)) : null;
-            dueDate = parsed && !isNaN(parsed.getTime()) ? parsed : new Date();
-          }
-          const rawPaid = get("pago", "paid", "status", "situacao");
-          const isPaid = rawPaid ? ["sim", "yes", "pago", "paid", "1", "true"].includes(String(rawPaid).toLowerCase().trim()) : false;
-          const rawCostId = get("custo", "costid", "cost");
-          const costId = rawCostId ? parseInt(String(rawCostId)) : undefined;
-          return { desc, amount, dueDate, isPaid, costId };
+        const parsedRows = rows
+          .map(parsePayableSpreadsheetRow)
+          .filter((row): row is NonNullable<typeof row> => row !== null);
+        const existingTransactions = parsedRows.length > 0
+          ? await getFinTransactions(ctx.user.id, {
+              dateFrom: new Date(Math.min(...parsedRows.map(row => row.dueDate.getTime()))),
+              dateTo: new Date(Math.max(...parsedRows.map(row => row.dueDate.getTime())) + 86_399_999),
+            })
+          : [];
+        const transactionKey = (description: string, amount: number | string, dueDate: Date) => {
+          const dateKey = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, "0")}-${String(dueDate.getDate()).padStart(2, "0")}`;
+          return `${normalizeFinancialLabel(description)}|${Number(amount).toFixed(2)}|${dateKey}`;
         };
-
+        const existingKeys = new Set(existingTransactions.map(row =>
+          transactionKey(row.description, row.amount, new Date(row.dueDate))
+        ));
+        const costs = await getFinCosts();
+        const unmatchedCosts = new Set<string>();
         let imported = 0;
         let skipped = 0;
-        for (const row of rows) {
-          const parsed = parseRow(row);
-          if (!parsed) { skipped++; continue; }
-          await createFinTransaction({
-            userId: ctx.user.id,
-            description: parsed.desc,
-            amount: String(parsed.amount),
-            dueDate: parsed.dueDate,
-            categoryId: input.categoryId,
-            bankId: input.bankId,
-            isPaid: parsed.isPaid,
-            costId: parsed.costId ?? undefined,
-          });
+        let duplicates = 0;
+        for (const parsed of parsedRows) {
+          const key = transactionKey(parsed.description, parsed.amount, parsed.dueDate);
+          if (existingKeys.has(key)) {
+            duplicates++;
+            continue;
+          }
+          const matchedCostId = parsed.costIdCandidate
+            ?? findFinancialCostId(parsed.costReference, costs);
+          if (parsed.costReference && !matchedCostId) unmatchedCosts.add(parsed.costReference);
+          const notes = parsed.costReference && !matchedCostId
+            ? `Custo informado na planilha: ${parsed.costReference}`
+            : undefined;
+          if (!input.dryRun) {
+            await createFinTransaction({
+              userId: ctx.user.id,
+              description: parsed.description,
+              amount: String(parsed.amount),
+              dueDate: parsed.dueDate,
+              categoryId: input.categoryId,
+              bankId: input.bankId,
+              isPaid: parsed.isPaid,
+              paymentDate: parsed.isPaid ? parsed.dueDate : undefined,
+              costId: matchedCostId,
+              notes,
+            });
+          }
+          existingKeys.add(key);
           imported++;
         }
-        return { imported, skipped, total: rows.length };
+        skipped += rows.length - parsedRows.length;
+        return {
+          imported,
+          skipped,
+          duplicates,
+          total: rows.length,
+          dryRun: input.dryRun,
+          unmatchedCosts: Array.from(unmatchedCosts).sort(),
+        };
       }),
   }),
   // ─── Receivables (Contas a Receber)) ────────────────────────────────────────

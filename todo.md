@@ -80,7 +80,9 @@
 - [x] Validar via API autenticada os módulos principais com estados vazios seguros
 - [ ] Validar visualmente no frontend autenticado Dashboard, Compras, Produtos, Relatórios, Caixas e Forecast
 - [x] Registrar a ordem segura de reconfiguração e reimportação dos dados reais
-- [ ] Validar com arquivos e credenciais reais os fluxos INOVE, Forecast, notas/PDF e Rede
+- [x] Validar com credenciais reais os fluxos INOVE e Forecast após a sincronização
+- [ ] Validar importação de notas/PDF com um arquivo fiscal real do usuário
+- [ ] Validar importação e conciliação Rede com um arquivo Excel real do usuário
 - [x] Diagnosticar e corrigir o site publicado exibindo "This site is under maintenance"
 - [x] Confirmar configuração ativa e conectividade do conector INOVE no banco novo
 - [x] Sincronizar e persistir produtos e saldos de estoque reais do INOVE
@@ -88,3 +90,11 @@
 - [x] Validar no banco e nas APIs os volumes recuperados após a sincronização do INOVE
 - [x] Corrigir lançamento financeiro que envia costId como NaN e deve persistir NULL quando não houver custo selecionado
 - [x] Adicionar teste de regressão para campos numéricos opcionais no lançamento financeiro
+- [x] Sanitizar categoryId, typeId, costId e bankId diretamente em createFinTransaction e updateFinTransaction
+- [x] Adicionar teste persistente da camada db.fin para impedir NaN de qualquer chamador
+- [ ] Confirmar em produção que o lançamento DUO GELATTO não gera mais erro de SQL
+- [x] Inspecionar o arquivo real PagamentoDuo.xlsx e confirmar seu destino em Contas a Pagar sem importar
+- [ ] Validar duplicidades e importar PagamentoDuo.xlsx somente após confirmar o mapeamento das colunas
+- [x] Confirmar cobertura parcial dos custos cadastrados: 9 rótulos vinculados e 10 preservados nas observações
+- [x] Validar o importador completo em dry-run sem persistir registros de teste
+- [ ] Salvar checkpoint e liberar a versão corrigida para publicação antes da importação real

@@ -39,6 +39,21 @@ import {
   sales,
 } from "../drizzle/schema";
 import { getDb } from "./db";
+import { toOptionalPositiveId } from "../shared/optional-id";
+
+const FIN_TRANSACTION_ID_FIELDS = ["categoryId", "typeId", "costId", "bankId"] as const;
+
+function sanitizeFinTransactionIds<T extends Partial<InsertFinTransaction>>(data: T): T {
+  const sanitized = { ...data } as T & Record<string, unknown>;
+
+  for (const field of FIN_TRANSACTION_ID_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(sanitized, field)) continue;
+    if (sanitized[field] === null) continue;
+    sanitized[field] = toOptionalPositiveId(sanitized[field]) ?? null;
+  }
+
+  return sanitized;
+}
 
 // ─── Fin Categories ───────────────────────────────────────────────────────────
 export async function getFinCategories(): Promise<FinCategory[]> {
@@ -165,7 +180,7 @@ export async function getFinTransactions(_userId: number, filters?: {
 export async function createFinTransaction(data: InsertFinTransaction): Promise<FinTransaction | null> {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.insert(finTransactions).values(data);
+  const result = await db.insert(finTransactions).values(sanitizeFinTransactionIds(data));
   const insertId = (result as unknown as { insertId: number }[])[0]?.insertId;
   if (!insertId) return null;
   const rows = await db.select().from(finTransactions).where(eq(finTransactions.id, insertId)).limit(1);
@@ -174,7 +189,7 @@ export async function createFinTransaction(data: InsertFinTransaction): Promise<
 export async function updateFinTransaction(id: number, userId: number, data: Partial<InsertFinTransaction>): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.update(finTransactions).set({ ...data, updatedAt: new Date() }).where(and(eq(finTransactions.id, id), eq(finTransactions.userId, userId)));
+  await db.update(finTransactions).set({ ...sanitizeFinTransactionIds(data), updatedAt: new Date() }).where(and(eq(finTransactions.id, id), eq(finTransactions.userId, userId)));
 }
 export async function deleteFinTransaction(id: number, userId: number): Promise<void> {
   const db = await getDb();
