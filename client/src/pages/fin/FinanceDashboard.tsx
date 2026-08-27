@@ -17,6 +17,11 @@ const fmtBRL = (v: number) =>
 
 export default function FinanceDashboard() {
   const { data: kpis, isLoading } = trpc.fin.dashboard.useQuery();
+  const {
+    data: next7Forecast,
+    isLoading: isLoadingNext7Forecast,
+    isError: isNext7ForecastError,
+  } = trpc.fin.forecastCalendar.getNext7DaysForecast.useQuery();
   const { data: categories = [] } = trpc.fin.categories.list.useQuery();
   const { data: transactions = [] } = trpc.fin.transactions.list.useQuery();
   const { data: rainAlerts = [] } = trpc.fin.forecastCalendar.getRainAlert.useQuery();
@@ -92,9 +97,9 @@ export default function FinanceDashboard() {
           bgColor="bg-emerald-500/10"
         />
         <FinKPICard
-          title="A Receber"
-          value={fmtBRL(kpis?.totalReceivable ?? 0)}
-          subtitle="Em aberto"
+          title="A Receber — Próx. 7 Dias"
+          value={isLoadingNext7Forecast ? "Calculando..." : isNext7ForecastError ? "Indisponível" : fmtBRL(next7Forecast?.totalProjected ?? 0)}
+          subtitle={isNext7ForecastError ? "Não foi possível calcular o Forecast" : "Previsão da tela Forecast"}
           icon={ArrowDownCircle}
           iconColor="text-blue-500"
           bgColor="bg-blue-500/10"

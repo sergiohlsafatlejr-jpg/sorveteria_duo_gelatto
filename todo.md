@@ -78,10 +78,11 @@
 - [x] Validar existência das tabelas essenciais e persistência do usuário administrador
 - [x] Validar login OAuth ponta a ponta, sessão autenticada e acesso às rotas protegidas após a recriação do banco
 - [x] Validar via API autenticada os módulos principais com estados vazios seguros
-- [ ] Validar visualmente no frontend autenticado Dashboard, Compras, Produtos, Relatórios, Caixas e Forecast
+- [x] Validar visualmente no frontend autenticado Dashboard, Compras, Produtos, Relatórios, Caixas e Forecast
 - [x] Registrar a ordem segura de reconfiguração e reimportação dos dados reais
 - [x] Validar com credenciais reais os fluxos INOVE e Forecast após a sincronização
 - [ ] Validar importação de notas/PDF com um arquivo fiscal real do usuário
+- [ ] Confirmar no banco os registros da nota PDF real importada, sem duplicidades, erros ou placeholders
 - [ ] Validar importação e conciliação Rede com um arquivo Excel real do usuário
 - [x] Diagnosticar e corrigir o site publicado exibindo "This site is under maintenance"
 - [x] Confirmar configuração ativa e conectividade do conector INOVE no banco novo
@@ -106,3 +107,7 @@
 - [x] Expor na Gestão de Custos o nome financeiro original e o custo cadastrado vinculado em colunas separadas
 - [x] Indicar correspondência, divergência ou ausência de vínculo comparando os dois nomes corretos
 - [x] Adicionar teste garantindo que a comparação usa o campo Custo original, não a descrição do lançamento
+- [x] Alterar o KPI A Receber para mostrar a previsão de faturamento dos próximos sete dias
+- [x] Reutilizar no Dashboard Financeiro a mesma fonte de dados e regras da tela Forecast
+- [x] Manter separado o KPI Próx. 7 Dias de contas a pagar para não misturar entradas e despesas
+- [x] Adicionar teste que confirme o valor dos próximos sete dias no Dashboard e no Forecast
