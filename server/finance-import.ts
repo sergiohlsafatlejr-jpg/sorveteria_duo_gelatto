@@ -14,11 +14,29 @@ export type FinancialCostReference = {
   name: string;
 };
 
+export type FinancialCategoryReference = {
+  id: number;
+  name: string;
+};
+
+export type FinancialBankReference = {
+  id: number;
+  name: string;
+};
+
 const COST_LABEL_ALIASES: Record<string, string[]> = {
   SORVETE: ["SORVETE", "SORVETES", "DUO GELATTO"],
   GULOSEIMA: ["GULOSEIMA", "GULOSEIMAS"],
   SEGURO: ["SEGURO", "SEGURO DA LOJA"],
-  "CUSTO PESSOAL": ["CUSTO PESSOAL", "PESSOAL"],
+  "CUSTO PESSOAL": ["CUSTO PESSOAL", "PESSOAL", "SALARIOS"],
+};
+
+const CATEGORY_LABEL_ALIASES: Record<string, string[]> = {
+  SORVETE: ["SORVETE", "SORVETES", "DUO GELATTO"],
+  GULOSEIMA: ["GULOSEIMA", "GULOSEIMAS"],
+  SEGURO: ["SEGURO", "SEGURO LOJA", "SEGURO DA LOJA"],
+  "CUSTO PESSOAL": ["CUSTO PESSOAL", "PESSOAL", "SALARIOS"],
+  SANEAGO: ["SANEAGO", "AGUA"],
 };
 
 export function normalizeFinancialLabel(value: unknown): string {
@@ -36,13 +54,37 @@ export function findFinancialCostId(
 ): number | undefined {
   const normalizedReference = normalizeFinancialLabel(reference);
   if (!normalizedReference) return undefined;
+  return findUniqueNamedId(normalizedReference, costs, COST_LABEL_ALIASES);
+}
 
-  const direct = costs.find(cost => normalizeFinancialLabel(cost.name) === normalizedReference);
-  if (direct) return toOptionalPositiveId(direct.id);
+export function findFinancialCategoryId(
+  reference: unknown,
+  categories: FinancialCategoryReference[],
+): number | undefined {
+  const normalizedReference = normalizeFinancialLabel(reference);
+  if (!normalizedReference) return undefined;
+  return findUniqueNamedId(normalizedReference, categories, CATEGORY_LABEL_ALIASES);
+}
 
-  const aliases = COST_LABEL_ALIASES[normalizedReference] ?? [normalizedReference];
-  const matched = costs.find(cost => aliases.includes(normalizeFinancialLabel(cost.name)));
-  return matched ? toOptionalPositiveId(matched.id) : undefined;
+function findUniqueNamedId(
+  normalizedReference: string,
+  items: Array<{ id: number; name: string }>,
+  aliasGroups: Record<string, string[]>,
+): number | undefined {
+  const group = Object.entries(aliasGroups).find(([canonical, aliases]) =>
+    [canonical, ...aliases].includes(normalizedReference)
+  );
+  const acceptedNames = group
+    ? new Set([group[0], ...group[1]].map(normalizeFinancialLabel))
+    : new Set([normalizedReference]);
+  const matches = items.filter(item => acceptedNames.has(normalizeFinancialLabel(item.name)));
+  return matches.length === 1 ? toOptionalPositiveId(matches[0]?.id) : undefined;
+}
+
+export function findDefaultFinancialBankId(
+  banks: FinancialBankReference[],
+): number | undefined {
+  return banks.length === 1 ? toOptionalPositiveId(banks[0]?.id) : undefined;
 }
 
 function normalizeHeader(value: string): string {

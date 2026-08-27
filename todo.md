@@ -92,9 +92,12 @@
 - [x] Adicionar teste de regressão para campos numéricos opcionais no lançamento financeiro
 - [x] Sanitizar categoryId, typeId, costId e bankId diretamente em createFinTransaction e updateFinTransaction
 - [x] Adicionar teste persistente da camada db.fin para impedir NaN de qualquer chamador
-- [ ] Confirmar em produção que o lançamento DUO GELATTO não gera mais erro de SQL
+- [x] Confirmar em produção que o lançamento DUO GELATTO não gera mais erro de SQL
 - [x] Inspecionar o arquivo real PagamentoDuo.xlsx e confirmar seu destino em Contas a Pagar sem importar
-- [ ] Validar duplicidades e importar PagamentoDuo.xlsx somente após confirmar o mapeamento das colunas
+- [x] Validar duplicidades e importar PagamentoDuo.xlsx somente após confirmar o mapeamento das colunas
 - [x] Confirmar cobertura parcial dos custos cadastrados: 9 rótulos vinculados e 10 preservados nas observações
 - [x] Validar o importador completo em dry-run sem persistir registros de teste
-- [ ] Salvar checkpoint e liberar a versão corrigida para publicação antes da importação real
+- [x] Salvar checkpoint e liberar a versão corrigida para publicação antes da importação real
+- [x] Auditar os lançamentos importados de setembro/2026 que ficaram sem custo, banco ou categoria
+- [x] Aplicar vínculos automáticos confiáveis de custo, banco e categoria sem alterar valor, vencimento ou status
+- [x] Atualizar o importador para preservar os mesmos vínculos em futuras importações

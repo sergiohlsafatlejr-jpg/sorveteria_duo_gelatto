@@ -69,6 +69,8 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { toOptionalPositiveId } from "../../shared/optional-id";
 import {
+  findDefaultFinancialBankId,
+  findFinancialCategoryId,
   findFinancialCostId,
   normalizeFinancialLabel,
   parsePayableSpreadsheetRow,
@@ -407,7 +409,11 @@ export const finRouter = router({
           transactionKey(row.description, row.amount, new Date(row.dueDate))
         ));
         const costs = await getFinCosts();
+        const categories = await getFinCategories();
+        const banks = await getFinBanks();
+        const defaultBankId = input.bankId ?? findDefaultFinancialBankId(banks);
         const unmatchedCosts = new Set<string>();
+        const unmatchedCategories = new Set<string>();
         let imported = 0;
         let skipped = 0;
         let duplicates = 0;
@@ -419,7 +425,10 @@ export const finRouter = router({
           }
           const matchedCostId = parsed.costIdCandidate
             ?? findFinancialCostId(parsed.costReference, costs);
+          const matchedCategoryId = input.categoryId
+            ?? findFinancialCategoryId(parsed.costReference, categories);
           if (parsed.costReference && !matchedCostId) unmatchedCosts.add(parsed.costReference);
+          if (parsed.costReference && !matchedCategoryId) unmatchedCategories.add(parsed.costReference);
           const notes = parsed.costReference && !matchedCostId
             ? `Custo informado na planilha: ${parsed.costReference}`
             : undefined;
@@ -429,8 +438,8 @@ export const finRouter = router({
               description: parsed.description,
               amount: String(parsed.amount),
               dueDate: parsed.dueDate,
-              categoryId: input.categoryId,
-              bankId: input.bankId,
+              categoryId: matchedCategoryId,
+              bankId: defaultBankId,
               isPaid: parsed.isPaid,
               paymentDate: parsed.isPaid ? parsed.dueDate : undefined,
               costId: matchedCostId,
@@ -448,6 +457,8 @@ export const finRouter = router({
           total: rows.length,
           dryRun: input.dryRun,
           unmatchedCosts: Array.from(unmatchedCosts).sort(),
+          unmatchedCategories: Array.from(unmatchedCategories).sort(),
+          defaultBankId,
         };
       }),
   }),

@@ -29,3 +29,23 @@ Antes da importação, o parser deve reconhecer valores como `R$ 2,430.86` como 
 O dry-run reconheceu nove rótulos por nome ou alias: `SORVETE`, `GULOSEIMA`, `ENERGIA`, `EMPRESTIMOS`, `COPOS`, `SEGURO`, `CONTABILIDADE`, `ALUGUEL` e `CUSTO PESSOAL`. Dez rótulos ainda não têm custo correspondente: `CARTAO DE CREDITO`, `CONSTRUCAO`, `FRUTAS`, `IMPOSTOS`, `INTERNET`, `LIMPEZA`, `MARKETING`, `SANEAGO`, `SEGURANCA` e `SISTEMA`. Esses lançamentos são importados com `costId = NULL` e o rótulo original preservado nas observações.
 
 O importador completo foi executado em modo `dryRun`: 61 linhas válidas, zero ignoradas, zero duplicidades e nenhuma alteração na quantidade de transações do banco.
+
+## Resultado da importação e correção de setembro
+
+A importação real persistiu 61 lançamentos e não criou duplicidades exatas por descrição, valor e vencimento. O lançamento `DUO GELATTO` de R$ 2.430,86 foi gravado corretamente com custo Duo Gelatto, categoria Sorvetes e banco Itaú, confirmando que o erro `costId = NaN` foi eliminado.
+
+| Validação de setembro de 2026 | Resultado |
+| --- | ---: |
+| Lançamentos | 46 |
+| Valor total atualmente persistido | R$ 134.195,46 |
+| Com banco Itaú | 46 |
+| Com categoria vinculada | 39 |
+| Com custo vinculado | 38 |
+| Sem categoria correspondente | 7 |
+| Sem custo cadastrado | 8 |
+
+Os custos ainda não cadastrados são `CONSTRUCAO`, `LIMPEZA` (três lançamentos), `MARKETING`, `SANEAGO`, `SEGURANCA` e `SISTEMA`. As categorias ainda sem correspondência segura são `CONSTRUCAO`, `LIMPEZA`, `SEGURANCA`, `SISTEMA` e um lançamento de `INTERNET`, pois existem duas categorias com esse mesmo nome. Esses registros foram preservados sem associação forçada.
+
+Todos os 46 lançamentos de setembro receberam automaticamente o único banco cadastrado, **Itaú**. Os custos e categorias foram associados por nome ou alias somente quando havia uma correspondência única. O importador futuro repete essa regra e não escolhe automaticamente quando existem dois cadastros com o mesmo nome.
+
+A reconciliação linha a linha encontrou uma divergência: o arquivo contém `INOVE` em 01/09/2026 por **R$ 287,56**, enquanto o banco possui **R$ 371,56**, diferença de **R$ 84,00**. O valor persistido não foi alterado, pois a solicitação atual autorizou somente vínculos de custo, banco e categoria.

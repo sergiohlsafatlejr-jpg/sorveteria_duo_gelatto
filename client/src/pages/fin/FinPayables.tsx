@@ -151,7 +151,18 @@ export default function FinPayables() {
   };
 
   const importMut = trpc.fin.transactions.importExcel.useMutation({
-    onSuccess: (r) => { utils.fin.transactions.list.invalidate(); toast.success(`Importados: ${r.imported} registros (${r.skipped} ignorados)`); setShowImport(false); },
+    onSuccess: (r) => {
+      utils.fin.transactions.list.invalidate();
+      toast.success(`Importados: ${r.imported} • duplicados: ${r.duplicates} • ignorados: ${r.skipped}`);
+      const pending = [
+        r.unmatchedCosts.length > 0 ? `${r.unmatchedCosts.length} custo(s) sem cadastro` : null,
+        r.unmatchedCategories.length > 0 ? `${r.unmatchedCategories.length} categoria(s) sem correspondência` : null,
+      ].filter(Boolean);
+      if (pending.length > 0) {
+        toast.warning(`Importação concluída. Revisar: ${pending.join(" e ")}.`, { duration: 8_000 });
+      }
+      setShowImport(false);
+    },
     onError: (e) => toast.error(e.message),
   });
 
