@@ -27,6 +27,7 @@ import {
   purchaseProductConfig,
   finDailyRevenue,
   inoveSalesCache,
+  productGoals,
 } from "../../drizzle/schema";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 import crypto from "crypto";
@@ -40,6 +41,11 @@ import {
   parseCachedProducts,
   subtractIsoDays,
 } from "../inove-dashboard-fallback";
+import {
+  calculateProductGoalProgress,
+  normalizeEpochTimestamp,
+  type ProductSale,
+} from "../product-goal-progress";
 
 async function getCachedDailyRevenue(dateFrom?: string) {
   const db = await getDb();
@@ -58,6 +64,101 @@ async function getCachedMonthlyProducts(limit: number) {
   const rows = await db.select().from(inoveSalesCache)
     .where(eq(inoveSalesCache.cacheKey, monthKey)).limit(1);
   return rows.length > 0 ? parseCachedProducts(rows[0].data, limit) : [];
+}
+
+type MonthlyProductSnapshot = {
+  products: ProductSale[];
+  source: "live" | "cache";
+  updatedAt: string | null;
+  isPartial: boolean;
+};
+
+async function getCachedMonthlyProductSnapshot(monthKey: string, limit: number): Promise<MonthlyProductSnapshot> {
+  const db = await getDb();
+  if (!db) return { products: [], source: "cache", updatedAt: null, isPartial: true };
+  const rows = await db.select().from(inoveSalesCache)
+    .where(eq(inoveSalesCache.cacheKey, monthKey)).limit(1);
+  if (rows.length === 0) return { products: [], source: "cache", updatedAt: null, isPartial: true };
+
+  let isPartial = true;
+  try {
+    const parsed = JSON.parse(rows[0].data) as { products?: unknown[] };
+    isPartial = !Array.isArray(parsed.products);
+  } catch {
+    isPartial = true;
+  }
+
+  return {
+    products: parseCachedProducts(rows[0].data, limit),
+    source: "cache",
+    updatedAt: normalizeEpochTimestamp(rows[0].updatedAt),
+    isPartial,
+  };
+}
+
+async function getMonthlyProductSnapshot(monthKey: string, limit: number): Promise<MonthlyProductSnapshot> {
+  const db = await getDb();
+  if (!db) return { products: [], source: "cache", updatedAt: null, isPartial: true };
+  const configRows = await db.select().from(inoveConnectorConfig).limit(1);
+  if (configRows.length === 0 || !configRows[0].active) {
+    return getCachedMonthlyProductSnapshot(monthKey, limit);
+  }
+
+  const [year, month] = monthKey.split("-").map(Number);
+  let pool: MssqlPool | null = null;
+  try {
+    pool = await createInovePool(configRows[0]);
+    const result = await pool.request().query(`
+      SELECT
+        p.PRODUTO AS produtoId,
+        ISNULL(p.PRO_NOME, 'Produto s/nome') AS nome,
+        p.PRO_CODIGO AS codPdv,
+        CAST(SUM(iv.ITE_QUANTIDADE) AS float) AS qtd,
+        CAST(SUM(iv.ITE_VALOR * iv.ITE_QUANTIDADE) AS float) AS total
+      FROM ITENS_VENDAS iv
+      JOIN VENDAS v ON v.VENDA = iv.VENDA
+      JOIN PRODUTOS p ON p.PRODUTO = iv.PRODUTO
+      WHERE v.VEN_SITUACAO = 2
+        AND YEAR(v.VEN_DATA_FIM) = ${year}
+        AND MONTH(v.VEN_DATA_FIM) = ${month}
+      GROUP BY p.PRODUTO, p.PRO_NOME, p.PRO_CODIGO
+      ORDER BY total DESC
+    `);
+    await pool.close();
+    pool = null;
+
+    const products = (result.recordset as Array<Record<string, unknown>>).map((row) => ({
+      produtoId: Number(row.produtoId),
+      codPdv: row.codPdv === null || row.codPdv === undefined ? null : String(row.codPdv),
+      nome: String(row.nome ?? "Produto sem nome"),
+      qtd: Number(row.qtd ?? 0),
+      total: Number(row.total ?? 0),
+    }));
+    const updatedAtSeconds = Math.floor(Date.now() / 1000);
+    const cacheData = JSON.stringify({
+      month: monthKey,
+      top10: products.slice(0, 10).map((product) => ({ ...product, faturamento: product.total })),
+      products: products.map((product) => ({ ...product, faturamento: product.total })),
+      totalFaturamento: products.reduce((sum, product) => sum + product.total, 0),
+      totalQtd: products.reduce((sum, product) => sum + product.qtd, 0),
+      totalProdutos: products.length,
+    });
+
+    await db.insert(inoveSalesCache)
+      .values({ cacheKey: monthKey, data: cacheData, updatedAt: updatedAtSeconds })
+      .onDuplicateKeyUpdate({ set: { data: cacheData, updatedAt: updatedAtSeconds } });
+
+    return {
+      products: products.slice(0, limit),
+      source: "live",
+      updatedAt: new Date(updatedAtSeconds * 1000).toISOString(),
+      isPartial: false,
+    };
+  } catch (error) {
+    if (pool) await pool.close().catch(() => {});
+    console.error("[getMonthlyProductSnapshot] Erro ao consultar INOVE:", error);
+    return getCachedMonthlyProductSnapshot(monthKey, limit);
+  }
 }
 
 // ── Tipos do SQL Server ───────────────────────────────────────────────────────
@@ -546,10 +647,8 @@ export const inoveRouter = router({
       if (!db) throw new Error("DB unavailable");
       const rows = await db.select().from(inoveConnectorConfig).limit(1);
       const dateFrom = subtractIsoDays(getSaoPauloDate(), input.days);
-      const cachedRows = await getCachedDailyRevenue(dateFrom);
-      if (cachedRows.length > 0) return buildCachedSalesByDay(cachedRows, dateFrom);
       if (rows.length === 0 || !rows[0].active) {
-        return [];
+        return buildCachedSalesByDay(await getCachedDailyRevenue(dateFrom), dateFrom);
       }
       const config = rows[0];
       try {
@@ -572,6 +671,28 @@ export const inoveRouter = router({
       }
     }),
 
+  // ── Metas de Produtos com realizado mensal exato ─────────────────────────
+  getProductGoalsProgress: protectedProcedure
+    .input(z.object({
+      month: z.string().regex(/^\d{4}-\d{2}$/),
+      includeInactive: z.boolean().default(false),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const goals = await db.select().from(productGoals)
+        .where(input.includeInactive
+          ? eq(productGoals.month, input.month)
+          : and(eq(productGoals.month, input.month), eq(productGoals.active, true)))
+        .orderBy(desc(productGoals.createdAt));
+      const snapshot = await getMonthlyProductSnapshot(input.month, 500);
+
+      return {
+        ...snapshot,
+        goals: goals.map((goal) => calculateProductGoalProgress(goal, snapshot.products)),
+      };
+    }),
+
   // ── Top Produtos Mais Vendidos ────────────────────────────────────────────
   getTopProducts: protectedProcedure
     .input(z.object({ days: z.number().int().min(1).max(365).default(30), limit: z.number().int().min(1).max(200).default(10) }))
@@ -579,9 +700,7 @@ export const inoveRouter = router({
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
       const rows = await db.select().from(inoveConnectorConfig).limit(1);
-      const cachedProducts = await getCachedMonthlyProducts(input.limit);
-      if (cachedProducts.length > 0) return cachedProducts;
-      if (rows.length === 0 || !rows[0].active) return [];
+      if (rows.length === 0 || !rows[0].active) return getCachedMonthlyProducts(input.limit);
       const config = rows[0];
       try {
         const pool = await createInovePool(config);
@@ -610,10 +729,8 @@ export const inoveRouter = router({
     const db = await getDb();
     if (!db) throw new Error("DB unavailable");
     const rows = await db.select().from(inoveConnectorConfig).limit(1);
-    const cachedRevenue = await getCachedDailyRevenue();
-    if (cachedRevenue.length > 0) return buildCachedKpis(cachedRevenue);
     if (rows.length === 0 || !rows[0].active) {
-      return buildCachedKpis([]);
+      return buildCachedKpis(await getCachedDailyRevenue());
     }
     const config = rows[0];
     try {

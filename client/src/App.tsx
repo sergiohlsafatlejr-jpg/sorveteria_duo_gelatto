@@ -1,75 +1,76 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
+import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
-import Customers from "./pages/Customers";
-import Points from "./pages/Points";
-import PointsRules from "./pages/PointsRules";
-import Products from "./pages/Products";
-import NfeImport from "./pages/NfeImport";
-import Sales from "./pages/Sales";
-import Finance from "./pages/Finance";
-import Users from "./pages/Users";
-import Connector from "./pages/Connector";
-import Notifications from "./pages/Notifications";
-import Dashboard from "./pages/Dashboard";
-import Reports from "./pages/Reports";
-import GerencialReports from "./pages/GerencialReports";
-// Finance module pages
-import FinanceDashboard from "./pages/fin/FinanceDashboard";
-import FinPayables from "./pages/fin/FinPayables";
-import FinWeekdayReport from "./pages/fin/FinWeekdayReport";
-import FinReceivables from "./pages/fin/FinReceivables";
-import FinBankStatements from "./pages/fin/FinBankStatements";
-import FinCosts from "./pages/fin/FinCosts";
-import FinDRE from "./pages/fin/FinDRE";
-import FinOtimizacao from "./pages/fin/FinOtimizacao";
-import FinRevenueForecast from "./pages/fin/FinRevenueForecast";
-import FinProductGoals from "./pages/fin/FinProductGoals";
-import FinGoals from "./pages/fin/FinGoals";
-import FinSettings from "./pages/fin/FinSettings";
-import FinCategories from "./pages/fin/FinCategories";
-import FinBanks from "./pages/fin/FinBanks";
-import FinCostsRegister from "./pages/fin/FinCostsRegister";
-import FinCashflow from "./pages/fin/FinCashflow";
-import FinMonthlyComparison from "./pages/fin/FinMonthlyComparison";
-import FinBankReconciliation from "./pages/fin/FinBankReconciliation";
-import WhatsApp from "./pages/WhatsApp";
-import InstagramPage from "./pages/Instagram";
-import ProductsRegister from "./pages/ProductsRegister";
-import PurchaseSuggestion from "./pages/PurchaseSuggestion";
-import SmartPurchasePlanner from "./pages/SmartPurchasePlanner";
-import SalesImport from "./pages/SalesImport";
-import ProductMapping from "./pages/ProductMapping";
-import SalesReport from "./pages/SalesReport";
-import SalesAverage from "./pages/SalesAverage";
-import Unauthorized from "./pages/Unauthorized";
-import MetaAds from "./pages/MetaAds";
-import AdLibrary from "./pages/AdLibrary";
-import GiroEstoque from "./pages/GiroEstoque";
-import InoveConnector from "./pages/InoveConnector";
-import CronJobs from "./pages/CronJobs";
-import InoveReports from "./pages/InoveReports";
-import InoveProductSales from "./pages/InoveProductSales";
-import InoveCostMargin from "./pages/InoveCostMargin";
-import InoveManagerial from "./pages/InoveManagerial";
-import PublicLoyalty from "./pages/PublicLoyalty";
-import Purchases from "./pages/Purchases";
-import PurchaseInvoices from "./pages/PurchaseInvoices";
-import PurchaseItems from "./pages/PurchaseItems";
-import PurchaseDashboard from "./pages/PurchaseDashboard";
-// Novos relatórios consolidados
-import ReportSales from "./pages/reports/ReportSales";
-import ReportCMV from "./pages/reports/ReportCMV";
-import ReportManagerial from "./pages/reports/ReportManagerial";
-import BoxesControl from "./pages/stock/BoxesControl";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+
+const NotFound = lazy(() => import("@/pages/NotFound"));
+const Home = lazy(() => import("./pages/Home"));
+const Customers = lazy(() => import("./pages/Customers"));
+const Points = lazy(() => import("./pages/Points"));
+const PointsRules = lazy(() => import("./pages/PointsRules"));
+const Products = lazy(() => import("./pages/Products"));
+const NfeImport = lazy(() => import("./pages/NfeImport"));
+const Sales = lazy(() => import("./pages/Sales"));
+const Finance = lazy(() => import("./pages/Finance"));
+const Users = lazy(() => import("./pages/Users"));
+const Connector = lazy(() => import("./pages/Connector"));
+const Notifications = lazy(() => import("./pages/Notifications"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Reports = lazy(() => import("./pages/Reports"));
+const GerencialReports = lazy(() => import("./pages/GerencialReports"));
+const FinanceDashboard = lazy(() => import("./pages/fin/FinanceDashboard"));
+const FinPayables = lazy(() => import("./pages/fin/FinPayables"));
+const FinWeekdayReport = lazy(() => import("./pages/fin/FinWeekdayReport"));
+const FinReceivables = lazy(() => import("./pages/fin/FinReceivables"));
+const FinBankStatements = lazy(() => import("./pages/fin/FinBankStatements"));
+const FinCosts = lazy(() => import("./pages/fin/FinCosts"));
+const FinDRE = lazy(() => import("./pages/fin/FinDRE"));
+const FinOtimizacao = lazy(() => import("./pages/fin/FinOtimizacao"));
+const FinRevenueForecast = lazy(() => import("./pages/fin/FinRevenueForecast"));
+const FinProductGoals = lazy(() => import("./pages/fin/FinProductGoals"));
+const FinGoals = lazy(() => import("./pages/fin/FinGoals"));
+const FinSettings = lazy(() => import("./pages/fin/FinSettings"));
+const FinCategories = lazy(() => import("./pages/fin/FinCategories"));
+const FinBanks = lazy(() => import("./pages/fin/FinBanks"));
+const FinCostsRegister = lazy(() => import("./pages/fin/FinCostsRegister"));
+const FinCashflow = lazy(() => import("./pages/fin/FinCashflow"));
+const FinMonthlyComparison = lazy(() => import("./pages/fin/FinMonthlyComparison"));
+const FinBankReconciliation = lazy(() => import("./pages/fin/FinBankReconciliation"));
+const WhatsApp = lazy(() => import("./pages/WhatsApp"));
+const InstagramPage = lazy(() => import("./pages/Instagram"));
+const ProductsRegister = lazy(() => import("./pages/ProductsRegister"));
+const PurchaseSuggestion = lazy(() => import("./pages/PurchaseSuggestion"));
+const SmartPurchasePlanner = lazy(() => import("./pages/SmartPurchasePlanner"));
+const SalesImport = lazy(() => import("./pages/SalesImport"));
+const ProductMapping = lazy(() => import("./pages/ProductMapping"));
+const SalesReport = lazy(() => import("./pages/SalesReport"));
+const SalesAverage = lazy(() => import("./pages/SalesAverage"));
+const Unauthorized = lazy(() => import("./pages/Unauthorized"));
+const MetaAds = lazy(() => import("./pages/MetaAds"));
+const AdLibrary = lazy(() => import("./pages/AdLibrary"));
+const GiroEstoque = lazy(() => import("./pages/GiroEstoque"));
+const InoveConnector = lazy(() => import("./pages/InoveConnector"));
+const CronJobs = lazy(() => import("./pages/CronJobs"));
+const InoveReports = lazy(() => import("./pages/InoveReports"));
+const InoveProductSales = lazy(() => import("./pages/InoveProductSales"));
+const InoveCostMargin = lazy(() => import("./pages/InoveCostMargin"));
+const InoveManagerial = lazy(() => import("./pages/InoveManagerial"));
+const PublicLoyalty = lazy(() => import("./pages/PublicLoyalty"));
+const Purchases = lazy(() => import("./pages/Purchases"));
+const PurchaseInvoices = lazy(() => import("./pages/PurchaseInvoices"));
+const PurchaseItems = lazy(() => import("./pages/PurchaseItems"));
+const PurchaseDashboard = lazy(() => import("./pages/PurchaseDashboard"));
+const ReportSales = lazy(() => import("./pages/reports/ReportSales"));
+const ReportCMV = lazy(() => import("./pages/reports/ReportCMV"));
+const ReportManagerial = lazy(() => import("./pages/reports/ReportManagerial"));
+const BoxesControl = lazy(() => import("./pages/stock/BoxesControl"));
 
 function Router() {
   return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Carregando módulo...</div>}>
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/dashboard" component={Dashboard} />
@@ -144,6 +145,7 @@ function Router() {
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
+    </Suspense>
   );
 }
 

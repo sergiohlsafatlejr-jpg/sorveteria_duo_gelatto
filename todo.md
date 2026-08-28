@@ -118,10 +118,18 @@
 - [x] Diagnosticar por que o Dashboard mostra faturamento e metas zerados apesar dos dados sincronizados
 - [x] Corrigir a atualização dos KPIs mensais e faturamento usando o cache persistido quando o INOVE estiver offline
 - [x] Identificar visualmente que as metas de produtos usam uma lista parcial enquanto o cache completo não for renovado
-- [ ] Renovar o cache completo de produtos após o INOVE voltar a responder para atualizar integralmente as metas
+- [x] Renovar o cache completo de produtos após o INOVE voltar a responder para atualizar integralmente as metas
 - [x] Validar a correção no banco, nas APIs e na visualização móvel da prévia autenticada
 - [ ] Validar a correção no site publicado após o usuário clicar em Publicar
 - [x] Restaurar o código da versão estável 3cf487b9 após regressão para commit antigo do GitHub
 - [x] Reaplicar o fallback do INOVE sobre a versão restaurada
 - [x] Sincronizar a versão estável com o repositório principal sergiohlsafatlejr-jpg/sorveteria_duo_gelatto
 - [ ] Publicar a versão estável em produção pelo botão Publicar
+- [x] Auditar com dados reais os realizados de Picolé, Potes Sorvetes e Açaí Potes de agosto/2026
+- [x] Corrigir o cálculo das metas para somar exatamente os produtos marcados, sem correspondência parcial de nomes
+- [x] Atualizar os Dashboards pelo INOVE a cada 60 segundos enquanto a tela estiver aberta
+- [x] Manter o cache persistido somente como contingência, mostrando origem, data e hora da última atualização
+- [x] Corrigir a visualização responsiva da tabela de Metas de Produtos no celular
+- [x] Não ativar sincronização subminuto em servidor permanente; alternativa descartada pelo usuário para evitar upgrade
+- [x] Preservar os jobs automáticos existentes e não adicionar um novo processo permanente/subminuto
+- [x] Carregar rotas sob demanda para reduzir o bundle inicial e estabilizar o build de produção

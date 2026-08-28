@@ -6,6 +6,8 @@ export type CachedDailyRevenue = {
 };
 
 export type CachedProductSales = {
+  produtoId?: number;
+  codPdv?: string | null;
   nome: string;
   qtd: number;
   total: number;
@@ -68,12 +70,14 @@ export function buildCachedSalesByDay(rows: CachedDailyRevenue[], dateFrom: stri
 export function parseCachedProducts(data: string, limit: number): CachedProductSales[] {
   try {
     const parsed = JSON.parse(data) as {
-      products?: Array<{ nome?: string; qtd?: number; faturamento?: number }>;
-      top10?: Array<{ nome?: string; qtd?: number; faturamento?: number }>;
+      products?: Array<{ produtoId?: number; codPdv?: string | null; nome?: string; qtd?: number; faturamento?: number }>;
+      top10?: Array<{ produtoId?: number; codPdv?: string | null; nome?: string; qtd?: number; faturamento?: number }>;
     };
     const products = parsed.products ?? parsed.top10 ?? [];
     return products
       .map((product) => ({
+        ...(Number.isFinite(Number(product.produtoId)) ? { produtoId: Number(product.produtoId) } : {}),
+        ...(product.codPdv === null || product.codPdv === undefined ? {} : { codPdv: String(product.codPdv) }),
         nome: String(product.nome ?? "Produto sem nome"),
         qtd: Number(product.qtd ?? 0),
         total: Number(product.faturamento ?? 0),

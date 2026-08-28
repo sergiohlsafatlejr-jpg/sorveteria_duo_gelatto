@@ -42,18 +42,22 @@ export default function FinProductGoals() {
   const [productSearch, setProductSearch] = useState("");
 
   const utils = trpc.useUtils();
-  const { data: goals = [], isLoading } = trpc.productGoals.listAll.useQuery({ month: selectedMonth });
-
-  // Buscar produtos do INOVE (lista completa para seleção)
-  const { data: topProducts = [] } = trpc.inove.getTopProducts.useQuery(
-    { days: new Date().getDate(), limit: 200 },
-    { staleTime: 5 * 60 * 1000 }
+  const { data: progressData, isLoading } = trpc.inove.getProductGoalsProgress.useQuery(
+    { month: selectedMonth, includeInactive: true },
+    { refetchInterval: 60_000 }
   );
+  const goals = progressData?.goals ?? [];
+  const topProducts = progressData?.products ?? [];
+
+  function invalidateGoals() {
+    utils.productGoals.listAll.invalidate();
+    utils.productGoals.list.invalidate();
+    utils.inove.getProductGoalsProgress.invalidate();
+  }
 
   const createMut = trpc.productGoals.create.useMutation({
     onSuccess: () => {
-      utils.productGoals.listAll.invalidate();
-      utils.productGoals.list.invalidate();
+      invalidateGoals();
       setShowCreateDialog(false);
       resetForm();
       toast.success("Meta criada com sucesso!");
@@ -63,8 +67,7 @@ export default function FinProductGoals() {
 
   const updateMut = trpc.productGoals.update.useMutation({
     onSuccess: () => {
-      utils.productGoals.listAll.invalidate();
-      utils.productGoals.list.invalidate();
+      invalidateGoals();
       setEditingGoal(null);
       resetForm();
       toast.success("Meta atualizada!");
@@ -74,8 +77,7 @@ export default function FinProductGoals() {
 
   const deleteMut = trpc.productGoals.delete.useMutation({
     onSuccess: () => {
-      utils.productGoals.listAll.invalidate();
-      utils.productGoals.list.invalidate();
+      invalidateGoals();
       toast.success("Meta removida!");
     },
     onError: (err) => toast.error(`Erro ao remover meta: ${err.message}`),
@@ -83,8 +85,7 @@ export default function FinProductGoals() {
 
   const copyMut = trpc.productGoals.copyFromPreviousMonth.useMutation({
     onSuccess: (data) => {
-      utils.productGoals.listAll.invalidate();
-      utils.productGoals.list.invalidate();
+      invalidateGoals();
       toast.success(`${data.copied} meta(s) copiada(s) do mês anterior!`);
     },
     onError: (err) => toast.error(`Erro ao copiar metas: ${err.message}`),
@@ -99,9 +100,12 @@ export default function FinProductGoals() {
     setProductSearch("");
   }
 
-  // Gerar keywords a partir dos produtos selecionados (usa | como separador para evitar conflito com nomes como "1,5L")
+  // Persistir ID e nome para o cálculo continuar exato mesmo se o produto for renomeado no INOVE.
   function getKeywordsFromSelected(): string {
-    return selectedProducts.join("|");
+    return JSON.stringify(selectedProducts.map((name) => {
+      const product = topProducts.find((item) => item.nome === name);
+      return { ...(product?.produtoId ? { id: product.produtoId } : {}), name };
+    }));
   }
 
   function handleCreate() {
@@ -136,10 +140,7 @@ export default function FinProductGoals() {
     setFormTargetQty(goal.targetQuantity.toString());
     setFormTargetRevenue(goal.targetRevenue?.toString() || "");
     setFormIcon(goal.icon || "🎯");
-    // Parsear keywords existentes para pré-selecionar produtos (suporta | e , como separador)
-    const sep = (goal.searchKeywords || "").includes("|") ? "|" : ",";
-    const existingKeywords = (goal.searchKeywords || "").split(sep).map(k => k.trim());
-    setSelectedProducts(existingKeywords.filter(k => k.length > 0));
+    setSelectedProducts(goal.selectedProducts.map((product) => product.name));
     setProductSearch("");
   }
 
@@ -158,21 +159,7 @@ export default function FinProductGoals() {
     return topProducts.filter(p => p.nome.toUpperCase().includes(search));
   }, [productSearch, topProducts]);
 
-  // Calcular realizado para cada meta
-  const goalsWithProgress = useMemo(() => {
-    return goals.map(goal => {
-      const sep = (goal.searchKeywords || "").includes("|") ? "|" : ",";
-      const keywords = (goal.searchKeywords || "").split(sep).map(k => k.trim().toUpperCase());
-      const matched = topProducts.filter(p => {
-        const nome = p.nome.toUpperCase();
-        return keywords.some(kw => kw.length > 0 && nome === kw);
-      });
-      const realQty = matched.reduce((sum, p) => sum + p.qtd, 0);
-      const realRevenue = matched.reduce((sum, p) => sum + p.total, 0);
-      const percentQty = goal.targetQuantity > 0 ? (realQty / goal.targetQuantity) * 100 : 0;
-      return { ...goal, realQty, realRevenue, percentQty, matchedProducts: matched };
-    });
-  }, [goals, topProducts]);
+  const goalsWithProgress = goals;
 
   // Componente de seleção de produtos com checkboxes
   function ProductSelector() {
@@ -318,6 +305,13 @@ export default function FinProductGoals() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-lg">Metas de {selectedMonth}</CardTitle>
+          <p className={`text-xs ${progressData?.source === "live" ? "text-emerald-700" : "text-amber-700"}`}>
+            {progressData?.source === "live" ? "Dados ao vivo do INOVE" : "Dados da última sincronização"}
+            {progressData?.updatedAt
+              ? ` · ${new Date(progressData.updatedAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`
+              : ""}
+            {" · atualização a cada 60 segundos"}
+          </p>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -329,7 +323,73 @@ export default function FinProductGoals() {
               <p className="text-sm text-muted-foreground">Clique em "Nova Meta" ou "Copiar mês anterior" para começar.</p>
             </div>
           ) : (
-            <Table>
+            <>
+            <div className="grid gap-3 md:hidden">
+              {goalsWithProgress.map((goal) => (
+                <div key={goal.id} className="rounded-xl border bg-background p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold flex items-center gap-2">
+                        <span className="text-lg">{goal.icon}</span>
+                        <span className="truncate">{goal.productName}</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {goal.selectedProducts.length} produto(s) selecionado(s)
+                      </p>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <Button size="sm" variant="ghost" onClick={() => startEdit(goal)} aria-label={`Editar ${goal.productName}`}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteMut.mutate({ id: goal.id })} aria-label={`Excluir ${goal.productName}`}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Meta</p>
+                      <p className="font-semibold">{goal.targetQuantity} un</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Realizado</p>
+                      <p className="font-semibold">{Math.round(goal.realQty)} un</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Faturamento</p>
+                      <p className="font-medium">{goal.realRevenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Atingido</p>
+                      <p className="font-semibold">{Math.round(goal.percentQty)}%</p>
+                    </div>
+                  </div>
+
+                  <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${goal.percentQty >= 100 ? "bg-green-500" : goal.percentQty >= 80 ? "bg-yellow-500" : "bg-red-400"}`}
+                      style={{ width: `${Math.min(goal.percentQty, 100)}%` }}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-1">
+                    {goal.selectedProducts.slice(0, 2).map((product) => (
+                      <Badge key={`${goal.id}-mobile-${product.id ?? product.name}`} variant="outline" className="text-[10px] max-w-full truncate">
+                        {product.name}
+                      </Badge>
+                    ))}
+                    {goal.selectedProducts.length > 2 && <Badge variant="outline" className="text-[10px]">+{goal.selectedProducts.length - 2}</Badge>}
+                  </div>
+                  {goal.missingProducts.length > 0 && (
+                    <p className="text-xs text-amber-700">{goal.missingProducts.length} item(ns) selecionado(s) sem venda encontrada no mês.</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto pb-2">
+            <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-12"></TableHead>
@@ -349,14 +409,14 @@ export default function FinProductGoals() {
                     <TableCell className="font-medium">{goal.productName}</TableCell>
                     <TableCell className="max-w-[200px]">
                       <div className="flex flex-wrap gap-1">
-                        {(goal.searchKeywords || "").split(",").filter(k => k.trim()).slice(0, 3).map((kw, i) => (
-                          <Badge key={i} variant="outline" className="text-[10px] px-1.5 py-0">
-                            {kw.trim()}
+                        {goal.selectedProducts.slice(0, 3).map((product) => (
+                          <Badge key={`${goal.id}-${product.id ?? product.name}`} variant="outline" className="text-[10px] px-1.5 py-0 max-w-[180px] truncate">
+                            {product.name}
                           </Badge>
                         ))}
-                        {(goal.searchKeywords || "").split(",").filter(k => k.trim()).length > 3 && (
+                        {goal.selectedProducts.length > 3 && (
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                            +{(goal.searchKeywords || "").split(",").filter(k => k.trim()).length - 3}
+                            +{goal.selectedProducts.length - 3}
                           </Badge>
                         )}
                       </div>
@@ -388,40 +448,9 @@ export default function FinProductGoals() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button size="sm" variant="ghost" onClick={() => startEdit(goal)}>
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                            <DialogHeader>
-                              <DialogTitle>Editar Meta: {goal.productName}</DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-4">
-                              <div className="grid grid-cols-[auto_1fr] gap-4 items-center">
-                                <Label>Ícone</Label>
-                                <Input value={formIcon} onChange={(e) => setFormIcon(e.target.value)} className="w-20" />
-                              </div>
-                              <div>
-                                <Label>Nome da Meta</Label>
-                                <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} />
-                              </div>
-
-                              {/* Seleção de produtos com checkboxes */}
-                              <ProductSelector />
-
-                              <div>
-                                <Label>Meta (unidades/mês)</Label>
-                                <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} />
-                                <p className="text-xs text-muted-foreground mt-1">A meta de faturamento geral é a mesma configurada no Forecast.</p>
-                              </div>
-                              <Button onClick={() => handleUpdate(goal.id)} disabled={updateMut.isPending} className="w-full">
-                                {updateMut.isPending ? "Salvando..." : "Salvar Alterações"}
-                              </Button>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
+                        <Button size="sm" variant="ghost" onClick={() => startEdit(goal)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
                         <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteMut.mutate({ id: goal.id })}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -431,9 +460,38 @@ export default function FinProductGoals() {
                 ))}
               </TableBody>
             </Table>
+            </div>
+            </>
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={editingGoal !== null} onOpenChange={(open) => { if (!open) { setEditingGoal(null); resetForm(); } }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Meta: {formProductName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-[auto_1fr] gap-4 items-center">
+              <Label>Ícone</Label>
+              <Input value={formIcon} onChange={(e) => setFormIcon(e.target.value)} className="w-20" />
+            </div>
+            <div>
+              <Label>Nome da Meta</Label>
+              <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} />
+            </div>
+            <ProductSelector />
+            <div>
+              <Label>Meta (unidades/mês)</Label>
+              <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} />
+              <p className="text-xs text-muted-foreground mt-1">A meta de faturamento geral é a mesma configurada no Forecast.</p>
+            </div>
+            <Button onClick={() => editingGoal !== null && handleUpdate(editingGoal)} disabled={updateMut.isPending || editingGoal === null} className="w-full">
+              {updateMut.isPending ? "Salvando..." : "Salvar Alterações"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Dica */}
       <Card className="border-blue-200 bg-blue-50/50">

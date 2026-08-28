@@ -154,7 +154,30 @@ const PAYMENT_COLORS: Record<string, string> = {
 const DEFAULT_COLORS = ["#10b981", "#8b5cf6", "#3b82f6", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899"];
 
 // ── Widget de Metas do Mês ───────────────────────────────────────────────────────────────
-function GoalsWidget({ vendasMes, productDataPartial = false }: { vendasMes: number; productDataPartial?: boolean }) {
+type ProductGoalProgressItem = {
+  id: number;
+  productName: string;
+  targetQuantity: number;
+  icon: string | null;
+  realQty: number;
+  realRevenue: number;
+  percentQty: number;
+  missingProducts: Array<{ id?: number; name: string }>;
+};
+
+function GoalsWidget({
+  vendasMes,
+  productGoalsWithProgress,
+  productDataSource,
+  productDataUpdatedAt,
+  productDataPartial = false,
+}: {
+  vendasMes: number;
+  productGoalsWithProgress: ProductGoalProgressItem[];
+  productDataSource?: "live" | "cache";
+  productDataUpdatedAt?: string | null;
+  productDataPartial?: boolean;
+}) {
   const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
 
   // Buscar meta do mês do Forecast (soma dos valores diários do calendário)
@@ -164,38 +187,23 @@ function GoalsWidget({ vendasMes, productDataPartial = false }: { vendasMes: num
     { staleTime: 5 * 60 * 1000 }
   );
 
-  // Buscar metas de produtos configuráveis (productGoals)
-  const { data: productGoalsList = [] } = trpc.productGoals.list.useQuery(
-    { month: currentMonth },
-    { staleTime: 5 * 60 * 1000 }
-  );
-
-  // Buscar todos os produtos do mês para matching com metas
-  const { data: allProductsMonth = [] } = trpc.inove.getTopProducts.useQuery(
-    { days: new Date().getDate(), limit: 200 }, // do dia 1 até hoje — cobre todos os produtos
-    { staleTime: 5 * 60 * 1000 }
-  );
-
   // Meta geral do mês = soma dos valores diários do Forecast (mesma "Meta do Mês" exibida no Forecast)
   const metaGeral = goalForecasts.length > 0
     ? goalForecasts.reduce((sum: number, f: { amount: string | number }) => sum + Number(f.amount), 0)
     : 0;
   const percentGeral = metaGeral > 0 ? Math.min((vendasMes / metaGeral) * 100, 150) : 0;
 
-  // Calcular realizado para cada meta de produto usando keywords matching
-  const productGoalsWithProgress = productGoalsList.map(goal => {
-    const sep = goal.searchKeywords.includes('|') ? '|' : ',';
-    const keywords = goal.searchKeywords.split(sep).map((k: string) => k.trim().toUpperCase());
-    const matchingProducts = allProductsMonth.filter(p => {
-      const nome = p.nome.toUpperCase();
-      // Matching exato por nome completo (produtos selecionados via checkbox)
-      return keywords.some(kw => kw.length > 0 && nome === kw);
-    });
-    const totalQty = matchingProducts.reduce((sum, p) => sum + p.qtd, 0);
-    const totalRevenue = matchingProducts.reduce((sum, p) => sum + p.total, 0);
-    const percent = goal.targetQuantity > 0 ? Math.min((totalQty / goal.targetQuantity) * 100, 150) : 0;
-    return { ...goal, totalQty, totalRevenue, percent };
-  });
+  const updatedAtLabel = productDataUpdatedAt
+    ? new Date(productDataUpdatedAt).toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : null;
 
   return (
     <Card className="border-0 shadow-sm">
@@ -207,9 +215,17 @@ function GoalsWidget({ vendasMes, productDataPartial = false }: { vendasMes: num
             {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
           </span>
         </CardTitle>
-        {productDataPartial && (
+        {productDataSource === "live" ? (
+          <p className="text-[11px] text-emerald-700">
+            Dados ao vivo do INOVE{updatedAtLabel ? ` · ${updatedAtLabel}` : ""} · atualização automática a cada 60 segundos.
+          </p>
+        ) : productDataPartial ? (
           <p className="text-[11px] text-amber-700">
-            Metas de produtos calculadas com a última lista parcial sincronizada do INOVE.
+            Contingência: última lista parcial do INOVE{updatedAtLabel ? ` · ${updatedAtLabel}` : ""}.
+          </p>
+        ) : (
+          <p className="text-[11px] text-amber-700">
+            Contingência: última sincronização completa{updatedAtLabel ? ` · ${updatedAtLabel}` : ""}.
           </p>
         )}
       </CardHeader>
@@ -256,18 +272,23 @@ function GoalsWidget({ vendasMes, productDataPartial = false }: { vendasMes: num
                     <span className="text-sm">{goal.icon || '🎯'}</span>
                     {goal.productName}
                   </span>
-                  <span className={`text-xs font-bold ${color.text}`}>{goal.percent.toFixed(0)}%</span>
+                  <span className={`text-xs font-bold ${color.text}`}>{goal.percentQty.toFixed(0)}%</span>
                 </div>
                 <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full bg-gradient-to-r ${color.bar} transition-all`}
-                    style={{ width: `${Math.min(goal.percent, 100)}%` }}
+                    style={{ width: `${Math.min(goal.percentQty, 100)}%` }}
                   />
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{goal.totalQty} un ({formatCurrency(goal.totalRevenue)})</span>
+                  <span>{Math.round(goal.realQty)} un ({formatCurrency(goal.realRevenue)})</span>
                   <span>Meta: {goal.targetQuantity} un</span>
                 </div>
+                {goal.missingProducts.length > 0 && (
+                  <p className="text-[10px] text-amber-700">
+                    {goal.missingProducts.length} item(ns) selecionado(s) não encontrado(s) neste mês.
+                  </p>
+                )}
               </div>
             );
           })}
@@ -300,19 +321,38 @@ export default function Dashboard() {
   // Dados do INOVE (PDV SQL Server) — mês atual
   // No dia N do mês, busca os últimos N dias (= do dia 1 até hoje)
   const daysInCurrentMonth = new Date().getDate();
-  const { data: inoveSalesByDay = [] } = trpc.inove.getSalesByDay.useQuery({ days: daysInCurrentMonth });
-  const { data: inoveTopProducts = [] } = trpc.inove.getTopProducts.useQuery({ days: daysInCurrentMonth, limit: 8 });
+  const currentMonth = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }).slice(0, 7);
+  const { data: inoveSalesByDay = [] } = trpc.inove.getSalesByDay.useQuery(
+    { days: daysInCurrentMonth },
+    { refetchInterval: 60_000 }
+  );
+  const { data: productGoalsProgress } = trpc.inove.getProductGoalsProgress.useQuery(
+    { month: currentMonth, includeInactive: false },
+    { refetchInterval: 60_000 }
+  );
+  const inoveTopProducts = productGoalsProgress?.products.slice(0, 8) ?? [];
   const { data: inoveTopProductsToday = [] } = trpc.inove.getTopProducts.useQuery(
     { days: 1, limit: 5 },
-    { refetchInterval: 5 * 60 * 1000 }
+    { refetchInterval: 60_000 }
   );
-  const { data: inoveKpis } = trpc.inove.getKpis.useQuery();
-  const { data: vendasHoje } = trpc.inove.getVendasHoje.useQuery(undefined, { refetchInterval: 60000 });
+  const { data: inoveKpis } = trpc.inove.getKpis.useQuery(undefined, { refetchInterval: 60_000 });
+  const vendasHoje = inoveKpis?.vendas_hoje;
   const { data: paymentTypes = [] } = trpc.inove.getSalesByPaymentType.useQuery(
     { days: 1 },
-    { refetchInterval: 5 * 60 * 1000 }
+    { refetchInterval: 60_000 }
   );
   const inoveKpisSource = (inoveKpis as (typeof inoveKpis & { source?: "live" | "cache" }) | undefined)?.source;
+  const inoveKpisUpdatedAt = inoveKpis?.cachedAt
+    ? new Date(inoveKpis.cachedAt).toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : null;
 
   // Gráfico: prioriza INOVE se disponível
   const salesChart = inoveSalesByDay.length > 0
@@ -378,7 +418,7 @@ export default function Dashboard() {
             title="Vendas do Mês"
             value={formatCurrency(inoveKpis ? inoveKpis.vendas_mes.total : (metrics?.monthSalesTotal ?? 0))}
             subtitle={inoveKpis
-              ? `${inoveKpis.vendas_mes.qtd} transações · ${inoveKpisSource === "cache" ? "última sincronização" : "PDV"}`
+              ? `${inoveKpis.vendas_mes.qtd} transações · ${inoveKpisSource === "cache" ? `cache ${inoveKpisUpdatedAt ?? "sem horário"}` : "PDV ao vivo"}`
               : `${metrics?.monthSalesCount ?? 0} transações`}
             icon={TrendingUp}
             gradient="bg-gradient-to-br from-pink-500 to-rose-600"
@@ -386,7 +426,7 @@ export default function Dashboard() {
           <StatCard
             title="Ticket Médio"
             value={inoveKpis ? formatCurrency(inoveKpis.ticket_medio) : formatCurrency(metrics?.todaySalesTotal && metrics?.todaySalesCount ? metrics.todaySalesTotal / metrics.todaySalesCount : 0)}
-            subtitle={inoveKpisSource === "cache" ? "média do mês · última sincronização" : "média por venda · mês atual"}
+            subtitle={inoveKpisSource === "cache" ? `cache ${inoveKpisUpdatedAt ?? "sem horário"}` : "média por venda · PDV ao vivo"}
             icon={DollarSign}
             gradient="bg-gradient-to-br from-amber-500 to-orange-600"
           />
@@ -402,7 +442,10 @@ export default function Dashboard() {
         {/* Metas do Mês */}
         <GoalsWidget
           vendasMes={inoveKpis?.vendas_mes?.total ?? 0}
-          productDataPartial={inoveKpisSource === "cache"}
+          productGoalsWithProgress={productGoalsProgress?.goals ?? []}
+          productDataSource={productGoalsProgress?.source}
+          productDataUpdatedAt={productGoalsProgress?.updatedAt}
+          productDataPartial={productGoalsProgress?.isPartial ?? true}
         />
 
         {/* Widget de Previsão do Tempo */}
