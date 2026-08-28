@@ -475,7 +475,7 @@ async function syncSalesCache(): Promise<void> {
       const prevMonth = prevDate.getMonth() + 1;
 
       const currRes = await pool.request().query(`
-        SELECT TOP 10
+        SELECT
           p.PRODUTO as produtoId,
           ISNULL(p.PRO_NOME, 'Produto s/nome') as nome,
           p.PRO_CODIGO as codPdv,
@@ -538,6 +538,13 @@ async function syncSalesCache(): Promise<void> {
         month: monthKey,
         prevMonth: `${prevYear}-${String(prevMonth).padStart(2, "0")}`,
         top10,
+        products: curr.map((c: CurrRow) => ({
+          produtoId: Number(c.produtoId),
+          nome: c.nome,
+          codPdv: c.codPdv,
+          qtd: Number(c.qtd),
+          faturamento: Number(c.faturamento),
+        })),
         totalFaturamento,
         totalQtd,
         totalFaturamentoPrev,

@@ -154,7 +154,7 @@ const PAYMENT_COLORS: Record<string, string> = {
 const DEFAULT_COLORS = ["#10b981", "#8b5cf6", "#3b82f6", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899"];
 
 // ── Widget de Metas do Mês ───────────────────────────────────────────────────────────────
-function GoalsWidget({ vendasMes }: { vendasMes: number }) {
+function GoalsWidget({ vendasMes, productDataPartial = false }: { vendasMes: number; productDataPartial?: boolean }) {
   const currentMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
 
   // Buscar meta do mês do Forecast (soma dos valores diários do calendário)
@@ -207,6 +207,11 @@ function GoalsWidget({ vendasMes }: { vendasMes: number }) {
             {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
           </span>
         </CardTitle>
+        {productDataPartial && (
+          <p className="text-[11px] text-amber-700">
+            Metas de produtos calculadas com a última lista parcial sincronizada do INOVE.
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         <div className={`grid grid-cols-1 ${productGoalsWithProgress.length > 0 ? `md:grid-cols-${Math.min(productGoalsWithProgress.length + 1, 4)}` : 'md:grid-cols-2'} gap-4`}>
@@ -307,6 +312,7 @@ export default function Dashboard() {
     { days: 1 },
     { refetchInterval: 5 * 60 * 1000 }
   );
+  const inoveKpisSource = (inoveKpis as (typeof inoveKpis & { source?: "live" | "cache" }) | undefined)?.source;
 
   // Gráfico: prioriza INOVE se disponível
   const salesChart = inoveSalesByDay.length > 0
@@ -372,7 +378,7 @@ export default function Dashboard() {
             title="Vendas do Mês"
             value={formatCurrency(inoveKpis ? inoveKpis.vendas_mes.total : (metrics?.monthSalesTotal ?? 0))}
             subtitle={inoveKpis
-              ? `${inoveKpis.vendas_mes.qtd} transações · PDV`
+              ? `${inoveKpis.vendas_mes.qtd} transações · ${inoveKpisSource === "cache" ? "última sincronização" : "PDV"}`
               : `${metrics?.monthSalesCount ?? 0} transações`}
             icon={TrendingUp}
             gradient="bg-gradient-to-br from-pink-500 to-rose-600"
@@ -380,7 +386,7 @@ export default function Dashboard() {
           <StatCard
             title="Ticket Médio"
             value={inoveKpis ? formatCurrency(inoveKpis.ticket_medio) : formatCurrency(metrics?.todaySalesTotal && metrics?.todaySalesCount ? metrics.todaySalesTotal / metrics.todaySalesCount : 0)}
-            subtitle="média por venda · mês atual"
+            subtitle={inoveKpisSource === "cache" ? "média do mês · última sincronização" : "média por venda · mês atual"}
             icon={DollarSign}
             gradient="bg-gradient-to-br from-amber-500 to-orange-600"
           />
@@ -394,7 +400,10 @@ export default function Dashboard() {
         </div>
 
         {/* Metas do Mês */}
-        <GoalsWidget vendasMes={inoveKpis?.vendas_mes?.total ?? 0} />
+        <GoalsWidget
+          vendasMes={inoveKpis?.vendas_mes?.total ?? 0}
+          productDataPartial={inoveKpisSource === "cache"}
+        />
 
         {/* Widget de Previsão do Tempo */}
         <WeatherWidget />

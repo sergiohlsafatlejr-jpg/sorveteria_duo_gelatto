@@ -115,3 +115,11 @@
 - [x] Adicionar colunas Realizado e Divergência em reais mantendo o valor cadastrado como previsto
 - [x] Aplicar cores para gasto acima, economia e igualdade, respeitando o mês selecionado
 - [x] Adicionar teste do cálculo mensal de realizado e divergência por custo
+- [x] Diagnosticar por que o Dashboard mostra faturamento e metas zerados apesar dos dados sincronizados
+- [x] Corrigir a atualização dos KPIs mensais e faturamento usando o cache persistido quando o INOVE estiver offline
+- [x] Identificar visualmente que as metas de produtos usam uma lista parcial enquanto o cache completo não for renovado
+- [ ] Renovar o cache completo de produtos após o INOVE voltar a responder para atualizar integralmente as metas
+- [ ] Validar a correção no banco, APIs e visualização móvel publicada
+- [x] Restaurar o código da versão estável 3cf487b9 após regressão para commit antigo do GitHub
+- [x] Reaplicar o fallback do INOVE sobre a versão restaurada
+- [ ] Sincronizar a versão estável com o repositório principal e a produção

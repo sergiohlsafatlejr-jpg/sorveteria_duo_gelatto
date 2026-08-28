@@ -25,12 +25,40 @@ import {
   salesImportItems,
   salesImportPayments,
   purchaseProductConfig,
+  finDailyRevenue,
+  inoveSalesCache,
 } from "../../drizzle/schema";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 import crypto from "crypto";
 import * as mssqlLib from "mssql";
 import { notifyOwner } from "../_core/notification";
 import { invokeLLM } from "../_core/llm";
+import {
+  buildCachedKpis,
+  buildCachedSalesByDay,
+  getSaoPauloDate,
+  parseCachedProducts,
+  subtractIsoDays,
+} from "../inove-dashboard-fallback";
+
+async function getCachedDailyRevenue(dateFrom?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const today = getSaoPauloDate();
+  const start = dateFrom ?? `${today.slice(0, 7)}-01`;
+  return db.select().from(finDailyRevenue)
+    .where(and(gte(finDailyRevenue.revenueDate, start), lte(finDailyRevenue.revenueDate, today)))
+    .orderBy(finDailyRevenue.revenueDate);
+}
+
+async function getCachedMonthlyProducts(limit: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const monthKey = getSaoPauloDate().slice(0, 7);
+  const rows = await db.select().from(inoveSalesCache)
+    .where(eq(inoveSalesCache.cacheKey, monthKey)).limit(1);
+  return rows.length > 0 ? parseCachedProducts(rows[0].data, limit) : [];
+}
 
 // ── Tipos do SQL Server ───────────────────────────────────────────────────────
 interface MssqlConfig {
@@ -517,7 +545,12 @@ export const inoveRouter = router({
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
       const rows = await db.select().from(inoveConnectorConfig).limit(1);
-      if (rows.length === 0 || !rows[0].active) return [];
+      const dateFrom = subtractIsoDays(getSaoPauloDate(), input.days);
+      const cachedRows = await getCachedDailyRevenue(dateFrom);
+      if (cachedRows.length > 0) return buildCachedSalesByDay(cachedRows, dateFrom);
+      if (rows.length === 0 || !rows[0].active) {
+        return [];
+      }
       const config = rows[0];
       try {
         const pool = await createInovePool(config);
@@ -535,7 +568,7 @@ export const inoveRouter = router({
         await pool.close();
         return result.recordset as Array<{ dia: string; qtd: number; total: number }>;
       } catch {
-        return [];
+        return buildCachedSalesByDay(await getCachedDailyRevenue(dateFrom), dateFrom);
       }
     }),
 
@@ -546,6 +579,8 @@ export const inoveRouter = router({
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
       const rows = await db.select().from(inoveConnectorConfig).limit(1);
+      const cachedProducts = await getCachedMonthlyProducts(input.limit);
+      if (cachedProducts.length > 0) return cachedProducts;
       if (rows.length === 0 || !rows[0].active) return [];
       const config = rows[0];
       try {
@@ -566,7 +601,7 @@ export const inoveRouter = router({
         await pool.close();
         return result.recordset as Array<{ nome: string; qtd: number; total: number }>;
       } catch {
-        return [];
+        return getCachedMonthlyProducts(input.limit);
       }
     }),
 
@@ -575,7 +610,11 @@ export const inoveRouter = router({
     const db = await getDb();
     if (!db) throw new Error("DB unavailable");
     const rows = await db.select().from(inoveConnectorConfig).limit(1);
-    if (rows.length === 0 || !rows[0].active) return null;
+    const cachedRevenue = await getCachedDailyRevenue();
+    if (cachedRevenue.length > 0) return buildCachedKpis(cachedRevenue);
+    if (rows.length === 0 || !rows[0].active) {
+      return buildCachedKpis([]);
+    }
     const config = rows[0];
     try {
       const pool = await createInovePool(config);
@@ -603,10 +642,12 @@ export const inoveRouter = router({
         vendas_mes: { qtd: Number(sets[1][0].qtd), total: Number(sets[1][0].total) },
         ticket_medio: Number(sets[2][0].ticket_medio),
         vendas_ontem: { qtd: Number(sets[3][0].qtd), total: Number(sets[3][0].total) },
+        source: "live" as const,
+        cachedAt: null,
       };
     } catch (err) {
       console.error('[getKpis] Erro:', err);
-      return null;
+      return buildCachedKpis(await getCachedDailyRevenue());
     }
   }),
 
