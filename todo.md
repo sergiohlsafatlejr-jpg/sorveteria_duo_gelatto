@@ -119,7 +119,9 @@
 - [x] Corrigir a atualização dos KPIs mensais e faturamento usando o cache persistido quando o INOVE estiver offline
 - [x] Identificar visualmente que as metas de produtos usam uma lista parcial enquanto o cache completo não for renovado
 - [ ] Renovar o cache completo de produtos após o INOVE voltar a responder para atualizar integralmente as metas
-- [ ] Validar a correção no banco, APIs e visualização móvel publicada
+- [x] Validar a correção no banco, nas APIs e na visualização móvel da prévia autenticada
+- [ ] Validar a correção no site publicado após o usuário clicar em Publicar
 - [x] Restaurar o código da versão estável 3cf487b9 após regressão para commit antigo do GitHub
 - [x] Reaplicar o fallback do INOVE sobre a versão restaurada
-- [ ] Sincronizar a versão estável com o repositório principal e a produção
+- [x] Sincronizar a versão estável com o repositório principal sergiohlsafatlejr-jpg/sorveteria_duo_gelatto
+- [ ] Publicar a versão estável em produção pelo botão Publicar
