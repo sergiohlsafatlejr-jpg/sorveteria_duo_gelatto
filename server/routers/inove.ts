@@ -1146,8 +1146,14 @@ export const inoveRouter = router({
           SELECT
             fp.PAG_NOME as forma,
             COUNT(DISTINCT pv.VENDA) as qtd_vendas,
-            CAST(SUM(pv.PAG_VALOR) as float) as total,
-            CAST(CASE WHEN COUNT(DISTINCT pv.VENDA) > 0 THEN SUM(pv.PAG_VALOR) / COUNT(DISTINCT pv.VENDA) ELSE 0 END as float) as ticket_medio
+            CAST(SUM(CASE WHEN UPPER(LTRIM(RTRIM(fp.PAG_NOME))) = 'DINHEIRO'
+              THEN pv.PAG_VALOR - ISNULL(pv.PAG_DEVOLUCAO, 0)
+              ELSE pv.PAG_VALOR END) as float) as total,
+            CAST(SUM(CASE WHEN UPPER(LTRIM(RTRIM(fp.PAG_NOME))) = 'DINHEIRO'
+              THEN ISNULL(pv.PAG_DEVOLUCAO, 0) ELSE 0 END) as float) as troco,
+            CAST(CASE WHEN COUNT(DISTINCT pv.VENDA) > 0 THEN SUM(CASE WHEN UPPER(LTRIM(RTRIM(fp.PAG_NOME))) = 'DINHEIRO'
+              THEN pv.PAG_VALOR - ISNULL(pv.PAG_DEVOLUCAO, 0)
+              ELSE pv.PAG_VALOR END) / COUNT(DISTINCT pv.VENDA) ELSE 0 END as float) as ticket_medio
           FROM PAGAMENTOS_VENDAS pv
           JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
           JOIN VENDAS v ON v.VENDA = pv.VENDA
@@ -1156,7 +1162,7 @@ export const inoveRouter = router({
           ORDER BY total DESC
         `);
         await pool.close();
-        return result.recordset as Array<{ forma: string; qtd_vendas: number; total: number; ticket_medio: number }>;
+        return result.recordset as Array<{ forma: string; qtd_vendas: number; total: number; troco: number; ticket_medio: number }>;
       } catch {
         return [];
       }
@@ -1246,7 +1252,9 @@ export const inoveRouter = router({
       const pool = await createInovePool(config);
       const res = await pool.request().query(`
         SELECT fp.PAG_NOME as forma,
-          ISNULL(SUM(pv.PAG_VALOR), 0) as valor,
+          ISNULL(SUM(CASE WHEN UPPER(LTRIM(RTRIM(fp.PAG_NOME))) = 'DINHEIRO'
+            THEN pv.PAG_VALOR - ISNULL(pv.PAG_DEVOLUCAO, 0)
+            ELSE pv.PAG_VALOR END), 0) as valor,
           COUNT(DISTINCT pv.VENDA) as qtd
         FROM PAGAMENTOS_VENDAS pv
         JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
@@ -1463,7 +1471,9 @@ export const inoveRouter = router({
       const res = await pool.request().query(`
         SELECT
           fp.PAG_NOME as forma,
-          CAST(SUM(pv.PAG_VALOR) as float) as total,
+          CAST(SUM(CASE WHEN UPPER(LTRIM(RTRIM(fp.PAG_NOME))) = 'DINHEIRO'
+            THEN pv.PAG_VALOR - ISNULL(pv.PAG_DEVOLUCAO, 0)
+            ELSE pv.PAG_VALOR END) as float) as total,
           COUNT(DISTINCT pv.VENDA) as qtd
         FROM PAGAMENTOS_VENDAS pv
         JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
@@ -1786,7 +1796,9 @@ export const inoveRouter = router({
         `);
         const pagamentos = await pool.request().query(`
           SELECT fp.PAG_NOME as forma,
-            CAST(SUM(pv.PAG_VALOR) as float) as total,
+            CAST(SUM(CASE WHEN UPPER(LTRIM(RTRIM(fp.PAG_NOME))) = 'DINHEIRO'
+              THEN pv.PAG_VALOR - ISNULL(pv.PAG_DEVOLUCAO, 0)
+              ELSE pv.PAG_VALOR END) as float) as total,
             COUNT(DISTINCT pv.VENDA) as qtdVendas
           FROM PAGAMENTOS_VENDAS pv
           JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO
@@ -1935,12 +1947,20 @@ export const inoveRouter = router({
           .groupBy(salesImportPayments.paymentMethod)
           .orderBy(desc(sql`SUM(${salesImportPayments.totalAmount})`));
         const total = rows.reduce((s, r) => s + (Number(r.totalAmount) || 0), 0);
+        const reconciliation = {
+          grossSales: total,
+          discounts: 0,
+          netSales: total,
+          netReceived: total,
+          difference: 0,
+        };
         return rows.map(r => ({
           forma: r.paymentMethod,
           total: Number(r.totalAmount) || 0,
           qtdVendas: Number(r.transactionCount) || 0,
           percentual: total > 0 ? ((Number(r.totalAmount) || 0) / total) * 100 : 0,
           fonte: "local" as const,
+          reconciliation,
         }));
       }
       if (!connRows.length || !connRows[0].active) return localPayments();
@@ -1958,7 +1978,11 @@ export const inoveRouter = router({
         const res = await pool.request().query(`
           SELECT
             fp.PAG_NOME as forma,
-            CAST(SUM(pv.PAG_VALOR) as float) as total,
+            CAST(SUM(CASE WHEN UPPER(LTRIM(RTRIM(fp.PAG_NOME))) = 'DINHEIRO'
+              THEN pv.PAG_VALOR - ISNULL(pv.PAG_DEVOLUCAO, 0)
+              ELSE pv.PAG_VALOR END) as float) as total,
+            CAST(SUM(CASE WHEN UPPER(LTRIM(RTRIM(fp.PAG_NOME))) = 'DINHEIRO'
+              THEN ISNULL(pv.PAG_DEVOLUCAO, 0) ELSE 0 END) as float) as troco,
             COUNT(DISTINCT pv.VENDA) as qtdVendas
           FROM PAGAMENTOS_VENDAS pv
           JOIN VENDAS v ON v.VENDA = pv.VENDA
@@ -1967,15 +1991,34 @@ export const inoveRouter = router({
           GROUP BY fp.PAG_NOME
           ORDER BY total DESC
         `);
+        const salesTotals = await pool.request().query(`
+          SELECT
+            CAST(ISNULL(SUM(v.VEN_TOTAL), 0) as float) as grossSales,
+            CAST(ISNULL(SUM(ISNULL(v.VEN_DESCONTO, 0)), 0) as float) as discounts
+          FROM VENDAS v
+          WHERE v.VEN_SITUACAO = 2 ${monthFilter}
+        `);
         await pool.close();
-        const data = res.recordset as Array<{forma:string;total:number;qtdVendas:number}>;
+        const data = res.recordset as Array<{forma:string;total:number;troco:number;qtdVendas:number}>;
         const totalGeral = data.reduce((s, r) => s + Number(r.total), 0);
+        const grossSales = Number(salesTotals.recordset[0]?.grossSales) || 0;
+        const discounts = Number(salesTotals.recordset[0]?.discounts) || 0;
+        const netSales = grossSales - discounts;
+        const reconciliation = {
+          grossSales,
+          discounts,
+          netSales,
+          netReceived: totalGeral,
+          difference: totalGeral - netSales,
+        };
         return data.map(r => ({
           forma: r.forma,
           total: Number(r.total),
+          troco: Number(r.troco) || 0,
           qtdVendas: Number(r.qtdVendas),
           percentual: totalGeral > 0 ? (Number(r.total) / totalGeral) * 100 : 0,
           fonte: "inove" as const,
+          reconciliation,
         }));
       } catch (err) {
         console.error("[getPaymentMethodsInove] Erro:", err instanceof Error ? err.message : err);
@@ -2338,7 +2381,9 @@ export const inoveRouter = router({
         const payRes = await pool.request().query(`
           SELECT
             ISNULL(fp.PAG_NOME, 'Outros') as formaPagamento,
-            CAST(SUM(pv.PAG_VALOR) as float) as total
+            CAST(SUM(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(fp.PAG_NOME, '')))) = 'DINHEIRO'
+              THEN pv.PAG_VALOR - ISNULL(pv.PAG_DEVOLUCAO, 0)
+              ELSE pv.PAG_VALOR END) as float) as total
           FROM PAGAMENTOS_VENDAS pv
           JOIN VENDAS v ON v.VENDA = pv.VENDA
           LEFT JOIN FORMAS_PAGAMENTOS fp ON fp.FORMA_PAGAMENTO = pv.FORMA_PAGAMENTO

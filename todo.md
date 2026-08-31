@@ -120,11 +120,11 @@
 - [x] Identificar visualmente que as metas de produtos usam uma lista parcial enquanto o cache completo não for renovado
 - [x] Renovar o cache completo de produtos após o INOVE voltar a responder para atualizar integralmente as metas
 - [x] Validar a correção no banco, nas APIs e na visualização móvel da prévia autenticada
-- [ ] Validar a correção no site publicado após o usuário clicar em Publicar
+- [ ] Validar autenticadamente a correção das metas no site publicado
 - [x] Restaurar o código da versão estável 3cf487b9 após regressão para commit antigo do GitHub
 - [x] Reaplicar o fallback do INOVE sobre a versão restaurada
 - [x] Sincronizar a versão estável com o repositório principal sergiohlsafatlejr-jpg/sorveteria_duo_gelatto
-- [ ] Publicar a versão estável em produção pelo botão Publicar
+- [x] Publicar a versão estável em produção pelo botão Publicar
 - [x] Auditar com dados reais os realizados de Picolé, Potes Sorvetes e Açaí Potes de agosto/2026
 - [x] Corrigir o cálculo das metas para somar exatamente os produtos marcados, sem correspondência parcial de nomes
 - [x] Atualizar os Dashboards pelo INOVE a cada 60 segundos enquanto a tela estiver aberta
@@ -133,3 +133,11 @@
 - [x] Não ativar sincronização subminuto em servidor permanente; alternativa descartada pelo usuário para evitar upgrade
 - [x] Preservar os jobs automáticos existentes e não adicionar um novo processo permanente/subminuto
 - [x] Carregar rotas sob demanda para reduzir o bundle inicial e estabilizar o build de produção
+- [x] Auditar a planilha real fechanebti082026.xlsx e comparar o total de agosto com o Relatório de Vendas
+- [x] Identificar a causa da divergência na forma de pagamento Dinheiro e verificar troco, cancelamentos e duplicidades
+- [x] Corrigir a consulta de pagamentos do INOVE para reconciliar com a planilha oficial de recebimentos do período
+- [x] Adicionar teste de regressão para impedir nova diferença entre formas de pagamento e vendas do mês
+- [x] Validar agosto na API após a correção
+- [ ] Validar agosto na tela publicada /reports/sales após publicar a nova correção
+- [x] Explicar na API e na tela a diferença entre faturamento bruto, descontos e recebimentos líquidos do período
+- [x] Permitir abrir e compartilhar diretamente a aba Pagamentos com o período aplicado pela URL

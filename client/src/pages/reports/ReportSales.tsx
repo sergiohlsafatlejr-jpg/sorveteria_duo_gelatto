@@ -295,10 +295,15 @@ function RankingProdutosTab() {
 function PagamentosTab() {
   const today = new Date().toISOString().split("T")[0];
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
-  const [dateFrom, setDateFrom] = useState(weekAgo);
-  const [dateTo, setDateTo] = useState(today);
-  const [appliedFrom, setAppliedFrom] = useState(weekAgo);
-  const [appliedTo, setAppliedTo] = useState(today);
+  const urlParams = new URLSearchParams(window.location.search);
+  const requestedFrom = urlParams.get("from");
+  const requestedTo = urlParams.get("to");
+  const initialFrom = requestedFrom && /^\d{4}-\d{2}-\d{2}$/.test(requestedFrom) ? requestedFrom : weekAgo;
+  const initialTo = requestedTo && /^\d{4}-\d{2}-\d{2}$/.test(requestedTo) ? requestedTo : today;
+  const [dateFrom, setDateFrom] = useState(initialFrom);
+  const [dateTo, setDateTo] = useState(initialTo);
+  const [appliedFrom, setAppliedFrom] = useState(initialFrom);
+  const [appliedTo, setAppliedTo] = useState(initialTo);
 
   const { data: rawPayments = [], isLoading, refetch } = trpc.inove.getPaymentMethodsInove.useQuery(
     { dateFrom: appliedFrom, dateTo: appliedTo },
@@ -309,9 +314,18 @@ function PagamentosTab() {
   const payments = rawPayments.map((r: any) => ({
     forma: r.paymentMethod ?? r.forma ?? "",
     total: Number(r.totalAmount ?? r.total ?? 0),
+    troco: Number(r.troco ?? 0),
     qtd: Number(r.transactionCount ?? r.qtdVendas ?? 0),
   }));
   const totalGeral = payments.reduce((s, p) => s + p.total, 0);
+  const totalTroco = payments.reduce((s, p) => s + p.troco, 0);
+  const reconciliation = (rawPayments[0] as any)?.reconciliation as undefined | {
+    grossSales: number;
+    discounts: number;
+    netSales: number;
+    netReceived: number;
+    difference: number;
+  };
 
   const evolution = rawEvolution.map((r: any) => ({
     month: r.month ?? r.referenceMonth ?? "",
@@ -340,6 +354,34 @@ function PagamentosTab() {
         <div className="text-center py-12 text-muted-foreground">Carregando...</div>
       ) : (
         <>
+          {reconciliation && (
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="rounded-lg border bg-card px-4 py-3">
+                <p className="text-xs text-muted-foreground">Faturamento bruto</p>
+                <p className="font-semibold">{fmt(reconciliation.grossSales)}</p>
+              </div>
+              <div className="rounded-lg border bg-card px-4 py-3">
+                <p className="text-xs text-muted-foreground">Descontos</p>
+                <p className="font-semibold text-amber-600">− {fmt(reconciliation.discounts)}</p>
+              </div>
+              <div className="rounded-lg border bg-card px-4 py-3">
+                <p className="text-xs text-muted-foreground">Vendas líquidas</p>
+                <p className="font-semibold">{fmt(reconciliation.netSales)}</p>
+              </div>
+              <div className="rounded-lg border bg-card px-4 py-3">
+                <p className="text-xs text-muted-foreground">Recebimentos líquidos</p>
+                <p className={`font-semibold ${Math.abs(reconciliation.difference) < 0.01 ? "text-emerald-600" : "text-red-600"}`}>
+                  {fmt(reconciliation.netReceived)}
+                </p>
+              </div>
+            </div>
+          )}
+          {totalTroco > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              <strong>Dinheiro líquido:</strong> o relatório descontou {fmt(totalTroco)} de troco/devolução registrado no INOVE.
+              Total recebido no período: <strong>{fmt(totalGeral)}</strong>.
+            </div>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
               <CardHeader><CardTitle className="text-base">Distribuição por Forma de Pagamento</CardTitle></CardHeader>
@@ -347,7 +389,7 @@ function PagamentosTab() {
                 <ResponsiveContainer width="100%" height={280}>
                   <PieChart>
                     <Pie data={payments} dataKey="total" nameKey="forma" cx="50%" cy="50%" outerRadius={100} label={({ forma, percent }) => `${forma} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {payments.map((p, i) => <Cell key={i} fill={PAYMENT_COLORS[p.forma] || CHART_COLORS[i % CHART_COLORS.length]} />)}
+                      {payments.map((p, i) => <Cell key={p.forma} fill={PAYMENT_COLORS[p.forma] || CHART_COLORS[i % CHART_COLORS.length]} />)}
                     </Pie>
                     <Tooltip formatter={(v: number) => fmt(v)} />
                     <Legend />
@@ -370,7 +412,7 @@ function PagamentosTab() {
                   </thead>
                   <tbody>
                     {payments.map((p, i) => (
-                      <tr key={i} className="border-b">
+                      <tr key={p.forma} className="border-b">
                         <td className="py-2 px-4 flex items-center gap-2">
                           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: PAYMENT_COLORS[p.forma] || CHART_COLORS[i % CHART_COLORS.length] }} />
                           {p.forma}
@@ -503,6 +545,9 @@ function KpiCard({ title, value, sub, icon: Icon, color }: {
 
 // ─── Página Principal ────────────────────────────────────────────────────────
 export default function ReportSales() {
+  const requestedTab = new URLSearchParams(window.location.search).get("tab");
+  const defaultTab = requestedTab === "pagamentos" || requestedTab === "hora" ? requestedTab : "periodo";
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -518,7 +563,7 @@ export default function ReportSales() {
           </p>
         </div>
 
-        <Tabs defaultValue="periodo">
+        <Tabs defaultValue={defaultTab}>
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="periodo">Por Período</TabsTrigger>
             <TabsTrigger value="pagamentos">Pagamentos</TabsTrigger>
