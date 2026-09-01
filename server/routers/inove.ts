@@ -43,6 +43,7 @@ import {
 } from "../inove-dashboard-fallback";
 import {
   calculateProductGoalProgress,
+  mergeProductCatalogWithSales,
   normalizeEpochTimestamp,
   type ProductSale,
 } from "../product-goal-progress";
@@ -691,6 +692,62 @@ export const inoveRouter = router({
         ...snapshot,
         goals: goals.map((goal) => calculateProductGoalProgress(goal, snapshot.products)),
       };
+    }),
+
+  // ── Catálogo completo para seleção nas metas ──────────────────────────────
+  getProductCatalogForGoals: protectedProcedure
+    .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      async function localCatalog() {
+        const [catalogRows, monthlySnapshot] = await Promise.all([
+          db!.select({ nome: products.name, codPdv: products.externalCode })
+            .from(products)
+            .where(eq(products.active, true))
+            .orderBy(products.name),
+          getCachedMonthlyProductSnapshot(input.month, 500),
+        ]);
+        return {
+          products: mergeProductCatalogWithSales(catalogRows, monthlySnapshot.products),
+          source: "cache" as const,
+          updatedAt: monthlySnapshot.updatedAt,
+        };
+      }
+
+      const configRows = await db.select().from(inoveConnectorConfig).limit(1);
+      if (configRows.length === 0 || !configRows[0].active) return localCatalog();
+
+      let pool: MssqlPool | null = null;
+      try {
+        pool = await createInovePool(configRows[0]);
+        const result = await pool.request().query(`
+          SELECT
+            p.PRODUTO AS produtoId,
+            p.PRO_CODIGO AS codPdv,
+            ISNULL(p.PRO_NOME, 'Produto sem nome') AS nome
+          FROM PRODUTOS p
+          WHERE p.PRO_ATIVO = 'S'
+          ORDER BY p.PRO_NOME
+        `);
+        await pool.close();
+        pool = null;
+        const monthlySnapshot = await getCachedMonthlyProductSnapshot(input.month, 500);
+        const catalog = (result.recordset as Array<Record<string, unknown>>).map((row) => ({
+          produtoId: Number(row.produtoId),
+          codPdv: row.codPdv === null || row.codPdv === undefined ? null : String(row.codPdv),
+          nome: String(row.nome),
+        }));
+        return {
+          products: mergeProductCatalogWithSales(catalog, monthlySnapshot.products),
+          source: "live" as const,
+          updatedAt: new Date().toISOString(),
+        };
+      } catch (error) {
+        if (pool) await pool.close().catch(() => {});
+        console.error("[getProductCatalogForGoals] Erro ao consultar INOVE:", error);
+        return localCatalog();
+      }
     }),
 
   // ── Top Produtos Mais Vendidos ────────────────────────────────────────────

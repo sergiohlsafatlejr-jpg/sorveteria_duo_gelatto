@@ -11,6 +11,12 @@ export type ProductSale = {
   total: number;
 };
 
+export type ProductCatalogItem = {
+  produtoId?: number;
+  codPdv?: string | null;
+  nome: string;
+};
+
 export type ProductGoalLike = {
   id: number;
   searchKeywords: string;
@@ -95,6 +101,22 @@ export function calculateProductGoalProgress<T extends ProductGoalLike>(goal: T,
     realRevenue,
     percentQty,
   };
+}
+
+export function mergeProductCatalogWithSales(catalog: ProductCatalogItem[], sales: ProductSale[]): ProductSale[] {
+  const salesById = new Map(sales.flatMap((sale) => sale.produtoId === undefined ? [] : [[Number(sale.produtoId), sale] as const]));
+  const salesByName = new Map(sales.map((sale) => [normalizeProductName(sale.nome), sale]));
+
+  return catalog.map((product) => {
+    const sale = product.produtoId === undefined
+      ? salesByName.get(normalizeProductName(product.nome))
+      : salesById.get(Number(product.produtoId)) ?? salesByName.get(normalizeProductName(product.nome));
+    return {
+      ...product,
+      qtd: Number(sale?.qtd ?? 0),
+      total: Number(sale?.total ?? 0),
+    };
+  });
 }
 
 export function normalizeEpochTimestamp(value: number | string | null | undefined): string | null {

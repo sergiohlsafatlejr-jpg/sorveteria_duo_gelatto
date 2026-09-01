@@ -3,6 +3,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { productGoals } from "../../drizzle/schema";
+import { buildCopiedProductGoal, getPreviousMonthKey, normalizeProductGoalName } from "../product-goal-copy";
 
 export const productGoalsRouter = router({
   // Listar metas de produtos (por mês ou todas ativas)
@@ -104,36 +105,37 @@ export const productGoalsRouter = router({
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
-      // Calcular mês anterior
-      const [year, month] = input.targetMonth.split('-').map(Number);
-      const prevDate = new Date(year, month - 2, 1);
-      const prevMonth = prevDate.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
+      // Cálculo textual evita o deslocamento de fuso que transformava agosto em julho.
+      const prevMonth = getPreviousMonthKey(input.targetMonth);
       // Buscar metas do mês anterior
       const prevGoals = await db.select().from(productGoals)
         .where(and(eq(productGoals.month, prevMonth), eq(productGoals.active, true)));
-      if (prevGoals.length === 0) return { copied: 0 };
-      // Copiar para o mês alvo
+      if (prevGoals.length === 0) return { copied: 0, reactivated: 0, skipped: 0, previousMonth: prevMonth };
+
+      const targetGoals = await db.select().from(productGoals)
+        .where(eq(productGoals.month, input.targetMonth));
+      const existingByName = new Map(targetGoals.map((goal) => [normalizeProductGoalName(goal.productName), goal]));
+
       let copied = 0;
+      let reactivated = 0;
+      let skipped = 0;
       for (const goal of prevGoals) {
-        // Verificar se já existe meta para este produto no mês alvo
-        const existing = await db.select().from(productGoals)
-          .where(and(
-            eq(productGoals.productName, goal.productName),
-            eq(productGoals.month, input.targetMonth)
-          ));
-        if (existing.length === 0) {
-          await db.insert(productGoals).values({
-            productName: goal.productName,
-            searchKeywords: goal.searchKeywords!,
-            targetQuantity: goal.targetQuantity,
-            targetRevenue: goal.targetRevenue,
-            month: input.targetMonth,
-            icon: goal.icon,
-            active: true,
-          });
-          copied++;
+        const key = normalizeProductGoalName(goal.productName);
+        const existing = existingByName.get(key);
+        const copiedValues = buildCopiedProductGoal(goal, input.targetMonth);
+
+        if (!existing) {
+          const [result] = await db.insert(productGoals).values(copiedValues);
+          existingByName.set(key, { ...goal, ...copiedValues, id: result.insertId });
+          copied += 1;
+        } else if (!existing.active) {
+          await db.update(productGoals).set(copiedValues).where(eq(productGoals.id, existing.id));
+          existingByName.set(key, { ...existing, ...copiedValues });
+          reactivated += 1;
+        } else {
+          skipped += 1;
         }
       }
-      return { copied };
+      return { copied, reactivated, skipped, previousMonth: prevMonth };
     }),
 });

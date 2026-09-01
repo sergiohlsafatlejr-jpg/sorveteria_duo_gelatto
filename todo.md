@@ -141,3 +141,10 @@
 - [ ] Validar agosto na tela publicada /reports/sales após publicar a nova correção
 - [x] Explicar na API e na tela a diferença entre faturamento bruto, descontos e recebimentos líquidos do período
 - [x] Permitir abrir e compartilhar diretamente a aba Pagamentos com o período aplicado pela URL
+- [x] Reproduzir e corrigir o botão Copiar mês anterior na tela de Metas de Produtos
+- [x] Preservar os produtos selecionados e evitar metas duplicadas ao copiar agosto para setembro
+- [x] Auditar por que Açaí com Leitinho e Açaí com Banana não aparecem na seleção de produtos
+- [x] Usar o catálogo completo de produtos ativos do INOVE para seleção, sem limitar aos vendidos no mês
+- [x] Adicionar testes de regressão para cópia mensal e disponibilidade do catálogo completo
+- [x] Validar visualmente em prévia autenticada mobile as três metas de setembro e a seleção de Açaí com Banana/Leitinho
+- [x] Corrigir o overflow horizontal do diálogo Nova Meta em telas de 390 px

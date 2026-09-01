@@ -47,7 +47,13 @@ export default function FinProductGoals() {
     { refetchInterval: 60_000 }
   );
   const goals = progressData?.goals ?? [];
-  const topProducts = progressData?.products ?? [];
+  const monthlyProducts = progressData?.products ?? [];
+  const productDialogOpen = showCreateDialog || editingGoal !== null;
+  const { data: catalogData, isLoading: isCatalogLoading } = trpc.inove.getProductCatalogForGoals.useQuery(
+    { month: selectedMonth },
+    { enabled: productDialogOpen, staleTime: 5 * 60_000 }
+  );
+  const selectableProducts = catalogData?.products ?? monthlyProducts;
 
   function invalidateGoals() {
     utils.productGoals.listAll.invalidate();
@@ -86,7 +92,14 @@ export default function FinProductGoals() {
   const copyMut = trpc.productGoals.copyFromPreviousMonth.useMutation({
     onSuccess: (data) => {
       invalidateGoals();
-      toast.success(`${data.copied} meta(s) copiada(s) do mês anterior!`);
+      const changed = data.copied + data.reactivated;
+      if (changed > 0) {
+        toast.success(`${changed} meta(s) copiada(s) de ${data.previousMonth}!`);
+      } else if (data.skipped > 0) {
+        toast.info(`As metas de ${data.previousMonth} já existem em ${selectedMonth}.`);
+      } else {
+        toast.warning(`Nenhuma meta ativa encontrada em ${data.previousMonth}.`);
+      }
     },
     onError: (err) => toast.error(`Erro ao copiar metas: ${err.message}`),
   });
@@ -103,7 +116,7 @@ export default function FinProductGoals() {
   // Persistir ID e nome para o cálculo continuar exato mesmo se o produto for renomeado no INOVE.
   function getKeywordsFromSelected(): string {
     return JSON.stringify(selectedProducts.map((name) => {
-      const product = topProducts.find((item) => item.nome === name);
+      const product = selectableProducts.find((item) => item.nome === name);
       return { ...(product?.produtoId ? { id: product.produtoId } : {}), name };
     }));
   }
@@ -154,17 +167,17 @@ export default function FinProductGoals() {
 
   // Filtrar produtos pela busca
   const filteredProducts = useMemo(() => {
-    if (!productSearch) return topProducts;
+    if (!productSearch) return selectableProducts;
     const search = productSearch.toUpperCase();
-    return topProducts.filter(p => p.nome.toUpperCase().includes(search));
-  }, [productSearch, topProducts]);
+    return selectableProducts.filter(p => p.nome.toUpperCase().includes(search));
+  }, [productSearch, selectableProducts]);
 
   const goalsWithProgress = goals;
 
   // Componente de seleção de produtos com checkboxes
   function ProductSelector() {
     return (
-      <div className="space-y-3">
+      <div className="min-w-0 max-w-full space-y-3 overflow-hidden">
         <Label>Selecione os produtos do INOVE</Label>
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -193,10 +206,12 @@ export default function FinProductGoals() {
         )}
 
         {/* Lista de produtos com checkboxes */}
-        <div className="border rounded-md max-h-[250px] overflow-y-auto">
-          {filteredProducts.length === 0 ? (
+        <div className="min-w-0 border rounded-md max-h-[250px] overflow-x-hidden overflow-y-auto">
+          {isCatalogLoading ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Carregando catálogo completo do INOVE...</p>
+          ) : filteredProducts.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
-              {topProducts.length === 0 ? "Nenhum produto encontrado no INOVE" : "Nenhum resultado para a busca"}
+              {selectableProducts.length === 0 ? "Nenhum produto encontrado no INOVE" : "Nenhum resultado para a busca"}
             </p>
           ) : (
             <div className="divide-y">
@@ -204,8 +219,8 @@ export default function FinProductGoals() {
                 const isSelected = selectedProducts.includes(product.nome);
                 return (
                   <label
-                    key={idx}
-                    className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors ${
+                    key={product.produtoId ?? `${product.nome}-${idx}`}
+                    className={`flex min-w-0 items-center gap-3 overflow-hidden px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors ${
                       isSelected ? "bg-primary/5" : ""
                     }`}
                   >
@@ -226,8 +241,9 @@ export default function FinProductGoals() {
             </div>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="max-w-full whitespace-normal break-words text-xs text-muted-foreground">
           {selectedProducts.length} produto(s) selecionado(s) — a meta será calculada somando as vendas de todos os itens marcados.
+          {catalogData ? ` Catálogo ${catalogData.source === "live" ? "ao vivo" : "sincronizado"}: ${selectableProducts.length} produtos ativos.` : ""}
         </p>
       </div>
     );
@@ -270,18 +286,18 @@ export default function FinProductGoals() {
                 <Plus className="h-4 w-4 mr-1" /> Nova Meta
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogContent className="w-[calc(100vw-1rem)] max-w-lg max-h-[90vh] overflow-x-hidden overflow-y-auto px-4 sm:px-6">
               <DialogHeader>
                 <DialogTitle>Nova Meta de Produto</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4">
+              <div className="min-w-0 max-w-full space-y-4 overflow-hidden">
                 <div className="grid grid-cols-[auto_1fr] gap-4 items-center">
                   <Label>Ícone</Label>
                   <Input value={formIcon} onChange={(e) => setFormIcon(e.target.value)} placeholder="🍨" className="w-20" />
                 </div>
                 <div>
                   <Label>Nome da Meta</Label>
-                  <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} placeholder="Ex: Açaí 1,5L" />
+                  <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} placeholder="Ex: Açaí 1,5L" className="min-w-0 w-full" />
                 </div>
 
                 {/* Seleção de produtos com checkboxes */}
@@ -290,7 +306,7 @@ export default function FinProductGoals() {
                 <div>
                   <Label>Meta (unidades/mês)</Label>
                   <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} placeholder="100" />
-                  <p className="text-xs text-muted-foreground mt-1">A meta de faturamento geral é a mesma configurada no Forecast.</p>
+                  <p className="max-w-full whitespace-normal break-words text-xs text-muted-foreground mt-1">A meta de faturamento geral é a mesma configurada no Forecast.</p>
                 </div>
                 <Button onClick={handleCreate} disabled={createMut.isPending} className="w-full">
                   {createMut.isPending ? "Criando..." : "Criar Meta"}
@@ -467,24 +483,24 @@ export default function FinProductGoals() {
       </Card>
 
       <Dialog open={editingGoal !== null} onOpenChange={(open) => { if (!open) { setEditingGoal(null); resetForm(); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-lg max-h-[90vh] overflow-x-hidden overflow-y-auto px-4 sm:px-6">
           <DialogHeader>
             <DialogTitle>Editar Meta: {formProductName}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="min-w-0 max-w-full space-y-4 overflow-hidden">
             <div className="grid grid-cols-[auto_1fr] gap-4 items-center">
               <Label>Ícone</Label>
               <Input value={formIcon} onChange={(e) => setFormIcon(e.target.value)} className="w-20" />
             </div>
             <div>
               <Label>Nome da Meta</Label>
-              <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} />
+              <Input value={formProductName} onChange={(e) => setFormProductName(e.target.value)} className="min-w-0 w-full" />
             </div>
             <ProductSelector />
             <div>
               <Label>Meta (unidades/mês)</Label>
               <Input type="number" value={formTargetQty} onChange={(e) => setFormTargetQty(e.target.value)} />
-              <p className="text-xs text-muted-foreground mt-1">A meta de faturamento geral é a mesma configurada no Forecast.</p>
+              <p className="max-w-full whitespace-normal break-words text-xs text-muted-foreground mt-1">A meta de faturamento geral é a mesma configurada no Forecast.</p>
             </div>
             <Button onClick={() => editingGoal !== null && handleUpdate(editingGoal)} disabled={updateMut.isPending || editingGoal === null} className="w-full">
               {updateMut.isPending ? "Salvando..." : "Salvar Alterações"}
