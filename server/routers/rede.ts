@@ -13,13 +13,24 @@ import {
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import { storagePut } from "../storage";
+import { sdk } from "../_core/sdk";
+import {
+  areRedePaymentMethodsCompatible,
+  isAcceptedRedeSale,
+  getRedeDateRange,
+  normalizeRedeHeader,
+  parseRedeDate,
+  parseRedeDecimal,
+  parseRedeOptionalDecimal,
+  parseRedeTime,
+} from "../rede-excel-parsing";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
  * Parse do arquivo Excel da Rede
  */
-async function parseRedeExcel(buffer: Buffer) {
+export async function parseRedeExcel(buffer: Buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
   const sheet = workbook.Sheets["vendas"];
   if (!sheet) throw new Error("Aba 'vendas' não encontrada");
@@ -42,46 +53,48 @@ async function parseRedeExcel(buffer: Buffer) {
   // Mapear colunas
   const colMap: Record<string, number> = {};
   headers.forEach((h, idx) => {
-    if (h) colMap[h.toLowerCase().trim()] = idx;
+    if (h) colMap[normalizeRedeHeader(h)] = idx;
   });
+
+  const cell = (row: any[], header: string) => row[colMap[normalizeRedeHeader(header)]];
 
   // Extrair vendas
   const sales = rows
-    .filter((row: any[]) => row[colMap["data da venda"]])
+    .filter((row: any[]) => cell(row, "data da venda"))
     .map((row: any[]) => ({
-      dataDaVenda: (() => { const v = row[colMap["data da venda"]]; if (typeof v === "number") return new Date((v - 25569) * 86400000); return new Date(v); })(),
-      horaDaVenda: (() => { const v = row[colMap["hora da venda"]]; if (typeof v === "number" && v < 1) { const totalSec = Math.round(v * 86400); const h = Math.floor(totalSec / 3600); const m = Math.floor((totalSec % 3600) / 60); return `${h.toString().padStart(2,"0")}:${m.toString().padStart(2,"0")}`; } return v ? String(v) : undefined; })(),
-      statusDaVenda: String(row[colMap["status da venda"]] || "").trim(),
-      valorDaVendaOriginal: parseFloat(row[colMap["valor da venda original"]] || 0),
-      valorDaVendaAtualizado: parseFloat(row[colMap["valor da venda atualizado"]] || 0),
-      modalidade: String(row[colMap["modalidade"]] || "").trim(),
-      tipo: row[colMap["tipo"]] ? String(row[colMap["tipo"]]).trim() : undefined,
-      bandeira: row[colMap["bandeira"]] ? String(row[colMap["bandeira"]]).trim() : undefined,
-      numeroDeParcelas: row[colMap["número de parcelas"]] ? parseInt(row[colMap["número de parcelas"]]) : undefined,
-      taxaMDR: row[colMap["taxa MDR"]] ? parseFloat(row[colMap["taxa MDR"]]) : undefined,
-      valorMDR: parseFloat(row[colMap["valor MDR"]] || 0),
-      taxaRecebimentoAutomatico: row[colMap["taxa de recebimento automático"]] ? parseFloat(row[colMap["taxa de recebimento automático"]]) : undefined,
-      valorTaxaRecebimentoAutomatico: parseFloat(row[colMap["valor taxa de recebimento automático"]] || 0),
-      valorTotalTaxas: parseFloat(row[colMap["valor total das taxas descontadas (MDR+recebimento automático)"]] || 0),
-      valorLiquido: row[colMap["valor líquido"]] ? parseFloat(row[colMap["valor líquido"]]) : undefined,
-      nsuCV: String(row[colMap["nsu/cv"]] || "").trim(),
-      idTransacao: row[colMap["id transação"]] ? String(row[colMap["id transação"]]).trim() : undefined,
-      numeroAutorizacao: row[colMap["número da autorização (Auto)"]] ? String(row[colMap["número da autorização (Auto)"]]).trim() : undefined,
-      prazoDeRecebimento: row[colMap["prazo de recebimento"]] ? String(row[colMap["prazo de recebimento"]]).trim() : undefined,
-      numeroDoEstabelecimento: String(row[colMap["número do estabelecimento"]] || "").trim(),
-      nomeDoEstabelecimento: row[colMap["nome do estabelecimento"]] ? String(row[colMap["nome do estabelecimento"]]).trim() : undefined,
-      cnpj: row[colMap["cnpj"]] ? String(row[colMap["cnpj"]]).trim() : undefined,
-      numeroDoCartao: row[colMap["número do cartão"]] ? String(row[colMap["número do cartão"]]).trim() : undefined,
-      codigoDaMaquininha: row[colMap["código da maquininha"]] ? String(row[colMap["código da maquininha"]]).trim() : undefined,
-      tipoDeMaquininha: row[colMap["tipo de maquininha"]] ? String(row[colMap["tipo de maquininha"]]).trim() : undefined,
-      canceladaPeloEstabelecimento: String(row[colMap["cancelada pelo estabelecimento"]] || "").toLowerCase() === "sim",
-      dataDoCancelamento: row[colMap["data do cancelamento"]] ? new Date(row[colMap["data do cancelamento"]]) : undefined,
-      valorCancelado: row[colMap["valor cancelado"]] ? parseFloat(row[colMap["valor cancelado"]]) : undefined,
-      emDisputaDeChargeback: String(row[colMap["em disputa de chargeback"]] || "").toLowerCase() === "sim",
-      dataQueEntrouEmDisputaDeChargeback: row[colMap["data que entrou em disputa de chargeback"]] ? new Date(row[colMap["data que entrou em disputa de chargeback"]]) : undefined,
-      resolucaoDoChargeback: row[colMap["resolução do chargeback"]] ? String(row[colMap["resolução do chargeback"]]).trim() : undefined,
+      dataDaVenda: parseRedeDate(cell(row, "data da venda")),
+      horaDaVenda: parseRedeTime(cell(row, "hora da venda")),
+      statusDaVenda: String(cell(row, "status da venda") || "").trim(),
+      valorDaVendaOriginal: parseRedeDecimal(cell(row, "valor da venda original")),
+      valorDaVendaAtualizado: parseRedeDecimal(cell(row, "valor da venda atualizado")),
+      modalidade: String(cell(row, "modalidade") || "").trim(),
+      tipo: cell(row, "tipo") ? String(cell(row, "tipo")).trim() : undefined,
+      bandeira: cell(row, "bandeira") ? String(cell(row, "bandeira")).trim() : undefined,
+      numeroDeParcelas: parseRedeOptionalDecimal(cell(row, "número de parcelas")),
+      taxaMDR: parseRedeOptionalDecimal(cell(row, "taxa MDR")),
+      valorMDR: parseRedeDecimal(cell(row, "valor MDR")),
+      taxaRecebimentoAutomatico: parseRedeOptionalDecimal(cell(row, "taxa de recebimento automático")),
+      valorTaxaRecebimentoAutomatico: parseRedeDecimal(cell(row, "valor taxa de recebimento automático")),
+      valorTotalTaxas: parseRedeDecimal(cell(row, "valor total das taxas descontadas (MDR+recebimento automático)")),
+      valorLiquido: parseRedeOptionalDecimal(cell(row, "valor líquido")),
+      nsuCV: String(cell(row, "nsu/cv") || "").trim(),
+      idTransacao: cell(row, "id transação") ? String(cell(row, "id transação")).trim() : undefined,
+      numeroAutorizacao: cell(row, "número da autorização (Auto)") ? String(cell(row, "número da autorização (Auto)")).trim() : undefined,
+      prazoDeRecebimento: cell(row, "prazo de recebimento") ? String(cell(row, "prazo de recebimento")).trim() : undefined,
+      numeroDoEstabelecimento: String(cell(row, "número do estabelecimento") || "").trim(),
+      nomeDoEstabelecimento: cell(row, "nome do estabelecimento") ? String(cell(row, "nome do estabelecimento")).trim() : undefined,
+      cnpj: cell(row, "cnpj") ? String(cell(row, "cnpj")).trim() : undefined,
+      numeroDoCartao: cell(row, "número do cartão") ? String(cell(row, "número do cartão")).trim() : undefined,
+      codigoDaMaquininha: cell(row, "código da maquininha") ? String(cell(row, "código da maquininha")).trim() : undefined,
+      tipoDeMaquininha: cell(row, "tipo de maquininha") ? String(cell(row, "tipo de maquininha")).trim() : undefined,
+      canceladaPeloEstabelecimento: normalizeRedeHeader(cell(row, "cancelada pelo estabelecimento")) === "sim",
+      dataDoCancelamento: cell(row, "data do cancelamento") ? parseRedeDate(cell(row, "data do cancelamento")) : undefined,
+      valorCancelado: parseRedeOptionalDecimal(cell(row, "valor cancelado")),
+      emDisputaDeChargeback: normalizeRedeHeader(cell(row, "em disputa de chargeback")) === "sim",
+      dataQueEntrouEmDisputaDeChargeback: cell(row, "data que entrou em disputa de chargeback") ? parseRedeDate(cell(row, "data que entrou em disputa de chargeback")) : undefined,
+      resolucaoDoChargeback: cell(row, "resolução do chargeback") ? String(cell(row, "resolução do chargeback")).trim() : undefined,
     }))
-    .filter((sale) => sale.nsuCV && sale.valorDaVendaOriginal > 0);
+    .filter((sale) => sale.nsuCV && sale.valorDaVendaOriginal > 0 && isAcceptedRedeSale(sale.statusDaVenda, sale.canceladaPeloEstabelecimento));
 
   return sales;
 }
@@ -250,13 +263,12 @@ export const redeRouter = router({
         if (redeSales.length === 0) throw new Error("Nenhuma venda encontrada para conciliação");
 
         // Buscar vendas INOVE no período
-        const periodStart = redeSales[0].dataDaVenda;
-        const periodEnd = redeSales[redeSales.length - 1].dataDaVenda;
+        const { start: periodStart, end: periodEnd } = getRedeDateRange(redeSales.map((sale) => sale.dataDaVenda));
         const periodStartStr = periodStart.toISOString().split("T")[0];
         const periodEndStr = periodEnd.toISOString().split("T")[0];
 
         // Tentar obter vendas individuais de cartão do banco de dados INOVE (SQL Server)
-        let inovePayments: Array<{ vendaId: number; dataHoraVenda: string; valor: number; formaPagamento: string }> = [];
+        let inovePayments: Array<{ paymentKey: string; vendaId: number; dataHoraVenda: string; valor: number; formaPagamento: string }> = [];
         const connConfig = await db.select().from(inoveConnectorConfig).limit(1);
 
         if (connConfig.length > 0 && connConfig[0].active) {
@@ -276,12 +288,21 @@ export const redeRouter = router({
               WHERE v.VEN_SITUACAO = 2
                 AND v.VEN_DATA_FIM >= '${periodStartStr} 00:00:00'
                 AND v.VEN_DATA_FIM <= '${periodEndStr} 23:59:59'
-                AND (fp.PAG_NOME LIKE '%CART%' OR fp.PAG_NOME LIKE '%CRED%' OR fp.PAG_NOME LIKE '%DEB%' OR fp.PAG_NOME LIKE '%REDE%')
+                AND (
+                  fp.PAG_NOME LIKE '%CART%'
+                  OR fp.PAG_NOME LIKE '%CRED%'
+                  OR fp.PAG_NOME LIKE '%DEB%'
+                  OR fp.PAG_NOME LIKE '%REDE%'
+                  OR fp.PAG_NOME LIKE '%PIX%'
+                  OR fp.PAG_NOME LIKE '%VOUCH%'
+                  OR fp.PAG_NOME LIKE '%VALE%'
+                )
             `);
 
             await pool.close();
 
-            inovePayments = (queryResult.recordset as any[]).map(row => ({
+            inovePayments = (queryResult.recordset as any[]).map((row, index) => ({
+              paymentKey: `${row.vendaId}:${index}`,
               vendaId: Number(row.vendaId),
               dataHoraVenda: row.dataHoraVenda,
               valor: Number(row.valor),
@@ -308,6 +329,7 @@ export const redeRouter = router({
           inovePayments = localSales
             .filter(s => s.paymentMethod === "credit_card" || s.paymentMethod === "debit_card")
             .map(s => ({
+              paymentKey: `local:${s.id}`,
               vendaId: s.id,
               dataHoraVenda: s.createdAt.toISOString().replace("T", " ").slice(0, 19),
               valor: parseFloat(s.finalTotal),
@@ -317,7 +339,7 @@ export const redeRouter = router({
 
         // ═══ CONCILIAÇÃO EM 3 NÍVEIS ═══
         const reconciliations: any[] = [];
-        const matchedInoveIds = new Set<number>();
+        const matchedInovePaymentKeys = new Set<string>();
         const matchedRedeIds = new Set<number>();
 
         // --- NÍVEL 1: Match por valor + hora (±10 minutos) ---
@@ -336,7 +358,8 @@ export const redeRouter = router({
           let bestDiffMin = 999;
 
           for (const cand of inovePayments) {
-            if (matchedInoveIds.has(cand.vendaId)) continue;
+            if (matchedInovePaymentKeys.has(cand.paymentKey)) continue;
+            if (!areRedePaymentMethodsCompatible(redeSale.modalidade, cand.formaPagamento)) continue;
             const candVal = cand.valor;
             if (Math.abs(candVal - amount) > 0.02) continue; // tolerância de 2 centavos
 
@@ -356,7 +379,7 @@ export const redeRouter = router({
           }
 
           if (bestMatch) {
-            matchedInoveIds.add(bestMatch.vendaId);
+            matchedInovePaymentKeys.add(bestMatch.paymentKey);
             matchedRedeIds.add(redeSale.id);
             reconciliations.push({
               redeSaleId: redeSale.id,
@@ -384,7 +407,8 @@ export const redeRouter = router({
           let bestMatch: typeof inovePayments[0] | null = null;
 
           for (const cand of inovePayments) {
-            if (matchedInoveIds.has(cand.vendaId)) continue;
+            if (matchedInovePaymentKeys.has(cand.paymentKey)) continue;
+            if (!areRedePaymentMethodsCompatible(redeSale.modalidade, cand.formaPagamento)) continue;
             if (Math.abs(cand.valor - amount) > 0.02) continue;
 
             const candDateStr = cand.dataHoraVenda.split(" ")[0];
@@ -395,7 +419,7 @@ export const redeRouter = router({
           }
 
           if (bestMatch) {
-            matchedInoveIds.add(bestMatch.vendaId);
+            matchedInovePaymentKeys.add(bestMatch.paymentKey);
             matchedRedeIds.add(redeSale.id);
             reconciliations.push({
               redeSaleId: redeSale.id,
@@ -426,7 +450,7 @@ export const redeRouter = router({
         // Agrupar pagamentos INOVE não conciliados por dia
         const unmatchedInoveByDay = new Map<string, typeof inovePayments>();
         for (const cand of inovePayments) {
-          if (matchedInoveIds.has(cand.vendaId)) continue;
+          if (matchedInovePaymentKeys.has(cand.paymentKey)) continue;
           const day = cand.dataHoraVenda.split(" ")[0];
           if (!unmatchedInoveByDay.has(day)) unmatchedInoveByDay.set(day, []);
           unmatchedInoveByDay.get(day)!.push(cand);
@@ -798,6 +822,12 @@ redeExpressRouter.post("/api/rede/upload", redeUpload.single("file"), async (req
     const fs = await import("fs");
     const buffer = fs.readFileSync(req.file.path);
     fs.unlinkSync(req.file.path);
+    let user;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      return res.status(401).json({ error: "Sessão inválida. Entre novamente para importar a planilha Rede." });
+    }
     const periodStart = req.body.periodStart;
     const periodEnd = req.body.periodEnd;
     if (!periodStart || !periodEnd) return res.status(400).json({ error: "Período não informado" });
@@ -811,6 +841,24 @@ redeExpressRouter.post("/api/rede/upload", redeUpload.single("file"), async (req
     try { sales = await parseRedeExcel(buffer); } catch (parseErr: any) { console.error("[rede/upload] Parse error:", parseErr.message); return res.status(400).json({ error: "Erro no parse: " + parseErr.message }); }
     if (sales.length === 0) return res.status(400).json({ error: "Nenhuma venda encontrada no arquivo" });
 
+    const totalValue = sales.reduce((sum, sale) => sum + sale.valorDaVendaOriginal, 0).toFixed(2);
+    const [existingImport] = await db
+      .select({ id: redeImportFiles.id })
+      .from(redeImportFiles)
+      .where(and(
+        eq(redeImportFiles.fileName, req.file.originalname),
+        eq(redeImportFiles.totalRecords, sales.length),
+        eq(redeImportFiles.totalValue, totalValue),
+      ))
+      .limit(1);
+    if (existingImport) {
+      return res.status(409).json({ error: "Esta planilha Rede já foi importada.", importFileId: existingImport.id });
+    }
+
+    const actualDates = sales.map((sale) => sale.dataDaVenda.getTime()).filter(Number.isFinite);
+    const actualPeriodStart = new Date(Math.min(...actualDates));
+    const actualPeriodEnd = new Date(Math.max(...actualDates));
+
     // Upload do arquivo para S3
     const fileKey = `rede-imports/${Date.now()}-${req.file.originalname}`;
     const { url: fileUrl } = await storagePut(fileKey, buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -819,11 +867,11 @@ redeExpressRouter.post("/api/rede/upload", redeUpload.single("file"), async (req
     const [importFile] = await db.insert(redeImportFiles).values({
       fileName: req.file.originalname,
       fileUrl,
-      periodStart: new Date(periodStart),
-      periodEnd: new Date(periodEnd),
+      periodStart: actualPeriodStart,
+      periodEnd: actualPeriodEnd,
       totalRecords: sales.length,
-      totalValue: String(sales.reduce((sum, s) => sum + (s.valorDaVendaOriginal || 0), 0).toFixed(2)),
-      importedBy: 0,
+      totalValue,
+      importedBy: user.id,
     }).$returningId();
 
     // Inserir vendas em lotes

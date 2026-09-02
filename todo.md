@@ -83,7 +83,7 @@
 - [x] Validar com credenciais reais os fluxos INOVE e Forecast após a sincronização
 - [x] Validar importação de notas/PDF com um arquivo fiscal real do usuário
 - [x] Confirmar no banco os registros da nota PDF real importada, sem duplicidades, erros ou placeholders
-- [ ] Validar importação e conciliação Rede com um arquivo Excel real do usuário
+- [x] Validar ponta a ponta a importação e conciliação Rede com um arquivo Excel real do usuário
 - [x] Diagnosticar e corrigir o site publicado exibindo "This site is under maintenance"
 - [x] Confirmar configuração ativa e conectividade do conector INOVE no banco novo
 - [x] Sincronizar e persistir produtos e saldos de estoque reais do INOVE
@@ -155,3 +155,13 @@
 - [x] Executar pré-validação de duplicidade, quantidades e soma dos itens contra o total da nota
 - [x] Importar a NF-e real somente após a pré-validação e confirmar os registros no MySQL
 - [x] Validar a interface responsiva, testes e build do importador corrigido
+- [x] Corrigir leitura de valores monetários e percentuais formatados nas planilhas Rede
+- [x] Excluir transações expiradas, negadas e canceladas dos totais importados da Rede
+- [x] Investigar e tratar NSU duplicado na planilha real de agosto sem remover vendas legítimas
+- [x] Revalidar os dois arquivos Rede e a conciliação com o INOVE após corrigir o parser
+- [x] Executar uma importação autenticada real da planilha Rede de agosto e confirmar rede_import_files e rede_sales_import no MySQL
+- [x] Executar a conciliação real do arquivo importado e confirmar rede_inove_reconciliation e suas estatísticas no MySQL
+- [x] Revalidar a planilha Rede de julho contra o INOVE ou documentar um bloqueio técnico verificável
+- [x] Corrigir o período invertido da conciliação Rede calculando menor e maior data, independentemente da ordem da planilha
+- [x] Incluir PIX do INOVE na conciliação Rede quando a planilha da adquirente contiver transações PIX
+- [x] Distinguir cada linha de pagamento do INOVE e exigir modalidade compatível para não cruzar PIX, débito, crédito ou voucher incorretamente
