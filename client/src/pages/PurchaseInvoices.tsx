@@ -99,6 +99,8 @@ export default function PurchaseInvoices() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [header, setHeader] = useState({ supplierName: "", supplierCnpj: "", invoiceNumber: "", issueDate: "", totalAmount: 0 });
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
+  const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "processing">("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const listInput = useMemo(() => ({ status, search, limit: 100 }), [status, search]);
   const { data: invoices = [], isLoading } = trpc.purchaseInvoices.list.useQuery(listInput);
@@ -127,23 +129,6 @@ export default function PurchaseInvoices() {
     })));
     setEditing(false);
   }, [detail]);
-
-  const uploadMutation = trpc.purchaseInvoices.uploadAndExtract.useMutation({
-    onSuccess: (result) => {
-      const count = result.documentInvoiceCount ?? 1;
-      toast.success(
-        count > 1
-          ? `${count} notas foram separadas do PDF${result.status === "review_required" ? " e enviadas para revisão." : "."}`
-          : result.status === "review_required"
-            ? "PDF extraído e enviado para revisão."
-            : "PDF extraído com sucesso.",
-      );
-      void utils.purchaseInvoices.invalidate();
-      setSelectedId(result.invoiceId);
-      if (inputRef.current) inputRef.current.value = "";
-    },
-    onError: (error) => toast.error(error.message),
-  });
 
   const reprocessMutation = trpc.purchaseInvoices.reprocess.useMutation({
     onSuccess: () => {
@@ -180,14 +165,52 @@ export default function PurchaseInvoices() {
       toast.error("Selecione um arquivo PDF válido.");
       return;
     }
-    if (file.size > 15 * 1024 * 1024) {
-      toast.error("O PDF deve ter no máximo 15 MB.");
+    if (file.size > 80 * 1024 * 1024) {
+      toast.error("O PDF deve ter no máximo 80 MB.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => uploadMutation.mutate({ fileName: file.name, mimeType: "application/pdf", base64: String(reader.result) });
-    reader.onerror = () => toast.error("Não foi possível ler o arquivo.");
-    reader.readAsDataURL(file);
+    const formData = new FormData();
+    formData.append("file", file);
+    const request = new XMLHttpRequest();
+    let processingTimer: ReturnType<typeof setInterval> | null = null;
+    request.open("POST", "/api/purchase-invoices/upload");
+    request.withCredentials = true;
+    setUploadStage("uploading");
+    setUploadProgress(1);
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      setUploadProgress(Math.max(1, Math.round((event.loaded / event.total) * 25)));
+    };
+    request.upload.onload = () => {
+      setUploadStage("processing");
+      setUploadProgress(25);
+      processingTimer = setInterval(() => setUploadProgress((value) => Math.min(90, value + 1)), 2500);
+    };
+    request.onload = () => {
+      if (processingTimer) clearInterval(processingTimer);
+      setUploadStage("idle");
+      setUploadProgress(100);
+      let result: any = null;
+      try { result = JSON.parse(request.responseText); } catch { result = null; }
+      if (request.status < 200 || request.status >= 300 || result?.error) {
+        toast.error(result?.error || "Não foi possível processar o PDF.");
+        setUploadProgress(0);
+        return;
+      }
+      const count = result.documentInvoiceCount ?? 1;
+      const items = result.documentItemCount ?? 0;
+      toast.success(`${count} nota(s) e ${items} item(ns) processados. Revise antes de confirmar as entradas.`);
+      void utils.purchaseInvoices.invalidate();
+      setSelectedId(result.invoiceId);
+      if (inputRef.current) inputRef.current.value = "";
+    };
+    request.onerror = () => {
+      if (processingTimer) clearInterval(processingTimer);
+      setUploadStage("idle");
+      setUploadProgress(0);
+      toast.error("A conexão foi interrompida durante o envio do PDF.");
+    };
+    request.send(formData);
   }
 
   async function openPdf() {
@@ -245,13 +268,13 @@ export default function PurchaseInvoices() {
               onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={(event) => { event.preventDefault(); setDragging(false); const file = event.dataTransfer.files[0]; if (file) handleFile(file); }}
-              onClick={() => !uploadMutation.isPending && inputRef.current?.click()}
+              onClick={() => uploadStage === "idle" && inputRef.current?.click()}
             >
               <input ref={inputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) handleFile(file); }} />
-              {uploadMutation.isPending ? (
-                <div className="flex flex-col items-center gap-3"><Loader2 className="h-10 w-10 animate-spin text-primary" /><p className="font-medium">Armazenando e extraindo todos os itens...</p><p className="text-xs text-muted-foreground">Mantenha esta página aberta até a conclusão.</p></div>
+              {uploadStage !== "idle" ? (
+                <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-3"><Loader2 className="h-10 w-10 animate-spin text-primary" /><p className="font-medium">{uploadStage === "uploading" ? `Enviando PDF — ${uploadProgress}%` : `Extraindo as notas e os itens — ${uploadProgress}%`}</p><div className="h-2 w-full overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-[width] duration-300" style={{ width: `${uploadProgress}%` }} /></div><p className="text-xs text-muted-foreground">{uploadStage === "uploading" ? "O arquivo grande é enviado diretamente, sem conversão para base64." : "O lote tem 20 páginas; mantenha esta página aberta. A extração pode levar alguns minutos."}</p></div>
               ) : (
-                <div className="flex flex-col items-center gap-3"><div className="rounded-2xl bg-primary/10 p-3 text-primary transition-transform group-hover:-translate-y-0.5"><Upload className="h-7 w-7" /></div><div><p className="font-semibold">Arraste o PDF da nota fiscal aqui</p><p className="mt-1 text-sm text-muted-foreground">Pode conter uma ou várias notas • máximo de 15 MB</p></div></div>
+                <div className="flex flex-col items-center gap-3"><div className="rounded-2xl bg-primary/10 p-3 text-primary transition-transform group-hover:-translate-y-0.5"><Upload className="h-7 w-7" /></div><div><p className="font-semibold">Arraste o PDF da nota fiscal aqui</p><p className="mt-1 text-sm text-muted-foreground">Pode conter uma ou várias notas • máximo de 80 MB</p></div></div>
               )}
             </div>
           </CardContent>
@@ -301,7 +324,7 @@ export default function PurchaseInvoices() {
           {detailLoading || !detail ? <div className="py-16 text-center text-muted-foreground"><Loader2 className="mx-auto mb-3 h-7 w-7 animate-spin" />Carregando itens...</div> : (
             <div className="space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/35 p-4">
-                <div className="flex flex-wrap items-center gap-3"><StatusBadge status={detail.invoice.status as keyof typeof STATUS} /><span className="text-sm text-muted-foreground">{detail.invoice.fileName}</span></div>
+                <div className="flex flex-wrap items-center gap-3"><StatusBadge status={detail.invoice.status as keyof typeof STATUS} />{detail.invoice.operationNature && <Badge variant={detail.invoice.operationNature === "VENDA" ? "secondary" : "destructive"}>{detail.invoice.operationNature}</Badge>}<span className="text-sm text-muted-foreground">{detail.invoice.fileName}</span></div>
                 <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void openPdf()} disabled={fileUrlQuery.isFetching}><ExternalLink className="mr-2 h-4 w-4" />Abrir PDF</Button>{detail.invoice.status !== "confirmed" && <Button size="sm" variant="outline" onClick={() => reprocessMutation.mutate({ invoiceId: detail.invoice.id })} disabled={reprocessMutation.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${reprocessMutation.isPending ? "animate-spin" : ""}`} />Reprocessar</Button>}{!editing && detail.invoice.status !== "confirmed" && <Button size="sm" variant="outline" onClick={() => setEditing(true)}><Pencil className="mr-2 h-4 w-4" />Editar revisão</Button>}{!editing && detail.invoice.status === "extracted" && <Button size="sm" onClick={() => setConfirmOpen(true)}><PackageCheck className="mr-2 h-4 w-4" />Confirmar entradas</Button>}</div>
               </div>
 

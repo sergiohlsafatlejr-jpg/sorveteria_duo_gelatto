@@ -148,3 +148,10 @@
 - [x] Adicionar testes de regressão para cópia mensal e disponibilidade do catálogo completo
 - [x] Validar visualmente em prévia autenticada mobile as três metas de setembro e a seleção de Açaí com Banana/Leitinho
 - [x] Corrigir o overflow horizontal do diálogo Nova Meta em telas de 390 px
+- [x] Inspecionar a NF-eJHN08-2026.pdf e identificar fornecedor, chave, data, totais, produtos e unidades
+- [x] Reproduzir a falha ou incompatibilidade do PDF na página /purchases/invoices sem gravar dados
+- [x] Adaptar o upload e o parser ao formato real da NF-e preservando a revisão humana antes da confirmação
+- [x] Exibir progresso detalhado durante o processamento do PDF e estados de erro compreensíveis
+- [x] Executar pré-validação de duplicidade, quantidades e soma dos itens contra o total da nota
+- [x] Importar a NF-e real somente após a pré-validação e confirmar os registros no MySQL
+- [x] Validar a interface responsiva, testes e build do importador corrigido

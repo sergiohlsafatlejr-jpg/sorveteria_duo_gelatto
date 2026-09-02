@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   isInoveSystemName,
+  invoiceNumberFromNfeAccessKey,
   isSorvefortSupplier,
   isTenLiterItem,
+  isValidNfeAccessKey,
   matchesPurchaseItemFilters,
   validateExtractedInvoice,
   type ExtractedInvoice,
@@ -13,6 +15,7 @@ const baseInvoice: ExtractedInvoice = {
   supplier_cnpj: "12.345.678/0001-90",
   invoice_number: "1234",
   access_key: "",
+  operation_nature: "VENDA",
   issue_date: "15/07/2026",
   total_amount: 150,
   confidence: 0.96,
@@ -64,6 +67,21 @@ describe("validateExtractedInvoice", () => {
     expect(result.supplier_name).toBe("");
     expect(result.suggestedStatus).toBe("review_required");
     expect(result.validationErrors.join(" ")).toContain("sistema de PDV/estoque");
+  });
+
+  it("bloqueia devolução e troca como entrada normal de estoque", () => {
+    for (const operation_nature of ["DEVOLUCAO", "TROCA"] as const) {
+      const result = validateExtractedInvoice({ ...baseInvoice, operation_nature });
+      expect(result.suggestedStatus).toBe("review_required");
+      expect(result.validationErrors.join(" ")).toContain(`Natureza ${operation_nature}`);
+    }
+  });
+
+  it("valida uma chave real e identifica o número da NF-e dentro dela", () => {
+    const accessKey = "52260844771401000110550010000134651811197274";
+    expect(isValidNfeAccessKey(accessKey)).toBe(true);
+    expect(invoiceNumberFromNfeAccessKey(accessKey)).toBe("13465");
+    expect(isValidNfeAccessKey(`${accessKey.slice(0, 43)}0`)).toBe(false);
   });
 });
 

@@ -579,6 +579,7 @@ export const purchaseInvoices = mysqlTable("purchase_invoices", {
   operationalSupplierId: int("operationalSupplierId"),
   invoiceNumber: varchar("invoiceNumber", { length: 30 }),
   accessKey: varchar("accessKey", { length: 44 }),
+  operationNature: varchar("operationNature", { length: 30 }),
   issueDate: varchar("issueDate", { length: 10 }), // YYYY-MM-DD
   totalAmount: decimal("totalAmount", { precision: 14, scale: 2 }),
   itemSubtotal: decimal("itemSubtotal", { precision: 14, scale: 2 }),
@@ -599,6 +600,7 @@ export const purchaseInvoices = mysqlTable("purchase_invoices", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({
   documentInvoiceUnique: uniqueIndex("purchase_invoice_document_idx").on(table.documentHash, table.documentIndex),
+  accessKeyUnique: uniqueIndex("purchase_invoice_access_key_idx").on(table.accessKey),
 }));
 export type PurchaseInvoice = typeof purchaseInvoices.$inferSelect;
 export type InsertPurchaseInvoice = typeof purchaseInvoices.$inferInsert;

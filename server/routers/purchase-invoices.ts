@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
+import { Router } from "express";
+import multer from "multer";
 import { z } from "zod";
 import {
   operationalSuppliers,
@@ -8,6 +11,7 @@ import {
   purchaseInvoices,
 } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
+import { sdk } from "../_core/sdk";
 import { getDb } from "../db";
 import {
   buildBoxPurchaseHistory,
@@ -17,9 +21,15 @@ import {
 import { confirmPurchaseInvoiceStock } from "../purchase-invoice-confirmation";
 import { findOperationalSupplierId } from "../purchase-invoice-domain";
 import { extractPurchaseInvoicePdf, matchesPurchaseItemFilters } from "../purchase-invoice-extraction";
+import {
+  mergeExtractedInvoiceBatches,
+  MODEL_MAX_PDF_BYTES,
+  splitPdfIntoBatches,
+} from "../purchase-invoice-pdf-batches";
 import { storageGet, storagePut } from "../storage";
 
-const MAX_PDF_BYTES = 15 * 1024 * 1024;
+const MAX_INLINE_PDF_BYTES = 15 * 1024 * 1024;
+export const MAX_PDF_BYTES = 80 * 1024 * 1024;
 type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
 const itemReviewSchema = z.object({
@@ -44,7 +54,7 @@ function normalize(value: string | null | undefined): string {
 function decodePdf(base64: string): Buffer {
   const payload = base64.includes(",") ? base64.slice(base64.indexOf(",") + 1) : base64;
   const buffer = Buffer.from(payload, "base64");
-  if (buffer.length === 0 || buffer.length > MAX_PDF_BYTES) {
+  if (buffer.length === 0 || buffer.length > MAX_INLINE_PDF_BYTES) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "O PDF deve ter entre 1 byte e 15 MB.",
@@ -54,6 +64,15 @@ function decodePdf(base64: string): Buffer {
     throw new TRPCError({ code: "BAD_REQUEST", message: "O arquivo enviado não é um PDF válido." });
   }
   return buffer;
+}
+
+function validatePdfBuffer(buffer: Buffer): void {
+  if (buffer.length === 0 || buffer.length > MAX_PDF_BYTES) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "O PDF deve ter entre 1 byte e 80 MB." });
+  }
+  if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "O arquivo enviado não é um PDF válido." });
+  }
 }
 
 async function resolveSupplierId(
@@ -87,7 +106,27 @@ async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
   const startedAt = Date.now();
   try {
     const signedFile = await storageGet(fileKey);
-    const extraction = await extractPurchaseInvoicePdf(signedFile.url);
+    let extraction: Awaited<ReturnType<typeof extractPurchaseInvoicePdf>>;
+    if (source.fileSize > MODEL_MAX_PDF_BYTES) {
+      const response = await fetch(signedFile.url);
+      if (!response.ok) throw new Error("Não foi possível preparar o PDF grande para extração.");
+      const originalBuffer = Buffer.from(await response.arrayBuffer());
+      const batches = await splitPdfIntoBatches(originalBuffer);
+      const extractedBatches: Awaited<ReturnType<typeof extractPurchaseInvoicePdf>>[] = [];
+      for (const batch of batches) {
+        const batchKey = `purchase-invoices/batches/${documentHash}/${batch.from}-${batch.to}.pdf`;
+        const storedBatch = await storagePut(batchKey, batch.buffer, "application/pdf");
+        extractedBatches.push(await extractPurchaseInvoicePdf(storedBatch.url));
+      }
+      extraction = {
+        invoices: mergeExtractedInvoiceBatches(extractedBatches.map((batch) => batch.invoices)),
+        model: extractedBatches.map((batch) => batch.model).filter(Boolean).join(" + "),
+        promptTokens: extractedBatches.reduce((sum, batch) => sum + batch.promptTokens, 0),
+        completionTokens: extractedBatches.reduce((sum, batch) => sum + batch.completionTokens, 0),
+      };
+    } else {
+      extraction = await extractPurchaseInvoicePdf(signedFile.url);
+    }
     const supplierIds = await Promise.all(
       extraction.invoices.map((invoice) => resolveSupplierId(db, invoice.supplier_name, invoice.supplier_cnpj)),
     );
@@ -154,6 +193,7 @@ async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
             operationalSupplierId: supplierIds[position],
             invoiceNumber: invoice.invoice_number || null,
             accessKey: invoice.access_key || null,
+            operationNature: invoice.operation_nature,
             issueDate: invoice.issue_date || null,
             totalAmount: invoice.total_amount.toFixed(2),
             itemSubtotal: invoice.itemSubtotal.toFixed(2),
@@ -184,7 +224,14 @@ async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
     const status = extraction.invoices.some((invoice) => invoice.suggestedStatus === "review_required")
       ? "review_required"
       : "extracted";
-    return { invoiceId: invoiceIds[0] ?? invoiceId, invoiceIds, documentInvoiceCount: invoiceIds.length, status, validationErrors };
+    return {
+      invoiceId: invoiceIds[0] ?? invoiceId,
+      invoiceIds,
+      documentInvoiceCount: invoiceIds.length,
+      documentItemCount: extraction.invoices.reduce((sum, invoice) => sum + invoice.items.length, 0),
+      status,
+      validationErrors,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha desconhecida na extração.";
     await db
@@ -193,6 +240,40 @@ async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
       .where(eq(purchaseInvoices.id, invoiceId));
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Não foi possível extrair a nota: ${message}` });
   }
+}
+
+async function processPurchaseInvoiceBuffer(db: Database, userId: number, fileName: string, buffer: Buffer) {
+  validatePdfBuffer(buffer);
+  const hash = createHash("sha256").update(buffer).digest("hex");
+  const duplicate = await db
+    .select({ id: purchaseInvoices.id, fileName: purchaseInvoices.fileName })
+    .from(purchaseInvoices)
+    .where(or(eq(purchaseInvoices.fileHash, hash), eq(purchaseInvoices.documentHash, hash)))
+    .limit(1);
+  if (duplicate[0]) {
+    throw new TRPCError({ code: "CONFLICT", message: `Este PDF já foi enviado como ${duplicate[0].fileName}.` });
+  }
+
+  const now = new Date();
+  const key = `purchase-invoices/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${hash}.pdf`;
+  const stored = await storagePut(key, buffer, "application/pdf");
+  const inserted = await db
+    .insert(purchaseInvoices)
+    .values({
+      fileName: fileName.replace(/[\\/]/g, "_").trim(),
+      fileKey: stored.key,
+      fileUrl: stored.url,
+      fileHash: hash,
+      documentHash: hash,
+      documentIndex: 1,
+      fileSize: buffer.length,
+      uploadedBy: userId,
+      status: "pending",
+    })
+    .$returningId();
+  const invoiceId = inserted[0]?.id;
+  if (!invoiceId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao registrar o PDF." });
+  return runExtraction(db, invoiceId, stored.key);
 }
 
 export const purchaseInvoicesRouter = router({
@@ -209,41 +290,7 @@ export const purchaseInvoicesRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
 
-      const buffer = decodePdf(input.base64);
-      const hash = createHash("sha256").update(buffer).digest("hex");
-      const duplicate = await db
-        .select({ id: purchaseInvoices.id, fileName: purchaseInvoices.fileName })
-        .from(purchaseInvoices)
-        .where(eq(purchaseInvoices.fileHash, hash))
-        .limit(1);
-      if (duplicate[0]) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: `Este PDF já foi enviado como ${duplicate[0].fileName}.`,
-        });
-      }
-
-      const now = new Date();
-      const key = `purchase-invoices/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${hash}.pdf`;
-      const stored = await storagePut(key, buffer, "application/pdf");
-      const inserted = await db
-        .insert(purchaseInvoices)
-        .values({
-          fileName: input.fileName.replace(/[\\/]/g, "_").trim(),
-          fileKey: stored.key,
-          fileUrl: stored.url,
-          fileHash: hash,
-          documentHash: hash,
-          documentIndex: 1,
-          fileSize: buffer.length,
-          uploadedBy: ctx.user.id,
-          status: "pending",
-        })
-        .$returningId();
-      const invoiceId = inserted[0]?.id;
-      if (!invoiceId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao registrar o PDF." });
-
-      return runExtraction(db, invoiceId, stored.key);
+      return processPurchaseInvoiceBuffer(db, ctx.user.id, input.fileName, decodePdf(input.base64));
     }),
 
   reprocess: protectedProcedure
@@ -351,7 +398,7 @@ export const purchaseInvoicesRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
 
       const invoiceRows = await db
-        .select({ status: purchaseInvoices.status })
+        .select({ status: purchaseInvoices.status, operationNature: purchaseInvoices.operationNature })
         .from(purchaseInvoices)
         .where(eq(purchaseInvoices.id, input.invoiceId))
         .limit(1);
@@ -380,6 +427,9 @@ export const purchaseInvoicesRouter = router({
       }
       if (Math.abs(itemSubtotal - input.totalAmount) > tolerance) {
         validationErrors.push("A soma dos itens diverge mais de 2% (ou R$ 2,00) do total da nota.");
+      }
+      if (invoiceRows[0].operationNature && invoiceRows[0].operationNature !== "VENDA") {
+        validationErrors.push(`Natureza ${invoiceRows[0].operationNature}: este documento não pode gerar entrada normal de estoque.`);
       }
 
       for (const item of input.items) {
@@ -946,4 +996,52 @@ export const purchaseInvoicesRouter = router({
         ...buildPurchaseDashboard(filteredInvoices, items.filter((item) => filteredInvoiceIds.has(item.invoiceId)), selectedMonth),
       };
     }),
+});
+
+const purchaseInvoiceUpload = multer({
+  dest: "/tmp/purchase-invoice-uploads/",
+  limits: { fileSize: MAX_PDF_BYTES, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    const valid = file.mimetype === "application/pdf" && file.originalname.toLowerCase().endsWith(".pdf");
+    if (!valid) {
+      callback(new Error("Selecione um arquivo PDF válido."));
+      return;
+    }
+    callback(null, true);
+  },
+});
+
+export const purchaseInvoicesExpressRouter = Router();
+
+purchaseInvoicesExpressRouter.post("/api/purchase-invoices/upload", async (req, res) => {
+  try {
+    const user = await sdk.authenticateRequest(req);
+    purchaseInvoiceUpload.single("file")(req, res, async (uploadError) => {
+      if (uploadError) {
+        const tooLarge = uploadError instanceof multer.MulterError && uploadError.code === "LIMIT_FILE_SIZE";
+        res.status(400).json({ error: tooLarge ? "O PDF deve ter no máximo 80 MB." : uploadError.message });
+        return;
+      }
+      if (!req.file) {
+        res.status(400).json({ error: "Nenhum PDF foi enviado." });
+        return;
+      }
+
+      try {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
+        const buffer = await fs.readFile(req.file.path);
+        const result = await processPurchaseInvoiceBuffer(db, user.id, req.file.originalname, buffer);
+        res.json(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Falha desconhecida na importação.";
+        const status = error instanceof TRPCError && error.code === "CONFLICT" ? 409 : 500;
+        res.status(status).json({ error: message });
+      } finally {
+        if (req.file?.path) await fs.unlink(req.file.path).catch(() => undefined);
+      }
+    });
+  } catch {
+    res.status(401).json({ error: "Sessão inválida. Entre novamente para importar a nota." });
+  }
 });

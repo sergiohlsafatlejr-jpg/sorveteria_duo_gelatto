@@ -48,6 +48,12 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
     if (invoice.status === "confirmed") {
       throw new TRPCError({ code: "CONFLICT", message: "Esta nota já foi confirmada e não gerará entradas duplicadas." });
     }
+    if (invoice.operationNature && invoice.operationNature !== "VENDA") {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `Documento com natureza ${invoice.operationNature} não pode gerar entrada normal de estoque.`,
+      });
+    }
     if (invoice.status !== "extracted") {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Revise e concilie a nota antes de confirmar as entradas." });
     }

@@ -31,6 +31,7 @@ const extractedInvoiceSchema = z.object({
   supplier_cnpj: z.string(),
   invoice_number: z.string(),
   access_key: z.string(),
+  operation_nature: z.enum(["VENDA", "DEVOLUCAO", "TROCA", "OUTRA"]),
   issue_date: z.string(),
   total_amount: z.number().nonnegative(),
   confidence: z.number().min(0).max(1),
@@ -64,6 +65,7 @@ const responseSchema = {
             supplier_cnpj: { type: "string" },
             invoice_number: { type: "string" },
             access_key: { type: "string" },
+            operation_nature: { type: "string", enum: ["VENDA", "DEVOLUCAO", "TROCA", "OUTRA"] },
             issue_date: { type: "string", description: "Data no formato YYYY-MM-DD; vazio se ilegível" },
             total_amount: { type: "number" },
             confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -91,7 +93,7 @@ const responseSchema = {
             },
           },
           required: [
-            "supplier_name", "supplier_cnpj", "invoice_number", "access_key",
+            "supplier_name", "supplier_cnpj", "invoice_number", "access_key", "operation_nature",
             "issue_date", "total_amount", "confidence", "items",
           ],
           additionalProperties: false,
@@ -114,6 +116,25 @@ function normalizeDate(value: string): string {
   return br ? `${br[3]}-${br[2]}-${br[1]}` : "";
 }
 
+export function isValidNfeAccessKey(value: string): boolean {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 44) return false;
+  let weight = 2;
+  let sum = 0;
+  for (let index = 42; index >= 0; index -= 1) {
+    sum += Number(digits[index]) * weight;
+    weight = weight === 9 ? 2 : weight + 1;
+  }
+  const remainder = sum % 11;
+  const expected = remainder === 0 || remainder === 1 ? 0 : 11 - remainder;
+  return Number(digits[43]) === expected;
+}
+
+export function invoiceNumberFromNfeAccessKey(value: string): string | null {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 44 ? String(Number(digits.slice(25, 34))) : null;
+}
+
 export function validateExtractedInvoice(input: ExtractedInvoice): ValidatedInvoice {
   const inoveWasReadAsSupplier = isInoveSystemName(input.supplier_name);
   const invoice: ExtractedInvoice = {
@@ -122,6 +143,7 @@ export function validateExtractedInvoice(input: ExtractedInvoice): ValidatedInvo
     supplier_cnpj: input.supplier_cnpj.replace(/\D/g, "").slice(0, 14),
     invoice_number: input.invoice_number.trim(),
     access_key: input.access_key.replace(/\D/g, "").slice(0, 44),
+    operation_nature: input.operation_nature,
     issue_date: normalizeDate(input.issue_date),
     total_amount: money(input.total_amount),
     items: input.items.map((item, index) => ({
@@ -140,8 +162,19 @@ export function validateExtractedInvoice(input: ExtractedInvoice): ValidatedInvo
   if (inoveWasReadAsSupplier) errors.push("INOVE é o sistema de PDV/estoque e não pode ser tratado como fornecedor.");
   if (!invoice.supplier_name) errors.push("Fornecedor não identificado.");
   if (!invoice.invoice_number) errors.push("Número da nota não identificado.");
+  if (invoice.access_key && !isValidNfeAccessKey(invoice.access_key)) {
+    errors.push("Chave de acesso da NF-e inválida; confira os 44 dígitos.");
+  }
+  const keyInvoiceNumber = invoiceNumberFromNfeAccessKey(invoice.access_key);
+  const readInvoiceNumber = invoice.invoice_number.replace(/\D/g, "").replace(/^0+/, "");
+  if (keyInvoiceNumber && readInvoiceNumber && keyInvoiceNumber !== readInvoiceNumber) {
+    errors.push(`Número da nota diverge da chave de acesso, que identifica a NF-e ${keyInvoiceNumber}.`);
+  }
   if (!invoice.issue_date) errors.push("Data de emissão ausente ou inválida.");
   if (invoice.total_amount <= 0) errors.push("Valor total da nota ausente ou inválido.");
+  if (invoice.operation_nature !== "VENDA") {
+    errors.push(`Natureza ${invoice.operation_nature}: este documento não pode gerar entrada normal de estoque.`);
+  }
   if (invoice.confidence < 0.7) errors.push("Confiança geral da extração abaixo de 70%.");
 
   for (const item of invoice.items) {
@@ -184,6 +217,8 @@ export async function extractPurchaseInvoicePdf(pdfUrl: string): Promise<{
         content:
           "Você extrai documentos fiscais brasileiros com precisão. Um PDF pode conter uma ou várias notas. " +
           "Separe cada NF-e/DANFE em um elemento distinto do array invoices e nunca misture itens de notas diferentes. " +
+          "Leia a NATUREZA DA OPERAÇÃO e classifique estritamente como VENDA, DEVOLUCAO, TROCA ou OUTRA. " +
+          "Não presuma VENDA: devoluções e trocas devem manter sua natureza real. " +
           "Transcreva todos os itens visíveis, " +
           "não invente campos ilegíveis e classifique cada item em uma das categorias permitidas. " +
           "Use valores numéricos sem símbolo de moeda. Em caso de dúvida, reduza a confiança.",
@@ -194,7 +229,7 @@ export async function extractPurchaseInvoicePdf(pdfUrl: string): Promise<{
           {
             type: "text",
             text:
-              "Identifique todas as notas existentes no PDF. Para cada nota, extraia fornecedor, CNPJ, número, chave, data, valor total e cada linha de produto. " +
+              "Identifique todas as notas existentes no PDF. Para cada nota, extraia fornecedor, CNPJ, número, chave, natureza da operação, data, valor total e cada linha de produto. " +
               "Material de limpeza deve usar categoria limpeza; doces e guloseimas, guloseimas; " +
               "quando nenhuma categoria específica couber, use outros.",
           },
@@ -205,7 +240,12 @@ export async function extractPurchaseInvoicePdf(pdfUrl: string): Promise<{
     responseFormat: { type: "json_schema", json_schema: responseSchema },
   });
 
-  const content = result.choices[0]?.message.content;
+  const firstChoice = Array.isArray(result.choices) ? result.choices[0] : undefined;
+  if (!firstChoice) {
+    const upstreamMessage = (result as unknown as { error?: { message?: string } }).error?.message;
+    throw new Error(upstreamMessage || "O modelo não retornou uma resposta de extração. Tente novamente em alguns minutos.");
+  }
+  const content = firstChoice.message.content;
   if (typeof content !== "string" || !content.trim()) {
     throw new Error("O modelo não retornou uma extração estruturada.");
   }
