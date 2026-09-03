@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { isFinancialModuleKey, removeFinancialPermissions } from "@shared/financial-access";
 
 // ─── Definição de perfis pré-definidos ──────────────────────────────────────
 const roleLabels: Record<string, string> = {
@@ -45,7 +46,7 @@ const roleLabels: Record<string, string> = {
 
 const roleDescriptions: Record<string, string> = {
   admin: "Acesso total ao sistema",
-  manager: "Vendas, estoque, pontos e financeiro básico",
+  manager: "Vendas, estoque, clientes, pontos e comunicação",
   attendant: "Apenas vendas e cadastro de clientes",
   user: "Apenas vendas e cadastro de clientes",
 };
@@ -137,8 +138,8 @@ const ALL_MODULES = MODULE_GROUPS.flatMap((g) => g.modules.map((m) => m.key));
 const PRESET_PROFILES: Record<string, { label: string; description: string; modules: string[]; canCreate?: string[]; canEdit?: string[]; canDelete?: string[] }> = {
   manager: {
     label: "Gerente",
-    description: "Vendas, estoque, clientes, pontos e financeiro básico",
-    modules: ["sales", "sales-import", "products", "products-stock", "giro-estoque", "reports", "customers", "points", "points-rules", "fin-forecast", "fin-goals", "notifications", "whatsapp", "instagram"],
+    description: "Vendas, estoque, clientes, pontos e comunicação",
+    modules: ["sales", "sales-import", "products", "products-stock", "giro-estoque", "reports", "customers", "points", "points-rules", "notifications", "whatsapp", "instagram"],
     canCreate: ["sales", "customers", "points"],
     canEdit: ["sales", "products", "products-stock", "customers", "points", "points-rules"],
     canDelete: [],
@@ -193,6 +194,11 @@ export default function Users() {
 
   const utils = trpc.useUtils();
   const { data: users, isLoading } = trpc.users.list.useQuery();
+  const selectedUser = users?.find((candidate) => candidate.id === selectedUserId);
+  const selectedUserIsAdmin = selectedUser?.role === "admin";
+  const visiblePermissionGroups = selectedUserIsAdmin
+    ? MODULE_GROUPS
+    : MODULE_GROUPS.filter((group) => group.group !== "Financeiro");
   const { data: permissions, isLoading: permsLoading } = trpc.users.getPermissions.useQuery(
     { userId: selectedUserId! },
     { enabled: !!selectedUserId }
@@ -255,14 +261,19 @@ export default function Users() {
 
   function handleSavePermissions() {
     if (!selectedUserId) return;
-    const permissions = ALL_MODULES.map((mod) => ({
+    const rawPermissions = ALL_MODULES.map((mod) => ({
       module: mod,
       ...getLocalPerm(mod),
     }));
+    const permissions = selectedUserIsAdmin ? rawPermissions : removeFinancialPermissions(rawPermissions);
     setAllPermissions.mutate({ userId: selectedUserId, permissions, profileApplied: "custom" });
   }
 
   function applyPreset(presetKey: string) {
+    if (!selectedUserIsAdmin && presetKey === "financeiro") {
+      toast.error("O módulo Financeiro é exclusivo do Administrador.");
+      return;
+    }
     const perms = buildPermissionsFromPreset(presetKey);
     const map: Record<string, { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean }> = {};
     for (const p of perms) {
@@ -484,7 +495,7 @@ export default function Users() {
               <Zap className="h-3 w-3" /> Aplicar Perfil Pré-definido
             </p>
             <div className="flex flex-wrap gap-2">
-              {Object.entries(PRESET_PROFILES).map(([key, profile]) => (
+              {Object.entries(PRESET_PROFILES).filter(([key]) => selectedUserIsAdmin || key !== "financeiro").map(([key, profile]) => (
                 <Button
                   key={key}
                   variant="outline"
@@ -515,10 +526,15 @@ export default function Users() {
                 className="h-8 text-xs gap-1 text-green-600 border-green-200 hover:bg-green-50"
                 onClick={() => {
                   const map: Record<string, any> = {};
-                  for (const mod of ALL_MODULES) map[mod] = { canView: true, canCreate: true, canEdit: true, canDelete: true };
+                  for (const mod of ALL_MODULES) {
+                    const allowed = selectedUserIsAdmin || !isFinancialModuleKey(mod);
+                    map[mod] = { canView: allowed, canCreate: allowed, canEdit: allowed, canDelete: allowed };
+                  }
                   setLocalPerms(map);
                   setIsDirty(true);
-                  toast.info("Acesso total aplicado. Clique em Salvar para confirmar.");
+                  toast.info(selectedUserIsAdmin
+                    ? "Acesso total aplicado. Clique em Salvar para confirmar."
+                    : "Acesso total operacional aplicado. O Financeiro continua bloqueado.");
                 }}
               >
                 <CheckSquare className="h-3 w-3" /> Acesso Total
@@ -546,7 +562,12 @@ export default function Users() {
             </div>
           ) : (
             <div className="space-y-3">
-              {MODULE_GROUPS.map((group) => {
+              {!selectedUserIsAdmin && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  O módulo Financeiro é exclusivo do Administrador e não pode ser liberado para Colaborador ou Funcionário.
+                </div>
+              )}
+              {visiblePermissionGroups.map((group) => {
                 const isExpanded = expandedGroups.has(group.group);
                 const groupModuleKeys = group.modules.map((m) => m.key);
                 const allVisible = groupModuleKeys.every((k) => getLocalPerm(k).canView);

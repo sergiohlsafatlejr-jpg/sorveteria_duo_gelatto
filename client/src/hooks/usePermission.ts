@@ -13,6 +13,7 @@
 
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import { canAccessFinancialModule, isFinancialModuleKey, isFinancialPath } from "@shared/financial-access";
 
 // Hierarquia numérica para comparações simples
 const HIERARCHY: Record<string, number> = {
@@ -63,8 +64,8 @@ const PATH_TO_MODULE: Record<string, string> = {
 const DEFAULT_ROLE_MODULES: Record<string, string[]> = {
   manager: [
     "sales", "sales-import", "products", "products-stock", "giro-estoque",
-    "reports", "customers", "points", "points-rules", "fin-forecast",
-    "fin-goals", "notifications", "whatsapp", "instagram",
+    "reports", "customers", "points", "points-rules", "notifications",
+    "whatsapp", "instagram",
   ],
   attendant: ["sales", "customers", "points"],
   user: ["sales", "customers", "points"],
@@ -88,16 +89,16 @@ export function usePermission() {
   const level = HIERARCHY[role] ?? 1;
 
   // Busca permissões granulares do banco para usuários não-admin
-  const { data: dbPermissions } = trpc.users.getPermissions.useQuery(
-    { userId: user?.id ?? 0 },
-    { enabled: !!user && level < 3 }
-  );
+  const { data: dbPermissions } = trpc.users.myPermissions.useQuery(undefined, {
+    enabled: !!user && level < 3,
+  });
 
   /**
    * Verifica se o usuário pode visualizar um módulo específico
    */
   function canViewModule(moduleKey: string): boolean {
     if (level >= 3) return true;
+    if (isFinancialModuleKey(moduleKey)) return false;
     if (dbPermissions && dbPermissions.length > 0) {
       const perm = dbPermissions.find((p) => p.module === moduleKey);
       if (perm !== undefined) return perm.canView;
@@ -112,6 +113,7 @@ export function usePermission() {
    */
   function canCreate(moduleKey: string): boolean {
     if (level >= 3) return true;
+    if (isFinancialModuleKey(moduleKey)) return false;
     if (dbPermissions && dbPermissions.length > 0) {
       const perm = dbPermissions.find((p) => p.module === moduleKey);
       return perm?.canCreate ?? false;
@@ -124,6 +126,7 @@ export function usePermission() {
    */
   function canEdit(moduleKey: string): boolean {
     if (level >= 3) return true;
+    if (isFinancialModuleKey(moduleKey)) return false;
     if (dbPermissions && dbPermissions.length > 0) {
       const perm = dbPermissions.find((p) => p.module === moduleKey);
       return perm?.canEdit ?? false;
@@ -136,6 +139,7 @@ export function usePermission() {
    */
   function canDelete(moduleKey: string): boolean {
     if (level >= 3) return true;
+    if (isFinancialModuleKey(moduleKey)) return false;
     if (dbPermissions && dbPermissions.length > 0) {
       const perm = dbPermissions.find((p) => p.module === moduleKey);
       return perm?.canDelete ?? false;
@@ -148,6 +152,7 @@ export function usePermission() {
    */
   function canAccess(path: string): boolean {
     if (level >= 3) return true;
+    if (isFinancialPath(path)) return canAccessFinancialModule(role);
     const moduleKey = Object.entries(PATH_TO_MODULE).find(([p]) =>
       path === p || path.startsWith(p + "/")
     )?.[1];

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { financeProcedure, protectedProcedure, router } from "../_core/trpc";
 import {
   getCostVsSalesReport,
   getTopProductsReport,
@@ -70,7 +70,7 @@ export const reportsRouter = router({
     }),
 
   // DRE — Demonstrativo de Resultado do Exercício
-  dre: protectedProcedure
+  dre: financeProcedure
     .input(z.object({ referenceMonth: z.string().optional() }))
     .query(async ({ input }) => {
       return getDREReport(input.referenceMonth);
@@ -117,7 +117,7 @@ export const reportsRouter = router({
     return getPredictivePurchasePlanning();
   }),
 
-  dreByChannel: protectedProcedure
+  dreByChannel: financeProcedure
     .input(z.object({ referenceMonth: z.string().optional() }))
     .query(async ({ input }) => {
       return getDreByChannelReport(input.referenceMonth);
@@ -126,7 +126,7 @@ export const reportsRouter = router({
   // ─── Análise de Otimização Financeira com IA ─────────────────────────────
   // Cruza receita real (INOVE) com despesas do mês, identifica onde cortar
   // para fechar no positivo, com recomendações da IA.
-  analiseOtimizacao: protectedProcedure
+  analiseOtimizacao: financeProcedure
     .input(
       z.object({
         month: z.string(), // 'YYYY-MM'

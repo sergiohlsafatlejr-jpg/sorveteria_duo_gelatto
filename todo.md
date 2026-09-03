@@ -165,3 +165,11 @@
 - [x] Corrigir o período invertido da conciliação Rede calculando menor e maior data, independentemente da ordem da planilha
 - [x] Incluir PIX do INOVE na conciliação Rede quando a planilha da adquirente contiver transações PIX
 - [x] Distinguir cada linha de pagamento do INOVE e exigir modalidade compatível para não cruzar PIX, débito, crédito ou voucher incorretamente
+- [x] Auditar os tipos Colaborador e Funcionário e o modelo atual de permissões por módulo
+- [x] Remover o módulo Financeiro dos menus de Colaborador e Funcionário
+- [x] Bloquear todas as rotas financeiras para Colaborador e Funcionário, inclusive por URL direta
+- [x] Bloquear no backend todos os procedimentos e dados financeiros para Colaborador e Funcionário
+- [x] Exibir mensagem amigável de acesso negado e preservar o acesso do administrador
+- [x] Adicionar testes de regressão de autorização financeira e validar build e interface
+- [x] Bloquear os relatórios DRE e DRE por canal para perfis não administrativos sem afetar relatórios operacionais
+- [x] Validar visualmente com sessão autenticada o menu restrito, a URL negada e o acesso preservado do administrador

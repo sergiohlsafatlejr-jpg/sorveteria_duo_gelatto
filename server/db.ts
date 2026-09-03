@@ -100,6 +100,13 @@ export async function getUserByOpenId(openId: string): Promise<User | undefined>
   return result[0];
 }
 
+export async function getUserById(userId: number): Promise<User | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  return result[0];
+}
+
 export async function getAllUsers(): Promise<User[]> {
   const db = await getDb();
   if (!db) return [];
@@ -151,6 +158,18 @@ export async function upsertAllUserPermissions(
       modulePerms.map(p => ({ userId, ...p }))
     );
   }
+}
+
+export async function revokeFinancialPermissions(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(userPermissions)
+    .set({ canView: false, canCreate: false, canEdit: false, canDelete: false })
+    .where(and(
+      eq(userPermissions.userId, userId),
+      or(eq(userPermissions.module, "finance"), like(userPermissions.module, "fin-%")),
+    ));
 }
 
 // ─── Audit Logs ───────────────────────────────────────────────────────────────

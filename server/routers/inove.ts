@@ -11,7 +11,7 @@
  * Vinculação: VENDAS.CLIENTE → CLIENTES.PESSOA → PESSOAS.PESSOA
  */
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, protectedProcedure, adminProcedure, financeProcedure } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   inoveConnectorConfig,
@@ -673,7 +673,7 @@ export const inoveRouter = router({
     }),
 
   // ── Metas de Produtos com realizado mensal exato ─────────────────────────
-  getProductGoalsProgress: protectedProcedure
+  getProductGoalsProgress: financeProcedure
     .input(z.object({
       month: z.string().regex(/^\d{4}-\d{2}$/),
       includeInactive: z.boolean().default(false),
@@ -695,7 +695,7 @@ export const inoveRouter = router({
     }),
 
   // ── Catálogo completo para seleção nas metas ──────────────────────────────
-  getProductCatalogForGoals: protectedProcedure
+  getProductCatalogForGoals: financeProcedure
     .input(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }))
     .query(async ({ input }) => {
       const db = await getDb();

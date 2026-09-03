@@ -26,6 +26,7 @@ import {
   Wind,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { usePermission } from "@/hooks/usePermission";
 import {
   Area,
   AreaChart,
@@ -307,6 +308,7 @@ function GoalsWidget({
 }
 
 export default function Dashboard() {
+  const { isAdmin } = usePermission();
   const { data: metrics, isLoading } = trpc.dashboard.metrics.useQuery();
   const { data: birthdays } = trpc.dashboard.birthdays.useQuery();
   const { data: metaSummary } = trpc.metaAds.getSummary.useQuery(
@@ -328,9 +330,12 @@ export default function Dashboard() {
   );
   const { data: productGoalsProgress } = trpc.inove.getProductGoalsProgress.useQuery(
     { month: currentMonth, includeInactive: false },
+    { refetchInterval: 60_000, enabled: isAdmin }
+  );
+  const { data: inoveTopProducts = [] } = trpc.inove.getTopProducts.useQuery(
+    { days: daysInCurrentMonth, limit: 8 },
     { refetchInterval: 60_000 }
   );
-  const inoveTopProducts = productGoalsProgress?.products.slice(0, 8) ?? [];
   const { data: inoveTopProductsToday = [] } = trpc.inove.getTopProducts.useQuery(
     { days: 1, limit: 5 },
     { refetchInterval: 60_000 }
@@ -440,13 +445,15 @@ export default function Dashboard() {
         </div>
 
         {/* Metas do Mês */}
-        <GoalsWidget
-          vendasMes={inoveKpis?.vendas_mes?.total ?? 0}
-          productGoalsWithProgress={productGoalsProgress?.goals ?? []}
-          productDataSource={productGoalsProgress?.source}
-          productDataUpdatedAt={productGoalsProgress?.updatedAt}
-          productDataPartial={productGoalsProgress?.isPartial ?? true}
-        />
+        {isAdmin && (
+          <GoalsWidget
+            vendasMes={inoveKpis?.vendas_mes?.total ?? 0}
+            productGoalsWithProgress={productGoalsProgress?.goals ?? []}
+            productDataSource={productGoalsProgress?.source}
+            productDataUpdatedAt={productGoalsProgress?.updatedAt}
+            productDataPartial={productGoalsProgress?.isPartial ?? true}
+          />
+        )}
 
         {/* Widget de Previsão do Tempo */}
         <WeatherWidget />

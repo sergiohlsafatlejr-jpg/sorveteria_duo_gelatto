@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { financeProcedure as protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { 
   redeSalesImport, 
@@ -24,6 +24,7 @@ import {
   parseRedeOptionalDecimal,
   parseRedeTime,
 } from "../rede-excel-parsing";
+import { canAccessFinancialModule } from "../../shared/financial-access";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -827,6 +828,9 @@ redeExpressRouter.post("/api/rede/upload", redeUpload.single("file"), async (req
       user = await sdk.authenticateRequest(req);
     } catch {
       return res.status(401).json({ error: "Sessão inválida. Entre novamente para importar a planilha Rede." });
+    }
+    if (!canAccessFinancialModule(user.role)) {
+      return res.status(403).json({ error: "Acesso ao módulo Financeiro restrito ao Administrador." });
     }
     const periodStart = req.body.periodStart;
     const periodEnd = req.body.periodEnd;

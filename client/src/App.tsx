@@ -78,7 +78,7 @@ function Router() {
       <Route path="/points" component={Points} />
       <Route path="/nfe-import" component={NfeImport} />
       <Route path="/sales" component={Sales} />
-      <Route path="/finance" component={Finance} />
+      <Route path="/finance">{() => <ProtectedRoute path="/finance"><Finance /></ProtectedRoute>}</Route>
       {/* Rotas protegidas — Estoque (gerente+) */}
       <Route path="/products-register">{() => <ProtectedRoute path="/products-register"><ProductsRegister /></ProtectedRoute>}</Route>
       <Route path="/products">{() => <ProtectedRoute path="/products"><Products /></ProtectedRoute>}</Route>

@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { canAccessFinancialModule } from "../../shared/financial-access";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -46,4 +47,13 @@ export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
+export const financeProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (!canAccessFinancialModule(ctx.user.role)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Acesso ao módulo Financeiro restrito ao Administrador.",
+    });
+  }
+  return next({ ctx });
+});
 

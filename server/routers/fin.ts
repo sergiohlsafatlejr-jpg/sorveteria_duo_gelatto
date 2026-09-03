@@ -63,7 +63,7 @@ import {
   getPayablesByWeekday,
   getPayablesByWeek,
 } from "../db.fin";
-import { protectedProcedure, router } from "../_core/trpc";
+import { financeProcedure as protectedProcedure, router } from "../_core/trpc";
 import { finDailyRevenue } from "../../drizzle/schema";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../db";

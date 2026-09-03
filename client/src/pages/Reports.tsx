@@ -33,6 +33,7 @@ import {
 } from "recharts";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart2, Download, Package, Search, ShoppingCart, Target, TrendingUp, Users, Sun, CloudRain, ShoppingBag, AlertCircle, Sparkles, Award, Activity } from "lucide-react";
 import { useMemo, useState } from "react";
+import { usePermission } from "@/hooks/usePermission";
 
 const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const fmtPct = (v: number) => `${v.toFixed(1)}%`;
@@ -308,6 +309,7 @@ function CostMarginTab() {
 
 // ── Aba: Inteligência de Negócios (BI) ────────────────────────────────────────
 function BITab() {
+  const { isAdmin } = usePermission();
   const [activeBiTab, setActiveBiTab] = useState("abc");
 
   // Querying BI backend endpoints
@@ -315,7 +317,7 @@ function BITab() {
   const { data: loyaltyData, isLoading: lLoyalty } = trpc.reports.loyaltyCohort.useQuery();
   const { data: abcData, isLoading: lAbc } = trpc.reports.abcMatrix.useQuery();
   const { data: purchaseData, isLoading: lPurchase } = trpc.reports.predictivePurchasePlanning.useQuery();
-  const { data: channelData, isLoading: lChannel } = trpc.reports.dreByChannel.useQuery({});
+  const { data: channelData, isLoading: lChannel } = trpc.reports.dreByChannel.useQuery({}, { enabled: isAdmin });
 
   const climate = (climateData || { averages: {}, history: [] }) as any;
   const loyalty = (loyaltyData || { matrix: [], churnRisk: [] }) as any;
@@ -335,7 +337,7 @@ function BITab() {
           { id: "loyalty", label: "Fidelidade & Churn", icon: <Award className="h-4 w-4" /> },
           { id: "purchase", label: "Compras Preditivas", icon: <ShoppingBag className="h-4 w-4" /> },
           { id: "channel", label: "Delivery vs Balcão", icon: <Activity className="h-4 w-4" /> },
-        ].map((t) => (
+        ].filter((tab) => isAdmin || tab.id !== "channel").map((t) => (
           <Button
             key={t.id}
             variant={activeBiTab === t.id ? "default" : "ghost"}

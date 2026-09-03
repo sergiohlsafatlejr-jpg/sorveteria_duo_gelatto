@@ -7,6 +7,7 @@ import { syncDailyRevenue, syncSalesCache } from "./cron";
 import { cronJobLog, finTransactions, finReceivables, products } from "../drizzle/schema";
 import { desc, and, eq, lt, lte, sql } from "drizzle-orm";
 import { getDb } from "./db";
+import { canAccessFinancialModule } from "../shared/financial-access";
 
 // Import modular sub-routers
 import { customersRouter } from "./routers/customers";
@@ -99,8 +100,9 @@ export const appRouter = router({
       const dbInstance = await getDb();
       if (!dbInstance) return { overduePayables: 0, overdueReceivables: 0, lowStock: 0, total: 0 };
       const now = new Date();
+      const canViewFinancial = canAccessFinancialModule(ctx.user.role);
       // Contas a pagar vencidas (não pagas e com dueDate < hoje)
-      const [overduePayablesResult] = await dbInstance
+      const [overduePayablesResult] = canViewFinancial ? await dbInstance
         .select({ count: sql<number>`COUNT(*)` })
         .from(finTransactions)
         .where(
@@ -109,9 +111,9 @@ export const appRouter = router({
             eq(finTransactions.isPaid, false),
             lt(finTransactions.dueDate, now)
           )
-        );
+        ) : [{ count: 0 }];
       // Contas a receber vencidas (não recebidas e com dueDate < hoje)
-      const [overdueReceivablesResult] = await dbInstance
+      const [overdueReceivablesResult] = canViewFinancial ? await dbInstance
         .select({ count: sql<number>`COUNT(*)` })
         .from(finReceivables)
         .where(
@@ -120,7 +122,7 @@ export const appRouter = router({
             eq(finReceivables.isReceived, false),
             lt(finReceivables.dueDate, now)
           )
-        );
+        ) : [{ count: 0 }];
       // Produtos com estoque baixo (currentStock <= minStock e ativo)
       const [lowStockResult] = await dbInstance
         .select({ count: sql<number>`COUNT(*)` })

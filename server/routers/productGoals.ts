@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
-import { protectedProcedure, router } from "../_core/trpc";
+import { financeProcedure as protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { productGoals } from "../../drizzle/schema";
 import { buildCopiedProductGoal, getPreviousMonthKey, normalizeProductGoalName } from "../product-goal-copy";
