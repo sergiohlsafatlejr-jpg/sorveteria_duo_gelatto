@@ -15,7 +15,6 @@ import {
   Megaphone,
   MousePointerClick,
   Package,
-  ShoppingCart,
   Sun,
   Target,
   TrendingUp,
@@ -27,6 +26,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { usePermission } from "@/hooks/usePermission";
+import { calculateDailyGoalProgress, getDailyGoalTone } from "@shared/daily-goal";
 import {
   Area,
   AreaChart,
@@ -61,7 +61,7 @@ function StatCard({
 }) {
   return (
     <Card className="overflow-hidden border-0 shadow-md">
-      <CardContent className={`p-5 ${gradient} text-white`}>
+      <CardContent className={`p-5 h-full ${gradient} text-white`}>
         <div className="flex items-start justify-between">
           <div>
             <p className="text-sm font-medium opacity-90">{title}</p>
@@ -72,6 +72,69 @@ function StatCard({
             <Icon className="h-5 w-5 text-white" />
           </div>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DailyGoalCard({
+  actual,
+  target,
+  source,
+  updatedAt,
+}: {
+  actual: number;
+  target: number;
+  source?: "live" | "cache";
+  updatedAt?: string | null;
+}) {
+  const progress = calculateDailyGoalProgress(actual, target);
+  const isReached = progress.status === "reached";
+  const isConfigured = progress.status !== "not_configured";
+  const tone = getDailyGoalTone(progress.status);
+  const gradient = tone === "success"
+    ? "from-emerald-500 to-green-700"
+    : tone === "danger"
+      ? "from-rose-500 to-red-700"
+      : "from-amber-500 to-orange-600";
+  const sourceLabel = source === "cache"
+    ? `Última sincronização${updatedAt ? ` · ${updatedAt}` : ""}`
+    : source === "live"
+      ? "PDV INOVE ao vivo"
+      : "Atualizando dados do PDV...";
+
+  return (
+    <Card className="overflow-hidden border-0 shadow-md">
+      <CardContent className={`p-5 h-full bg-gradient-to-br ${gradient} text-white`}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold opacity-95">Meta do Dia</p>
+            <p className="text-2xl font-bold mt-1">{formatCurrency(progress.actual)}</p>
+            <p className="text-xs opacity-90 mt-1">
+              {isConfigured ? `Meta: ${formatCurrency(progress.target)}` : "Meta não cadastrada no Forecast"}
+            </p>
+          </div>
+          <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+            <Target className="h-5 w-5 text-white" />
+          </div>
+        </div>
+
+        {isConfigured && (
+          <div className="mt-3 space-y-1.5">
+            <div className="h-2 rounded-full bg-white/25 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-white transition-all"
+                style={{ width: `${Math.min(progress.percent, 100)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 text-[11px] font-medium">
+              <span>{Math.round(progress.percent)}%</span>
+              <span>{isReached ? "Meta atingida" : `Faltam ${formatCurrency(progress.remaining)}`}</span>
+            </div>
+          </div>
+        )}
+
+        <p className="text-[10px] opacity-75 mt-2 truncate" title={sourceLabel}>{sourceLabel}</p>
       </CardContent>
     </Card>
   );
@@ -319,6 +382,9 @@ export default function Dashboard() {
     undefined,
     { staleTime: 60 * 60 * 1000 } // cache 1h
   );
+  const { data: dailyRevenueGoal } = trpc.dashboard.dailyRevenueGoal.useQuery(undefined, {
+    refetchInterval: 60_000,
+  });
 
   // Dados do INOVE (PDV SQL Server) — mês atual
   // No dia N do mês, busca os últimos N dias (= do dia 1 até hoje)
@@ -358,6 +424,7 @@ export default function Dashboard() {
         second: "2-digit",
       })
     : null;
+  const todayRevenue = vendasHoje?.total ?? metrics?.todaySalesTotal ?? 0;
 
   // Gráfico: prioriza INOVE se disponível
   const salesChart = inoveSalesByDay.length > 0
@@ -410,14 +477,11 @@ export default function Dashboard() {
 
         {/* KPI Cards — prioriza INOVE quando conectado */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            title="Vendas Hoje"
-            value={formatCurrency(vendasHoje ? vendasHoje.total : (metrics?.todaySalesTotal ?? 0))}
-            subtitle={vendasHoje
-              ? `${vendasHoje.qtd} transações · PDV INOVE`
-              : `${metrics?.todaySalesCount ?? 0} transações`}
-            icon={ShoppingCart}
-            gradient="bg-gradient-to-br from-violet-600 to-purple-700"
+          <DailyGoalCard
+            actual={todayRevenue}
+            target={dailyRevenueGoal?.targetAmount ?? 0}
+            source={inoveKpisSource}
+            updatedAt={inoveKpisUpdatedAt}
           />
           <StatCard
             title="Vendas do Mês"

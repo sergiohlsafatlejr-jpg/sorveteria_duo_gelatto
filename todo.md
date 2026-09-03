@@ -173,3 +173,8 @@
 - [x] Adicionar testes de regressão de autorização financeira e validar build e interface
 - [x] Bloquear os relatórios DRE e DRE por canal para perfis não administrativos sem afetar relatórios operacionais
 - [x] Validar visualmente com sessão autenticada o menu restrito, a URL negada e o acesso preservado do administrador
+- [x] Auditar a meta diária do Forecast e o faturamento realizado usados no Dashboard principal
+- [x] Substituir o KPI Vendas do Dia por Meta do Dia com realizado, meta, percentual e valor restante
+- [x] Exibir o KPI em vermelho enquanto estiver abaixo da meta e em verde após atingir ou superar a meta
+- [x] Tratar corretamente dias sem meta cadastrada e manter a origem e atualização dos dados visíveis
+- [x] Adicionar teste de regressão do estado visual da Meta do Dia e validar responsividade e build

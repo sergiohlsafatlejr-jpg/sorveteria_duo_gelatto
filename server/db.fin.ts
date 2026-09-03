@@ -310,6 +310,22 @@ export async function getFinRevenueForecasts(_userId: number, monthStart: string
     ))
     .orderBy(finRevenueForecasts.forecastDate);
 }
+export async function getDailyRevenueGoal(forecastDate: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [goal] = await db
+    .select({
+      forecastDate: finRevenueForecasts.forecastDate,
+      amount: finRevenueForecasts.amount,
+      description: finRevenueForecasts.description,
+      updatedAt: finRevenueForecasts.updatedAt,
+    })
+    .from(finRevenueForecasts)
+    .where(eq(finRevenueForecasts.forecastDate, forecastDate))
+    .orderBy(desc(finRevenueForecasts.updatedAt), desc(finRevenueForecasts.id))
+    .limit(1);
+  return goal ?? null;
+}
 export async function upsertFinRevenueForecast(data: InsertFinRevenueForecast): Promise<void> {
   const db = await getDb();
   if (!db) return;

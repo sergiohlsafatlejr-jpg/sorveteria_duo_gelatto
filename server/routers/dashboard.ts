@@ -2,6 +2,11 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { makeRequest } from "../_core/map";
 import * as db from "../db";
+import { getDailyRevenueGoal } from "../db.fin";
+
+function getSaoPauloDate() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+}
 
 // Cache para avaliações Google (evitar chamadas excessivas)
 let googleReviewsCache: { rating: number; totalReviews: number; fetchedAt: number } | null = null;
@@ -42,6 +47,16 @@ async function fetchGoogleReviews() {
 export const dashboardRouter = router({
   googleReviews: protectedProcedure.query(async () => {
     return fetchGoogleReviews();
+  }),
+  dailyRevenueGoal: protectedProcedure.query(async () => {
+    const today = getSaoPauloDate();
+    const goal = await getDailyRevenueGoal(today);
+    return {
+      date: today,
+      targetAmount: goal ? Number(goal.amount) : 0,
+      description: goal?.description ?? null,
+      updatedAt: goal?.updatedAt ?? null,
+    };
   }),
   metrics: protectedProcedure.query(() => db.getDashboardMetrics()),
   chartData: protectedProcedure
