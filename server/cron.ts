@@ -21,6 +21,7 @@ import {
   finRevenueForecasts,
 } from "../drizzle/schema";
 import { boxStock } from "../drizzle/schema";
+import { detectBoxOpenings } from "./box-opening";
 import { eq, and, sql } from "drizzle-orm";
 import * as mssqlLib from "mssql";
 import { ENV } from "./_core/env";
@@ -696,6 +697,42 @@ export function registerCronJobs(): void {
     timezone: "America/Sao_Paulo",
   });
   console.log("[cron]   → box-monthly-snapshot: dia 1 de cada mês às 00:05 (Brasília)");
+
+  // Detecção de abertura de caixas 10L por vendas em kg — 13h e 21h30 (Brasília)
+  cron.schedule("0 13 * * *", runBoxOpeningDetection, {
+    timezone: "America/Sao_Paulo",
+    name: "box-opening-detection-dia",
+  });
+  cron.schedule("30 21 * * *", runBoxOpeningDetection, {
+    timezone: "America/Sao_Paulo",
+    name: "box-opening-detection-noite",
+  });
+  console.log("[cron]   → box-opening-detection: todos os dias às 13:00 e 21:30 (Brasília)");
+}
+
+// ── Detecção de abertura de caixas 10L por vendas em kg ─────────────────────
+async function runBoxOpeningDetection() {
+  const startedAt = Date.now();
+  try {
+    const result = await detectBoxOpenings({
+      notify: async (title, content) => { await notifyOwner({ title, content }); },
+    });
+    await logCronJob(
+      "box-opening-detection",
+      result.checked > 0 ? "success" : "skipped",
+      result.message,
+      Date.now() - startedAt,
+    );
+    console.log(`[cron/box-opening] ${result.message}`);
+  } catch (err) {
+    await logCronJob(
+      "box-opening-detection",
+      "error",
+      err instanceof Error ? err.message : String(err),
+      Date.now() - startedAt,
+    );
+    console.error("[cron/box-opening] Erro:", err instanceof Error ? err.message : err);
+  }
 }
 
 // Exportar para uso no endpoint manual (disparar agora)

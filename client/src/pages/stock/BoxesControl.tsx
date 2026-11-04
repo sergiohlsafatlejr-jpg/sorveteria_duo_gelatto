@@ -8,13 +8,32 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Package, Plus, Minus, History, AlertTriangle, PackagePlus, RefreshCw, BarChart2, Search } from "lucide-react";
+import { Package, PackageOpen, Plus, Minus, History, AlertTriangle, PackagePlus, RefreshCw, BarChart2, Search, Pencil } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 export default function BoxesControl() {
   const utils = trpc.useUtils();
+
+  // ── Sugestões automáticas de abertura de caixa (vendas em kg) ──
+  const { data: openingSuggestions = [] } = trpc.boxStock.openingSuggestions.useQuery(undefined, { refetchInterval: 60000 });
+  const runDetection = trpc.boxStock.runOpeningDetection.useMutation({
+    onSuccess: (res) => { utils.boxStock.openingSuggestions.invalidate(); toast.success(res.message); },
+    onError: (e) => toast.error(e.message),
+  });
+  const confirmOpening = trpc.boxStock.confirmOpening.useMutation({
+    onSuccess: (res) => {
+      utils.boxStock.list.invalidate();
+      utils.boxStock.getMovements.invalidate();
+      utils.boxStock.getMonthlyResume.invalidate();
+      utils.boxStock.openingSuggestions.invalidate();
+      toast.success(res.stillPending
+        ? "Abertura registrada — atenção: ainda há outra caixa pendente de abertura!"
+        : "Abertura registrada!");
+    },
+    onError: (e) => toast.error(e.message),
+  });
   const { data: boxes = [], isLoading } = trpc.boxStock.list.useQuery();
   const { data: movements = [] } = trpc.boxStock.getMovements.useQuery({ limit: 30 });
   const [chartPeriod, setChartPeriod] = useState<number>(1);
@@ -45,6 +64,15 @@ export default function BoxesControl() {
     onSuccess: () => { utils.boxStock.list.invalidate(); toast.success("Caixa cadastrada!"); setShowAdd(false); },
     onError: (e) => toast.error(e.message),
   });
+  const updateBox = trpc.boxStock.update.useMutation({
+    onSuccess: () => {
+      utils.boxStock.list.invalidate();
+      utils.boxStock.openingSuggestions.invalidate();
+      toast.success("Caixa atualizada!");
+      setEditBoxId(null);
+    },
+    onError: (e) => toast.error(e.message),
+  });
   const deleteBox = trpc.boxStock.delete.useMutation({
     onSuccess: () => { utils.boxStock.list.invalidate(); toast.success("Caixa removida!"); },
     onError: (e) => toast.error(e.message),
@@ -55,6 +83,18 @@ export default function BoxesControl() {
   const [newCost, setNewCost] = useState("");
   const [newMin, setNewMin] = useState("2");
   const [newInitial, setNewInitial] = useState("0");
+  const [newRendimentoKg, setNewRendimentoKg] = useState("");
+  const [newInoveProductId, setNewInoveProductId] = useState("");
+
+  const [editBoxId, setEditBoxId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCost, setEditCost] = useState("");
+  const [editMin, setEditMin] = useState("2");
+  const [editRendimentoKg, setEditRendimentoKg] = useState("");
+  const [editInoveProductId, setEditInoveProductId] = useState("");
+  const [editInoveSearch, setEditInoveSearch] = useState("");
+  const [showEditInove, setShowEditInove] = useState(false);
+
   const [entryQty, setEntryQty] = useState<Record<number, number>>({});
   const [exitQty, setExitQty] = useState<Record<number, number>>({});
   const [showHistory, setShowHistory] = useState(false);
@@ -77,6 +117,10 @@ export default function BoxesControl() {
   const { data: inoveProducts } = trpc.inove.getStock.useQuery(
     { search: inoveSearch, page: 1, pageSize: 20 },
     { enabled: showInove && inoveSearch.length >= 2 }
+  );
+  const { data: editInoveProducts } = trpc.inove.getStock.useQuery(
+    { search: editInoveSearch, page: 1, pageSize: 20 },
+    { enabled: showEditInove && editInoveSearch.length >= 2 }
   );
 
   const totalCaixas = boxes.reduce((s, b) => s + b.currentStock, 0);
@@ -115,6 +159,51 @@ export default function BoxesControl() {
             </Button>
           </div>
         </div>
+
+        {/* Sugestões de abertura por vendas em kg */}
+        {openingSuggestions.length > 0 && (
+          <Card className="border-amber-400 bg-amber-50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2 text-amber-800">
+                <AlertTriangle className="w-5 h-5" />
+                {openingSuggestions.length} caixa(s) provavelmente acabaram — confirmar abertura?
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {openingSuggestions.map((s: any) => (
+                <div key={s.boxId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white rounded-md p-3 border border-amber-200">
+                  <div>
+                    <p className="font-medium text-sm">{s.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {Number(s.accumulatedKg).toFixed(1)} kg vendidos desde a última abertura
+                      {" · "}caixa ≈ {Number(s.rendimentoKg).toFixed(1)} kg
+                      {" · "}estoque: {s.currentStock} cx
+                      {s.estimatedBoxesMissing > 1 ? ` · ⚠️ possivelmente ${s.estimatedBoxesMissing} caixas sem registro` : ""}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => confirmOpening.mutate({ boxId: s.boxId })}
+                    disabled={confirmOpening.isPending}
+                  >
+                    <PackageOpen className="w-4 h-4 mr-1" /> Abrir nova caixa
+                  </Button>
+                </div>
+              ))}
+              <p className="text-xs text-amber-700 pt-1">
+                Sugestões calculadas pelas vendas em kg do PDV (atualizado 2x ao dia).{" "}
+                <button
+                  className="underline"
+                  onClick={() => runDetection.mutate()}
+                  disabled={runDetection.isPending}
+                >
+                  {runDetection.isPending ? "Verificando..." : "Verificar agora"}
+                </button>
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* KPIs */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -348,13 +437,36 @@ export default function BoxesControl() {
               <Card key={box.id} className={box.currentStock <= box.minStock ? "border-red-300" : ""}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="font-semibold text-sm">{box.name}</h3>
+                    <div className="min-w-0 pr-2">
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="font-semibold text-sm truncate">{box.name}</h3>
+                        <button
+                          type="button"
+                          title="Editar caixa / configurar rendimento (kg)"
+                          className="text-muted-foreground hover:text-foreground p-0.5 rounded"
+                          onClick={() => {
+                            setEditBoxId(box.id);
+                            setEditName(box.name);
+                            setEditCost(box.costPrice ? String(box.costPrice) : "0");
+                            setEditMin(String(box.minStock ?? 2));
+                            setEditRendimentoKg(box.rendimentoKg ? String(box.rendimentoKg) : "");
+                            setEditInoveProductId(box.inoveProductId ? String(box.inoveProductId) : "");
+                            setEditInoveSearch("");
+                            setShowEditInove(false);
+                          }}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         Custo: {box.costPrice ? fmt(Number(box.costPrice)) : "—"} | Mín: {box.minStock}
                       </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Rend.: {box.rendimentoKg && Number(box.rendimentoKg) > 0 ? `${Number(box.rendimentoKg).toFixed(2)} kg` : "—"}
+                        {" | "}PDV: {box.inoveProductId ? `#${box.inoveProductId}` : "—"}
+                      </p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <span className={`text-2xl font-bold ${box.currentStock <= box.minStock ? "text-red-500" : "text-green-600"}`}>
                         {box.currentStock}
                       </span>
@@ -554,10 +666,11 @@ export default function BoxesControl() {
                         onClick={() => {
                           setNewName(p.nome);
                           setNewCost(p.preco_custo?.toFixed(2) || "0");
+                          if (p.id) setNewInoveProductId(String(p.id));
                           setShowInove(false);
                         }}
                       >
-                        <span className="font-medium truncate">{p.nome}</span>
+                        <span className="font-medium truncate">#{p.id} · {p.nome}</span>
                         <span className="text-xs text-muted-foreground ml-2 whitespace-nowrap">
                           Custo: {fmt(p.preco_custo || 0)}
                         </span>
@@ -585,20 +698,149 @@ export default function BoxesControl() {
                   <Input type="number" min={0} value={newInitial} onChange={e => setNewInitial(e.target.value)} />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium">Rendimento da Caixa (kg)</label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min={0}
+                    placeholder="Ex: 5.80"
+                    value={newRendimentoKg}
+                    onChange={e => setNewRendimentoKg(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Usado na detecção automática de abertura</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">ID Produto INOVE (PDV)</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="Ex: 123"
+                    value={newInoveProductId}
+                    onChange={e => setNewInoveProductId(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Código PRODUTO vendido no PDV</p>
+                </div>
+              </div>
               <Button
                 className="w-full"
                 disabled={!newName.trim()}
                 onClick={() => {
+                  const parsedInoveId = parseInt(newInoveProductId);
                   createBox.mutate({
                     name: newName.trim(),
                     costPrice: newCost || "0",
                     minStock: parseInt(newMin) || 0,
                     currentStock: parseInt(newInitial) || 0,
+                    rendimentoKg: newRendimentoKg.trim() ? newRendimentoKg.trim() : undefined,
+                    inoveProductId: !isNaN(parsedInoveId) && parsedInoveId > 0 ? parsedInoveId : undefined,
                   });
                   setNewName(""); setNewCost(""); setNewMin("2"); setNewInitial("0");
+                  setNewRendimentoKg(""); setNewInoveProductId("");
                 }}
               >
                 Cadastrar Caixa
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog Editar Caixa */}
+        <Dialog open={editBoxId !== null} onOpenChange={(open) => { if (!open) setEditBoxId(null); }}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Editar Caixa 10L</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium">Nome do Sabor *</label>
+                <Input value={editName} onChange={e => setEditName(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium">Custo (R$)</label>
+                  <Input type="number" step="0.01" value={editCost} onChange={e => setEditCost(e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Estoque Mín.</label>
+                  <Input type="number" min={0} value={editMin} onChange={e => setEditMin(e.target.value)} />
+                </div>
+              </div>
+              <hr className="border-dashed" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium">Rendimento da Caixa (kg)</label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min={0}
+                    placeholder="Ex: 5.80"
+                    value={editRendimentoKg}
+                    onChange={e => setEditRendimentoKg(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Quantos kg 1 caixa rende em vendas</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">ID Produto INOVE (PDV)</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="Ex: 123"
+                    value={editInoveProductId}
+                    onChange={e => setEditInoveProductId(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-0.5">ID do produto vendido no PDV</p>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Buscar produto correspondente no INOVE</label>
+                <div className="relative mt-1">
+                  <Search className="absolute left-2 top-2.5 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Digite o nome do produto no PDV para preencher o ID..."
+                    value={editInoveSearch}
+                    onChange={e => { setEditInoveSearch(e.target.value); setShowEditInove(true); }}
+                    onFocus={() => setShowEditInove(true)}
+                    className="pl-8"
+                  />
+                </div>
+                {showEditInove && editInoveProducts?.items && editInoveProducts.items.length > 0 && (
+                  <div className="mt-1 max-h-[140px] overflow-y-auto border rounded-md bg-background">
+                    {editInoveProducts.items.map((p: any) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted border-b last:border-0 flex justify-between items-center"
+                        onClick={() => {
+                          if (p.id) setEditInoveProductId(String(p.id));
+                          setShowEditInove(false);
+                        }}
+                      >
+                        <span className="font-medium truncate">#{p.id} · {p.nome}</span>
+                        <span className="text-xs text-muted-foreground ml-2 whitespace-nowrap">
+                          Selecionar ID
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <Button
+                className="w-full"
+                disabled={!editName.trim() || updateBox.isPending}
+                onClick={() => {
+                  if (!editBoxId) return;
+                  const parsedInoveId = parseInt(editInoveProductId);
+                  updateBox.mutate({
+                    id: editBoxId,
+                    name: editName.trim(),
+                    costPrice: editCost || "0",
+                    minStock: parseInt(editMin) || 0,
+                    rendimentoKg: editRendimentoKg.trim() ? editRendimentoKg.trim() : null,
+                    inoveProductId: editInoveProductId.trim() && !isNaN(parsedInoveId) && parsedInoveId > 0 ? parsedInoveId : null,
+                  });
+                }}
+              >
+                {updateBox.isPending ? "Salvando..." : "Salvar Alterações"}
               </Button>
             </div>
           </DialogContent>

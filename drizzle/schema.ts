@@ -1072,6 +1072,7 @@ export const boxStock = mysqlTable("box_stock", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   inoveProductId: int("inoveProductId"),
+  rendimentoKg: decimal("rendimentoKg", { precision: 6, scale: 2 }), // kg que 1 caixa rende em vendas (ex: 5.80) — usado na detecção automática de abertura
   costPrice: decimal("costPrice", { precision: 10, scale: 2 }).default("0"),
   currentStock: int("currentStock").default(0).notNull(),
   minStock: int("minStock").default(0).notNull(),
@@ -1109,3 +1110,19 @@ export const boxStockSnapshots = mysqlTable("box_stock_snapshots", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type BoxStockSnapshot = typeof boxStockSnapshots.$inferSelect;
+
+// ─── Rastreamento de Abertura de Caixas por Vendas (kg) ─────────────────────
+// Acumula os kg vendidos no INOVE desde a última abertura para sugerir a
+// abertura de uma nova caixa (detecção automática em server/box-opening.ts)
+export const boxOpenTracking = mysqlTable("box_open_tracking", {
+  id: int("id").autoincrement().primaryKey(),
+  boxId: int("boxId").notNull().unique(), // 1 linha por caixa
+  accumulatedKg: decimal("accumulatedKg", { precision: 10, scale: 3 }).default("0").notNull(),
+  lastOpeningAt: timestamp("lastOpeningAt"),   // última saída/abertura confirmada
+  lastComputedAt: timestamp("lastComputedAt"), // cursor de idempotência do cômputo
+  suggestionPending: boolean("suggestionPending").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type BoxOpenTracking = typeof boxOpenTracking.$inferSelect;
+export type InsertBoxOpenTracking = typeof boxOpenTracking.$inferInsert;

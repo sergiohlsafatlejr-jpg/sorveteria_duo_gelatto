@@ -4,6 +4,7 @@ import { getDb } from "../db";
 import { boxStock, boxStockMovements, boxStockSnapshots, inoveConnectorConfig } from "../../drizzle/schema";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { createInovePool } from "./inove";
+import { confirmBoxOpening, detectBoxOpenings, getOpeningSuggestions } from "../box-opening";
 
 export const boxStockRouter = router({
   // Listar todas as caixas ativas
@@ -19,6 +20,7 @@ export const boxStockRouter = router({
       name: z.string().min(1),
       inoveProductId: z.number().optional(),
       costPrice: z.string().optional(),
+      rendimentoKg: z.string().optional(),
       currentStock: z.number().int().min(0).default(0),
       minStock: z.number().int().min(0).default(0),
     }))
@@ -29,6 +31,7 @@ export const boxStockRouter = router({
         name: input.name,
         inoveProductId: input.inoveProductId ?? null,
         costPrice: input.costPrice ?? "0",
+        rendimentoKg: input.rendimentoKg ?? null,
         currentStock: input.currentStock,
         minStock: input.minStock,
       });
@@ -40,7 +43,9 @@ export const boxStockRouter = router({
     .input(z.object({
       id: z.number(),
       name: z.string().min(1).optional(),
+      inoveProductId: z.number().nullable().optional(),
       costPrice: z.string().optional(),
+      rendimentoKg: z.string().nullable().optional(),
       minStock: z.number().int().min(0).optional(),
     }))
     .mutation(async ({ input }) => {
@@ -48,7 +53,9 @@ export const boxStockRouter = router({
       if (!db) throw new Error("DB unavailable");
       const updates: any = {};
       if (input.name !== undefined) updates.name = input.name;
+      if (input.inoveProductId !== undefined) updates.inoveProductId = input.inoveProductId;
       if (input.costPrice !== undefined) updates.costPrice = input.costPrice;
+      if (input.rendimentoKg !== undefined) updates.rendimentoKg = input.rendimentoKg;
       if (input.minStock !== undefined) updates.minStock = input.minStock;
       await db.update(boxStock).set(updates).where(eq(boxStock.id, input.id));
       return { success: true };
@@ -198,7 +205,7 @@ export const boxStockRouter = router({
     try {
       const pool = await createInovePool(config);
       const res = await pool.request().query(`
-        SELECT PRO_NOME as nome, CAST(ISNULL(PRO_CUSTO, 0) as float) as custo
+        SELECT PRODUTO as id, PRO_NOME as nome, CAST(ISNULL(PRO_CUSTO, 0) as float) as custo
         FROM PRODUTOS
         WHERE PRO_ATIVO = 'S'
           AND (PRO_NOME LIKE '%10 L%' OR PRO_NOME LIKE '%10L%' OR PRO_NOME LIKE '%10 Litros%' OR PRO_NOME LIKE '%10Litros%')
@@ -206,18 +213,21 @@ export const boxStockRouter = router({
       `);
       try { await pool.close(); } catch {}
       const existingBoxes = await db.select().from(boxStock);
-      const existingNames = existingBoxes.map(b => b.name.toLowerCase());
       let added = 0;
-      for (const row of res.recordset as Array<{nome: string; custo: number}>) {
-        if (!existingNames.includes(row.nome.toLowerCase())) {
+      for (const row of res.recordset as Array<{id: number; nome: string; custo: number}>) {
+        const existing = existingBoxes.find(b => b.name.toLowerCase() === row.nome.toLowerCase());
+        if (!existing) {
           await db.insert(boxStock).values({
             name: row.nome,
+            inoveProductId: Number(row.id) || null,
             costPrice: row.custo.toFixed(2),
             currentStock: 0,
             minStock: 2,
             active: true,
           });
           added++;
+        } else if (!existing.inoveProductId && row.id) {
+          await db.update(boxStock).set({ inoveProductId: Number(row.id) }).where(eq(boxStock.id, existing.id));
         }
       }
       return { added, total: res.recordset.length, message: `${added} caixa(s) importada(s) do INOVE (${res.recordset.length} encontradas)` };
@@ -314,6 +324,27 @@ export const boxStockRouter = router({
       await db.update(boxStock).set({ currentStock: input.realStock }).where(eq(boxStock.id, input.boxId));
       return { success: true, diff, message: `Ajuste de ${diff > 0 ? "+" : ""}${diff} caixa(s)` };
     }),
+
+  // ── Sugestões automáticas de abertura (vendas em kg) ──────────────────────
+
+  // Listar sugestões pendentes de abertura
+  openingSuggestions: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    return getOpeningSuggestions(db);
+  }),
+
+  // Confirmar abertura de nova caixa (1 toque) — registra a saída e carrega o excedente de kg
+  confirmOpening: protectedProcedure
+    .input(z.object({ boxId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      return confirmBoxOpening(input.boxId, ctx.user?.id ?? null);
+    }),
+
+  // Disparar a detecção manualmente (também roda no cron 2x/dia)
+  runOpeningDetection: protectedProcedure.mutation(async () => {
+    return detectBoxOpenings();
+  }),
 
   // Criar snapshot mensal (chamado pelo cron no dia 1)
   createMonthlySnapshot: protectedProcedure.mutation(async () => {
