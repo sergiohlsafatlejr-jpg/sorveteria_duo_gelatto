@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { useLocation } from "wouter";
+import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import BackButton from "@/components/BackButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -348,25 +350,52 @@ export default function FinRevenueForecast() {
   const totalGoal = useMemo(() => goalForecasts.reduce((s: number, f: { amount: string | number }) => s + Number(f.amount), 0), [goalForecasts]);
   const hasGoalMonth = totalGoal > 0;
   // Acurácia: real vs meta (se tiver meta), senão real vs projeção
+  const [, navigate] = useLocation();
   const accuracyBase = hasGoalMonth ? totalGoal : (data?.summary.totalProjected ?? 0);
   const accuracy = totalReal > 0 && accuracyBase > 0
     ? Math.round((totalReal / accuracyBase) * 100)
     : null;
 
   return (
+    <DashboardLayout>
     <TooltipProvider>
-      <div className="w-full min-w-0 p-4 sm:p-6 space-y-5">
+      <div className="w-full min-w-0 space-y-5">
+        {/* Barra de Navegação Rápida do Financeiro */}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-2.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">
+            Módulos Financeiros:
+          </span>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/fin/dashboard")}>
+            Painel Financeiro
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => navigate("/fin/payables")}>
+            💸 Contas a Pagar
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-amber-200 text-amber-800 hover:bg-amber-50" onClick={() => navigate("/fin/weekday-report")}>
+            📊 Break-Even Semanal & ABC
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => navigate("/fin/receivables")}>
+            💳 Contas a Receber & Liquidez
+          </Button>
+          <Button size="sm" variant="default" className="h-8 text-xs" onClick={() => navigate("/fin/forecast")}>
+            🌤️ Previsão & Clima
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-violet-200 text-violet-700 hover:bg-violet-50" onClick={() => navigate("/fin/goals")}>
+            🎯 Meta de Gerência
+          </Button>
+        </div>
+
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <BackButton to="/finance" />
+            <BackButton to="/fin/dashboard" />
             <div>
               <h1 className="text-2xl font-bold flex items-center gap-2">
                 <CalendarDays className="h-6 w-6 text-primary" />
-                Previsão de Faturamento
+                Previsão de Faturamento & Potencial Climático
               </h1>
               <p className="text-sm text-muted-foreground">
-                Calendário com feriados e previsão do tempo — Goiânia/GO
+                Calendário com feriados, curva térmica (°C) e previsão do tempo — Goiânia/GO
               </p>
             </div>
           </div>
@@ -908,10 +937,15 @@ export default function FinRevenueForecast() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {weatherIntel.thermalCurve.map((band) => (
+                {weatherIntel.thermalCurve.map((band) => {
+                  const forecastCount = (band as any).forecastDaysCount ?? 0;
+                  const avgForecast = (band as any).avgForecastRevenue ?? 0;
+                  return (
                   <div key={band.key} className="rounded-lg border bg-card/80 p-3 space-y-1">
                     <p className="text-xs font-semibold text-foreground">{band.label}</p>
-                    <p className="text-[11px] text-muted-foreground">{band.days} dia(s) com faturamento registrado</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {band.days} dia(s) faturado(s) · {forecastCount} dia(s) previstos no clima
+                    </p>
                     <div className="flex items-baseline justify-between pt-1">
                       <div>
                         <p className="text-[10px] text-muted-foreground">Média Real</p>
@@ -920,9 +954,13 @@ export default function FinRevenueForecast() {
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="text-[10px] text-muted-foreground">Esperado (Clima)</p>
-                        <p className="text-xs font-medium text-muted-foreground">
-                          {band.days > 0 ? fmtBRL(band.avgExpectedRevenue) : "—"}
+                        <p className="text-[10px] text-muted-foreground">Potencial Climático</p>
+                        <p className="text-xs font-semibold text-primary">
+                          {band.days > 0
+                            ? fmtBRL(band.avgExpectedRevenue)
+                            : forecastCount > 0
+                              ? fmtBRL(avgForecast)
+                              : "—"}
                         </p>
                       </div>
                     </div>
@@ -935,11 +973,11 @@ export default function FinRevenueForecast() {
                       </p>
                     )}
                   </div>
-                ))}
+                )})}
               </div>
 
-              {weatherIntel.days.some((d) => d.realAmount !== null && d.realAmount > 0) && (
-                <div className="rounded-lg border bg-card overflow-x-auto max-h-72">
+              {weatherIntel.days.length > 0 && (
+                <div className="rounded-lg border bg-card overflow-x-auto max-h-80">
                   <table className="w-full text-xs">
                     <thead className="bg-muted/40 border-b sticky top-0">
                       <tr>
@@ -953,9 +991,26 @@ export default function FinRevenueForecast() {
                     </thead>
                     <tbody className="divide-y">
                       {weatherIntel.days
-                        .filter((d) => (d.realAmount !== null && d.realAmount > 0) || !d.isPast)
-                        .slice(0, 18)
-                        .map((d) => (
+                        .filter((d) => (d.realAmount !== null && d.realAmount > 0) || !d.isPast || d.weather !== null)
+                        .slice(0, 22)
+                        .map((d) => {
+                          const effPct =
+                            d.operationalEfficiencyPct !== null
+                              ? d.operationalEfficiencyPct
+                              : d.realAmount && d.realAmount > 0 && d.weatherExpected > 0
+                                ? Math.round((d.realAmount / d.weatherExpected) * 100)
+                                : null;
+                          const diag =
+                            d.diagnosis !== "pending"
+                              ? d.diagnosis
+                              : effPct !== null
+                                ? effPct >= 103
+                                  ? "outperformed"
+                                  : effPct >= 88
+                                    ? "on_track"
+                                    : "underperformed"
+                                : "pending";
+                          return (
                           <tr key={d.date} className="hover:bg-muted/20">
                             <td className="px-3 py-2 font-medium">
                               {new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })}
@@ -964,7 +1019,7 @@ export default function FinRevenueForecast() {
                               {d.weather ? (
                                 <span className="inline-flex items-center gap-1.5">
                                   <WeatherIcon label={d.weather.label} size={13} />
-                                  <span>{Math.round(d.weather.tempMax)}°C</span>
+                                  <span className="font-semibold">{Math.round(d.weather.tempMax)}°C</span>
                                   {d.weather.peakHoursRainProb != null && (
                                     <span className="text-[10px] text-muted-foreground">
                                       (Chuva 13h–20h: {d.weather.peakHoursRainProb}%)
@@ -972,7 +1027,7 @@ export default function FinRevenueForecast() {
                                   )}
                                 </span>
                               ) : (
-                                <span className="text-muted-foreground">Sem dados</span>
+                                <span className="text-muted-foreground text-[11px]">Média Sazonal (&gt;15d)</span>
                               )}
                             </td>
                             <td className="px-3 py-2 text-right font-medium text-primary">{fmtBRL(d.weatherExpected)}</td>
@@ -980,28 +1035,29 @@ export default function FinRevenueForecast() {
                               {d.realAmount ? fmtBRL(d.realAmount) : "—"}
                             </td>
                             <td className="px-3 py-2 text-center">
-                              {d.operationalEfficiencyPct !== null ? (
+                              {effPct !== null ? (
                                 <span className={cn(
                                   "px-2 py-0.5 rounded-full text-[11px] font-bold",
-                                  d.diagnosis === "outperformed"
+                                  diag === "outperformed"
                                     ? "bg-emerald-500/15 text-emerald-500"
-                                    : d.diagnosis === "on_track"
+                                    : diag === "on_track"
                                       ? "bg-amber-500/15 text-amber-500"
                                       : "bg-rose-500/15 text-rose-500"
                                 )}>
-                                  {d.operationalEfficiencyPct}%
+                                  {effPct}%
                                 </span>
                               ) : (
-                                <span className="text-[10px] text-muted-foreground">Futuro</span>
+                                <span className="text-[10px] text-muted-foreground">Previsão</span>
                               )}
                             </td>
                             <td className="px-3 py-2 text-[11px] text-muted-foreground">
-                              {d.diagnosis === "outperformed" && "🔥 Vendeu acima do potencial climático! "}
-                              {d.diagnosis === "underperformed" && "⚠️ Abaixo do esperado para esse clima (revisar atendimento/ruptura). "}
-                              {d.weather?.tacticalRecommendation ?? ""}
+                              {diag === "outperformed" && "🔥 Vendeu acima do potencial climático! "}
+                              {diag === "underperformed" && "⚠️ Abaixo do esperado para esse clima (revisar atendimento/ruptura). "}
+                              {diag === "on_track" && "✅ Dentro da curva esperada para o clima do dia. "}
+                              {d.weather?.tacticalRecommendation ?? (diag === "pending" ? "Projeção baseada na média do dia da semana." : "")}
                             </td>
                           </tr>
-                        ))}
+                        )})}
                     </tbody>
                   </table>
                 </div>
@@ -1284,5 +1340,6 @@ export default function FinRevenueForecast() {
         </DialogContent>
       </Dialog>
     </TooltipProvider>
+    </DashboardLayout>
   );
 }

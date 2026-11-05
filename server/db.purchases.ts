@@ -3,6 +3,7 @@ import { getDb } from "./db";
 import {
   operationalSuppliers, operationalItems, operationalStockMovements,
   purchaseOrders, purchaseOrderItems, purchaseTemplates,
+  boxStock, boxStockMovements,
   InsertOperationalSupplier, InsertOperationalItem, InsertOperationalStockMovement,
   InsertPurchaseOrder, InsertPurchaseOrderItem, InsertPurchaseTemplate,
   OperationalSupplier, OperationalItem, OperationalStockMovement,
@@ -156,6 +157,232 @@ export async function registerStockMovement(data: { itemId: number, type: 'in' |
   
   const [insertedMovement] = await db.select().from(operationalStockMovements).where(eq(operationalStockMovements.id, movement.id));
   return insertedMovement;
+}
+
+function normalizeWarehouseNameKey(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+}
+
+function extractUnitsFromDescription(description: string): number {
+  const match = description.match(/\b(\d+)\s*UND/i);
+  if (match) return Math.max(1, Number(match[1]));
+  const packMatch = description.match(/PACK\s*(\d+)/i);
+  if (packMatch) return Math.max(1, Number(packMatch[1]));
+  return 1;
+}
+
+const VALID_OP_CATEGORIES = new Set([
+  "limpeza",
+  "guloseimas",
+  "caldas",
+  "descartaveis",
+  "embalagens",
+  "manutencao",
+  "insumos",
+]);
+
+export async function upsertWarehouseItemStock(data: {
+  operationalItemId?: number | null;
+  boxStockId?: number | null;
+  name: string;
+  category?: string;
+  unit?: string;
+  quantity: number;
+  minStock?: number;
+  referencePrice?: number;
+  inoveProductId?: number | null;
+  reason?: string;
+  userId?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const isTenLiterBox =
+    data.boxStockId != null ||
+    data.category === "caixas_10l" ||
+    /\b10\s*(L|LT|LITRO|LITROS)\b/i.test(data.name);
+
+  if (isTenLiterBox) {
+    const allBoxes = await db.select().from(boxStock).where(eq(boxStock.active, true));
+    const cleanFlavorName = data.name
+      .replace(/^CAIXA\s*10\s*(L|LT|LITRO|LITROS)\s*[-–—:]?\s*/i, "")
+      .trim();
+    const fullKey = normalizeWarehouseNameKey(data.name);
+    const flavorKey = normalizeWarehouseNameKey(cleanFlavorName);
+
+    const existingBox =
+      (data.boxStockId ? allBoxes.find((b) => b.id === data.boxStockId) : undefined) ??
+      allBoxes.find((b) => {
+        const bKey = normalizeWarehouseNameKey(b.name);
+        const bFlavor = normalizeWarehouseNameKey(
+          b.name.replace(/^CAIXA\s*10\s*(L|LT|LITRO|LITROS)\s*[-–—:]?\s*/i, "").trim(),
+        );
+        return bKey === fullKey || (flavorKey.length > 0 && (bKey === flavorKey || bFlavor === flavorKey));
+      });
+
+    const newStockInt = Math.max(0, Math.round(data.quantity));
+    const minStockInt = data.minStock != null ? Math.max(0, Math.round(data.minStock)) : (existingBox?.minStock ?? 2);
+
+    if (existingBox) {
+      const diff = newStockInt - existingBox.currentStock;
+      await db
+        .update(boxStock)
+        .set({
+          currentStock: newStockInt,
+          minStock: minStockInt,
+          ...(data.inoveProductId !== undefined ? { inoveProductId: data.inoveProductId } : {}),
+          ...(data.referencePrice && data.referencePrice > 0 ? { costPrice: String(data.referencePrice) } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(boxStock.id, existingBox.id));
+
+      if (diff !== 0) {
+        await db.insert(boxStockMovements).values({
+          boxId: existingBox.id,
+          type: diff > 0 ? "entrada" : "saida",
+          quantity: Math.abs(diff),
+          previousStock: existingBox.currentStock,
+          newStock: newStockInt,
+          notes: data.reason || "Ajuste manual pela aba Sorvetes / Estoque",
+          userId: data.userId,
+        });
+      }
+      return { target: "box_stock" as const, id: existingBox.id, newStock: newStockInt };
+    } else {
+      const [inserted] = await db
+        .insert(boxStock)
+        .values({
+          name: data.name,
+          currentStock: newStockInt,
+          minStock: minStockInt,
+          costPrice: String(data.referencePrice ?? 0),
+          inoveProductId: data.inoveProductId ?? null,
+          active: true,
+        })
+        .$returningId();
+
+      if (newStockInt > 0) {
+        await db.insert(boxStockMovements).values({
+          boxId: inserted.id,
+          type: "entrada",
+          quantity: newStockInt,
+          previousStock: 0,
+          newStock: newStockInt,
+          notes: data.reason || "Saldo inicial definido na aba Sorvetes / Estoque",
+          userId: data.userId,
+        });
+      }
+      return { target: "box_stock" as const, id: inserted.id, newStock: newStockInt };
+    }
+  }
+
+  // Item operacional / unidade (Picolés, Potes, Açaí, Insumos, Almoxarifado)
+  let targetItem: OperationalItem | undefined;
+  if (data.operationalItemId) {
+    const [found] = await db
+      .select()
+      .from(operationalItems)
+      .where(eq(operationalItems.id, data.operationalItemId));
+    targetItem = found;
+  }
+  if (!targetItem) {
+    const allItems = await db.select().from(operationalItems).where(eq(operationalItems.active, true));
+    const targetKey = normalizeWarehouseNameKey(data.name);
+    targetItem = allItems.find((i) => normalizeWarehouseNameKey(i.name) === targetKey);
+  }
+
+  if (targetItem) {
+    const extraUpdates: Record<string, any> = { updatedAt: new Date() };
+    if (data.minStock !== undefined && Number.isFinite(data.minStock)) {
+      extraUpdates.minStock = String(Math.max(0, data.minStock));
+    }
+    if (data.inoveProductId !== undefined) {
+      extraUpdates.inoveProductId = data.inoveProductId;
+    }
+    if (data.referencePrice !== undefined && data.referencePrice > 0) {
+      extraUpdates.referencePrice = String(data.referencePrice);
+    }
+    if (Object.keys(extraUpdates).length > 1) {
+      await db.update(operationalItems).set(extraUpdates).where(eq(operationalItems.id, targetItem.id));
+    }
+    await registerStockMovement({
+      itemId: targetItem.id,
+      type: "adjustment",
+      quantity: data.quantity,
+      reason: data.reason || "Contagem física / Ajuste direto na tela",
+      userId: data.userId,
+    });
+    return { target: "operational_items" as const, id: targetItem.id, newStock: data.quantity };
+  }
+
+  // Criar novo item operacional já configurado em unidades
+  const opCategory = (data.category && VALID_OP_CATEGORIES.has(data.category) ? data.category : "insumos") as any;
+  const unitsPerPkg = extractUnitsFromDescription(data.name);
+  const unitCost =
+    data.referencePrice && data.referencePrice > 0
+      ? unitsPerPkg > 1
+        ? Number((data.referencePrice / unitsPerPkg).toFixed(2))
+        : data.referencePrice
+      : 0;
+
+  const [created] = await db
+    .insert(operationalItems)
+    .values({
+      name: data.name,
+      category: opCategory,
+      unit: unitsPerPkg > 1 ? "un" : (data.unit || "un").toLowerCase(),
+      unitsPerPackage: unitsPerPkg,
+      currentStock: String(data.quantity),
+      minStock: String(data.minStock ?? (unitsPerPkg > 1 ? 15 : 5)),
+      referencePrice: String(unitCost),
+      inoveProductId: data.inoveProductId ?? null,
+      active: true,
+    })
+    .$returningId();
+
+  await db.insert(operationalStockMovements).values({
+    itemId: created.id,
+    type: "adjustment",
+    quantity: String(data.quantity),
+    previousStock: "0",
+    newStock: String(data.quantity),
+    reason: data.reason || "Saldo inicial cadastrado na tela de Estoque/Sorvetes",
+    userId: data.userId,
+  });
+
+  return { target: "operational_items" as const, id: created.id, newStock: data.quantity };
+}
+
+export async function initializeBatchWarehouseStock(
+  items: Array<{
+    name: string;
+    category?: string;
+    unit?: string;
+    quantity: number;
+    minStock?: number;
+    referencePrice?: number;
+  }>,
+  userId?: number,
+) {
+  let initialized = 0;
+  for (const item of items) {
+    await upsertWarehouseItemStock({
+      name: item.name,
+      category: item.category,
+      unit: item.unit,
+      quantity: item.quantity,
+      minStock: item.minStock,
+      referencePrice: item.referencePrice,
+      reason: "Inicialização em lote pelas Notas Fiscais do mês",
+      userId,
+    });
+    initialized++;
+  }
+  return { initialized };
 }
 
 // ─── Purchase Orders ──────────────────────────────────────────────────────

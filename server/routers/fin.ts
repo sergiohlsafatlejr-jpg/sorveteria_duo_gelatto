@@ -86,6 +86,7 @@ import {
   getWeatherSalesIntelligence,
   getWeeklyPayablesBreakEven,
   getWeeklyTeamGoalsPlan,
+  saveWeeklyTeamGoalsConfig,
 } from "../sorveteria-intelligence";
 
 const optionalPositiveIdSchema = z.preprocess(
@@ -1011,5 +1012,22 @@ export const finRouter = router({
         targetTicket: z.number().positive().optional(),
       }))
       .query(({ ctx, input }) => getWeeklyTeamGoalsPlan(ctx.user.id, input)),
+
+    saveWeeklyTeamGoalsConfig: protectedProcedure
+      .input(z.object({
+        month: z.string().regex(/^\d{4}-\d{2}$/),
+        monthlyAnalysis: z.string().optional(),
+        teamGeneralNotice: z.string().optional(),
+        targetMonthlyRevenueOverride: z.number().min(0).nullable().optional(),
+        targetTicketOverride: z.number().positive().nullable().optional(),
+        weekIndex: z.number().int().min(1).max(4).optional(),
+        weekOverride: z.object({
+          customGoal: z.number().min(0).nullable().optional(),
+          customTakeHomePotes: z.number().int().min(0).nullable().optional(),
+          managerAnalysis: z.string().optional(),
+          employeeNote: z.string().optional(),
+        }).optional(),
+      }))
+      .mutation(({ ctx, input }) => saveWeeklyTeamGoalsConfig(ctx.user.id, input)),
   }),
 });

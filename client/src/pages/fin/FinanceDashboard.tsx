@@ -1,5 +1,8 @@
+import { useLocation } from "wouter";
+import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import BackButton from "@/components/BackButton";
+import { Button } from "@/components/ui/button";
 import { FinKPICard } from "@/components/fin/FinKPICard";
 import { FinMonthlyEvolutionChart, FinCategoryChart } from "@/components/fin/FinCharts";
 import {
@@ -16,6 +19,7 @@ const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
 export default function FinanceDashboard() {
+  const [, navigate] = useLocation();
   const { data: kpis, isLoading } = trpc.fin.dashboard.useQuery();
   const {
     data: next7Forecast,
@@ -43,21 +47,47 @@ export default function FinanceDashboard() {
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-28 rounded-xl bg-muted/30 animate-pulse" />
-          ))}
+      <DashboardLayout>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="h-28 rounded-xl bg-muted/30 animate-pulse" />
+            ))}
+          </div>
         </div>
-      </div>
+      </DashboardLayout>
     );
   }
 
   const now = new Date();
 
   return (
-    <div className="p-6 space-y-6">
-        <BackButton to="/dashboard" />
+    <DashboardLayout>
+    <div className="space-y-6">
+      {/* Barra de Navegação Rápida do Financeiro */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-2.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">
+          Módulos Financeiros:
+        </span>
+        <Button size="sm" variant="default" className="h-8 text-xs" onClick={() => navigate("/fin/dashboard")}>
+          Painel Financeiro
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => navigate("/fin/payables")}>
+          💸 Contas a Pagar
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-amber-200 text-amber-800 hover:bg-amber-50" onClick={() => navigate("/fin/weekday-report")}>
+          📊 Break-Even Semanal & ABC
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => navigate("/fin/receivables")}>
+          💳 Contas a Receber & Liquidez
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => navigate("/fin/forecast")}>
+          🌤️ Previsão & Clima
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-violet-200 text-violet-700 hover:bg-violet-50" onClick={() => navigate("/fin/goals")}>
+          🎯 Meta de Gerência
+        </Button>
+      </div>
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -265,5 +295,6 @@ export default function FinanceDashboard() {
         </div>
       </div>
     </div>
+    </DashboardLayout>
   );
 }

@@ -12,6 +12,7 @@ import {
   Wifi, Database, RefreshCw, Package, CreditCard
 } from "lucide-react";
 import { useState, useMemo } from "react";
+import { useLocation } from "wouter";
 import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis, Legend,
@@ -26,6 +27,7 @@ const COLORS = [
 ];
 
 export default function Finance() {
+  const [, navigate] = useLocation();
   const today = new Date();
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
   const [from, setFrom] = useState(firstDay.toISOString().split("T")[0]);
@@ -69,7 +71,30 @@ export default function Finance() {
   return (
     <DashboardLayout>
       <div className="space-y-6 p-1">
-        <BackButton to="/dashboard" />
+        {/* Barra de Navegação Rápida do Financeiro */}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-2.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">
+            Módulos Financeiros:
+          </span>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/fin/dashboard")}>
+            Painel Financeiro
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => navigate("/fin/payables")}>
+            💸 Contas a Pagar
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-amber-200 text-amber-800 hover:bg-amber-50" onClick={() => navigate("/fin/weekday-report")}>
+            📊 Break-Even Semanal & ABC
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => navigate("/fin/receivables")}>
+            💳 Contas a Receber & Liquidez
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => navigate("/fin/forecast")}>
+            🌤️ Previsão & Clima
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-violet-200 text-violet-700 hover:bg-violet-50" onClick={() => navigate("/fin/goals")}>
+            🎯 Meta de Gerência
+          </Button>
+        </div>
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

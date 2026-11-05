@@ -1,4 +1,6 @@
 import { useState, useRef } from "react";
+import { useLocation } from "wouter";
+import DashboardLayout from "@/components/DashboardLayout";
 import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { FinFilterBar, FinFilters } from "@/components/fin/FinFilterBar";
@@ -236,20 +238,52 @@ export default function FinPayables() {
   const selectedPending = selectedItems.filter(t => !t.isPaid && new Date(t.dueDate) >= now).reduce((s, t) => s + Number(t.amount), 0);
   const selectedOverdue = selectedItems.filter(t => !t.isPaid && new Date(t.dueDate) < now).reduce((s, t) => s + Number(t.amount), 0);
 
+  const [, navigate] = useLocation();
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
   const bankMap = new Map(banks.map(b => [b.id, b.name]));
   const costMap = new Map(costs.map(c => [c.id, c.name]));
 
   return (
-    <div className="p-6 space-y-5">
-        <BackButton to="/fin/dashboard" />
+    <DashboardLayout>
+    <div className="space-y-5">
+      {/* Barra de Navegação Rápida do Financeiro */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-2.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">
+          Módulos Financeiros:
+        </span>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/fin/dashboard")}>
+          Painel Financeiro
+        </Button>
+        <Button size="sm" variant="default" className="h-8 text-xs" onClick={() => navigate("/fin/payables")}>
+          💸 Contas a Pagar
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-amber-300 bg-amber-50/50 text-amber-800 hover:bg-amber-100" onClick={() => navigate("/fin/weekday-report")}>
+          📊 Break-Even Semanal & Ranking ABC
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => navigate("/fin/receivables")}>
+          💳 Contas a Receber & Liquidez
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => navigate("/fin/forecast")}>
+          🌤️ Previsão & Clima
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-violet-200 text-violet-700 hover:bg-violet-50" onClick={() => navigate("/fin/goals")}>
+          🎯 Meta de Gerência
+        </Button>
+      </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Contas a Pagar</h1>
-          <p className="text-sm text-muted-foreground">Gerencie seus lançamentos de despesas</p>
+          <p className="text-sm text-muted-foreground">Gerencie seus lançamentos de despesas, vencimentos e conciliação</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => navigate("/fin/weekday-report")}
+            className="gap-2 border-amber-400/60 text-amber-700 hover:bg-amber-50"
+          >
+            📊 Ver Break-Even Semanal & ABC
+          </Button>
 
           {data.length > 0 && (
             <Button
@@ -654,5 +688,6 @@ export default function FinPayables() {
         </DialogContent>
       </Dialog>
     </div>
+    </DashboardLayout>
   );
 }

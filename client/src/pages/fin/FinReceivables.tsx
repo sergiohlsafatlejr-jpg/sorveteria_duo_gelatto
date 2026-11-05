@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
+import DashboardLayout from "@/components/DashboardLayout";
 import BackButton from "@/components/BackButton";
 import { trpc } from "@/lib/trpc";
 import { FinFilterBar, FinFilters } from "@/components/fin/FinFilterBar";
@@ -113,14 +115,39 @@ export default function FinReceivables() {
   const totalOverdue = data.filter(r => !r.isReceived && new Date(r.dueDate) < now).reduce((s, r) => s + Number(r.amount), 0);
   const typeMap = new Map(types.map(t => [t.id, t.description]));
 
+  const [, navigate] = useLocation();
   return (
-    <div className="w-full min-w-0 p-4 sm:p-6 space-y-5">
-        <BackButton to="/fin/dashboard" />
+    <DashboardLayout>
+    <div className="w-full min-w-0 space-y-5">
+      {/* Barra de Navegação Rápida do Financeiro */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-2.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">
+          Módulos Financeiros:
+        </span>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/fin/dashboard")}>
+          Painel Financeiro
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => navigate("/fin/payables")}>
+          💸 Contas a Pagar
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-amber-200 text-amber-800 hover:bg-amber-50" onClick={() => navigate("/fin/weekday-report")}>
+          📊 Break-Even Semanal & ABC
+        </Button>
+        <Button size="sm" variant="default" className="h-8 text-xs" onClick={() => navigate("/fin/receivables")}>
+          💳 Contas a Receber & Liquidez
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => navigate("/fin/forecast")}>
+          🌤️ Previsão & Clima
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-violet-200 text-violet-700 hover:bg-violet-50" onClick={() => navigate("/fin/goals")}>
+          🎯 Meta de Gerência
+        </Button>
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Contas a Receber</h1>
-          <p className="text-sm text-muted-foreground">Gerencie seus recebimentos e cobranças</p>
+          <h1 className="text-2xl font-bold">Contas a Receber & Previsão de Liquidez (D+0 / D+1 / D+30)</h1>
+          <p className="text-sm text-muted-foreground">Liquidação de cartões (Rede/Maquininha), Pix, cruzamento com boletos a pagar e títulos a receber</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {data.length > 0 && (
@@ -418,5 +445,6 @@ export default function FinReceivables() {
         </DialogContent>
       </Dialog>
     </div>
+    </DashboardLayout>
   );
 }

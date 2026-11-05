@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useLocation, Link } from "wouter";
+import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +16,6 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { ChevronDown, ChevronRight, Calendar, TrendingDown, CheckCircle, AlertCircle, FileSpreadsheet } from "lucide-react";
-import { Link } from "wouter";
 import { exportToExcelMultiSheet, fmtMoeda } from "@/lib/exportExcel";
 
 const MONTH_NAMES = [
@@ -41,11 +42,12 @@ function fmtDate(d: Date) {
 type ViewMode = "weekday" | "byweek" | "breakeven";
 
 export default function FinWeekdayReport() {
+  const [, navigate] = useLocation();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("byweek");
+  const [viewMode, setViewMode] = useState<ViewMode>("breakeven");
   const [selectedWeek, setSelectedWeek] = useState(0); // índice da semana selecionada
 
   // Dados agrupados por dia da semana (visão geral)
@@ -143,20 +145,46 @@ export default function FinWeekdayReport() {
   }
 
   return (
-    <div className="w-full min-w-0 p-4 sm:p-6 space-y-6 max-w-6xl mx-auto">
+    <DashboardLayout>
+    <div className="w-full min-w-0 space-y-6 max-w-6xl mx-auto">
+      {/* Barra de Navegação Rápida do Financeiro */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-2.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">
+          Módulos Financeiros:
+        </span>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/fin/dashboard")}>
+          Painel Financeiro
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => navigate("/fin/payables")}>
+          💸 Contas a Pagar
+        </Button>
+        <Button size="sm" variant="default" className="h-8 text-xs" onClick={() => navigate("/fin/weekday-report")}>
+          📊 Break-Even Semanal & ABC
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => navigate("/fin/receivables")}>
+          💳 Contas a Receber & Liquidez
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => navigate("/fin/forecast")}>
+          🌤️ Previsão & Clima
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-violet-200 text-violet-700 hover:bg-violet-50" onClick={() => navigate("/fin/goals")}>
+          🎯 Meta de Gerência
+        </Button>
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Link href="/fin/payables">
               <Button variant="ghost" size="sm" className="text-muted-foreground">
-                ← Voltar
+                ← Voltar para Contas a Pagar
               </Button>
             </Link>
           </div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Calendar className="h-6 w-6 text-primary" />
-            Contas a Pagar por Dia da Semana
+            Contas a Pagar — Break-Even Semanal, Ranking ABC & Vencimentos
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
             Acompanhamento dos valores a pagar agrupados por dia da semana (Segunda a Sexta)
@@ -769,5 +797,6 @@ export default function FinWeekdayReport() {
         </div>
       )}
     </div>
+    </DashboardLayout>
   );
 }

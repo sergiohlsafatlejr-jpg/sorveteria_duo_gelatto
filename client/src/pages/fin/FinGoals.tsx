@@ -1,13 +1,16 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation } from "wouter";
+import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import {
   ArrowLeft, Target, Plus, Trash2, Edit2, Check, X, TrendingUp,
-  DollarSign, AlertCircle, CheckCircle2, Calculator, CalendarDays, Copy, Share2
+  DollarSign, AlertCircle, CheckCircle2, Calculator, CalendarDays, Copy, Share2,
+  MessageSquare, Users, Save
 } from "lucide-react";
 import {
   AlertDialog,
@@ -48,6 +51,85 @@ export default function FinGoals() {
     month,
     targetTicket: parseFloat(customTargetTicket) || 31.5,
   });
+
+  // Estado para Análise Gerencial, Informações para Funcionários e Edição de Metas Semanais
+  const [monthlyAnalysisText, setMonthlyAnalysisText] = useState<string>("");
+  const [teamGeneralNoticeText, setTeamGeneralNoticeText] = useState<string>("");
+  const [monthlyGoalOverrideInput, setMonthlyGoalOverrideInput] = useState<string>("");
+  const [editingWeekIdx, setEditingWeekIdx] = useState<number | null>(null);
+  const [weekEditForm, setWeekEditForm] = useState<{
+    customGoal: string;
+    customTakeHomePotes: string;
+    managerAnalysis: string;
+    employeeNote: string;
+  }>({
+    customGoal: "",
+    customTakeHomePotes: "",
+    managerAnalysis: "",
+    employeeNote: "",
+  });
+
+  useEffect(() => {
+    if (weeklyTeamPlan) {
+      setMonthlyAnalysisText(weeklyTeamPlan.monthlyAnalysis ?? "");
+      setTeamGeneralNoticeText(weeklyTeamPlan.teamGeneralNotice ?? "");
+      setMonthlyGoalOverrideInput(
+        weeklyTeamPlan.targetMonthlyRevenue ? String(weeklyTeamPlan.targetMonthlyRevenue) : "",
+      );
+    }
+  }, [weeklyTeamPlan?.month, weeklyTeamPlan?.monthlyAnalysis, weeklyTeamPlan?.teamGeneralNotice, weeklyTeamPlan?.targetMonthlyRevenue]);
+
+  const saveTeamConfigMutation = trpc.fin.intelligence.saveWeeklyTeamGoalsConfig.useMutation({
+    onSuccess: () => {
+      utils.fin.intelligence.weeklyTeamGoals.invalidate();
+      setEditingWeekIdx(null);
+      toast.success("Análise, informações da equipe e metas atualizadas com sucesso!");
+    },
+    onError: (e) => toast.error(`Erro ao salvar configuração: ${e.message}`),
+  });
+
+  const handleSaveGeneralTeamConfig = () => {
+    const parsedMonthlyGoal = parseFloat(monthlyGoalOverrideInput);
+    const parsedTicket = parseFloat(customTargetTicket);
+    saveTeamConfigMutation.mutate({
+      month,
+      monthlyAnalysis: monthlyAnalysisText,
+      teamGeneralNotice: teamGeneralNoticeText,
+      targetMonthlyRevenueOverride: !isNaN(parsedMonthlyGoal) && parsedMonthlyGoal > 0 ? parsedMonthlyGoal : null,
+      targetTicketOverride: !isNaN(parsedTicket) && parsedTicket > 0 ? parsedTicket : null,
+    });
+  };
+
+  const openWeekEditor = (w: NonNullable<typeof weeklyTeamPlan>["weeks"][0]) => {
+    setEditingWeekIdx(w.weekIndex);
+    setWeekEditForm({
+      customGoal: String(w.recoveryGoal),
+      customTakeHomePotes: String(w.takeHomePotesTarget),
+      managerAnalysis: w.managerAnalysis ?? "",
+      employeeNote: w.employeeNote ?? "",
+    });
+  };
+
+  const handleSaveWeekEdit = (weekIndex: number) => {
+    const parsedGoal = parseFloat(weekEditForm.customGoal);
+    const parsedPotes = parseInt(weekEditForm.customTakeHomePotes, 10);
+    const parsedMonthlyGoal = parseFloat(monthlyGoalOverrideInput);
+    const parsedTicket = parseFloat(customTargetTicket);
+    saveTeamConfigMutation.mutate({
+      month,
+      monthlyAnalysis: monthlyAnalysisText,
+      teamGeneralNotice: teamGeneralNoticeText,
+      targetMonthlyRevenueOverride: !isNaN(parsedMonthlyGoal) && parsedMonthlyGoal > 0 ? parsedMonthlyGoal : null,
+      targetTicketOverride: !isNaN(parsedTicket) && parsedTicket > 0 ? parsedTicket : null,
+      weekIndex,
+      weekOverride: {
+        customGoal: !isNaN(parsedGoal) && parsedGoal > 0 ? parsedGoal : null,
+        customTakeHomePotes: !isNaN(parsedPotes) && parsedPotes > 0 ? parsedPotes : null,
+        managerAnalysis: weekEditForm.managerAnalysis,
+        employeeNote: weekEditForm.employeeNote,
+      },
+    });
+  };
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const createGoal = trpc.fin.goals.create.useMutation({
@@ -156,18 +238,44 @@ export default function FinGoals() {
   const loading = loadingSummary || loadingGoals || loadingExtra;
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6">
+    <DashboardLayout>
+    <div className="space-y-6">
+      {/* Barra de Navegação Rápida do Financeiro */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-2.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">
+          Módulos Financeiros:
+        </span>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/fin/dashboard")}>
+          Painel Financeiro
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => navigate("/fin/payables")}>
+          💸 Contas a Pagar
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-amber-200 text-amber-800 hover:bg-amber-50" onClick={() => navigate("/fin/weekday-report")}>
+          📊 Break-Even Semanal & ABC
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => navigate("/fin/receivables")}>
+          💳 Contas a Receber & Liquidez
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => navigate("/fin/forecast")}>
+          🌤️ Previsão & Clima
+        </Button>
+        <Button size="sm" variant="default" className="h-8 text-xs" onClick={() => navigate("/fin/goals")}>
+          🎯 Meta de Gerência
+        </Button>
+      </div>
+
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate("/fin/dashboard")}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Target className="h-6 w-6 text-primary" />
-            Meta de Gerência
+            Meta de Gerência & Plano da Equipe
           </h1>
-          <p className="text-sm text-muted-foreground">Cenários de faturamento e salário por mês</p>
+          <p className="text-sm text-muted-foreground">Cenários de faturamento, análise gerencial, comunicados para os funcionários e metas semanais editáveis</p>
         </div>
       </div>
 
@@ -452,28 +560,46 @@ export default function FinGoals() {
             </CardContent>
           </Card>
 
-          {/* ─── PAINEL DE METAS SEMANAIS DA EQUIPE (CLIMA + BALCÃO + WHATSAPP) ─── */}
+          {/* ─── PAINEL DE METAS SEMANAIS DA EQUIPE (CLIMA + BALCÃO + WHATSAPP + ANÁLISE & COMUNICADOS) ─── */}
           <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 via-card to-indigo-500/5">
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <CardTitle className="text-base flex items-center gap-2">
                     <Target className="h-5 w-5 text-emerald-500" />
-                    Metas Semanais da Equipe (Ponderadas por Clima + Recálculo de Recuperação)
+                    Metas Semanais da Equipe, Análise Gerencial & Informações para Funcionários
                   </CardTitle>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Desdobra a meta mensal em semanas levando em conta o peso de Seg–Dom, previsão do tempo (°C / chuva) e metas táticas de balcão.
+                    Altere as metas mensais ou de cada semana, registre sua análise gerencial e escreva orientações/avisos para os funcionários (incluídos automaticamente ao copiar para o WhatsApp).
                   </p>
                 </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-muted-foreground">Meta Ticket Médio (R$):</span>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Meta Mensal Equipe (R$):</span>
+                  <Input
+                    type="number"
+                    step="100"
+                    value={monthlyGoalOverrideInput}
+                    onChange={(e) => setMonthlyGoalOverrideInput(e.target.value)}
+                    placeholder="Ex: 55000"
+                    className="w-28 h-8 text-xs font-bold"
+                  />
+                  <span className="text-muted-foreground">Ticket Alvo (R$):</span>
                   <Input
                     type="number"
                     step="0.50"
                     value={customTargetTicket}
                     onChange={(e) => setCustomTargetTicket(e.target.value)}
-                    className="w-24 h-8 text-xs font-bold"
+                    className="w-20 h-8 text-xs font-bold"
                   />
+                  <Button
+                    size="sm"
+                    onClick={handleSaveGeneralTeamConfig}
+                    disabled={saveTeamConfigMutation.isPending}
+                    className="h-8 text-xs gap-1.5"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    Salvar Metas & Avisos
+                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -482,6 +608,48 @@ export default function FinGoals() {
                 <div className="py-8 text-center text-sm text-muted-foreground">Calculando plano semanal da equipe...</div>
               ) : weeklyTeamPlan ? (
                 <>
+                  {/* Mural de Análise da Gerência & Informações para os Funcionários */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 rounded-xl border border-indigo-500/25 bg-card/90 p-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wide text-indigo-600 flex items-center gap-1.5">
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        Análise da Gerência (Estratégia & Observações do Mês)
+                      </label>
+                      <Textarea
+                        rows={3}
+                        placeholder="Registre aqui sua análise do mês: motivo de ajuste das metas, foco em redução de desperdício, avaliação de turno, clima esperado..."
+                        value={monthlyAnalysisText}
+                        onChange={(e) => setMonthlyAnalysisText(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wide text-emerald-600 flex items-center gap-1.5">
+                        <Users className="h-3.5 w-3.5" />
+                        Informações / Comunicado Geral para os Funcionários (vai no WhatsApp)
+                      </label>
+                      <Textarea
+                        rows={3}
+                        placeholder="Escreva avisos e incentivos para a equipe (ex: 'Premiação de R$ 100 para o turno que bater a meta de Potes 1L nesta semana! Caprichem na abordagem no caixa!')"
+                        value={teamGeneralNoticeText}
+                        onChange={(e) => setTeamGeneralNoticeText(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="lg:col-span-2 flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs gap-1.5 border-emerald-500/40 text-emerald-700 hover:bg-emerald-50"
+                        onClick={handleSaveGeneralTeamConfig}
+                        disabled={saveTeamConfigMutation.isPending}
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        {saveTeamConfigMutation.isPending ? "Salvando..." : "Salvar Análise, Comunicado e Meta Mensal"}
+                      </Button>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="rounded-lg border bg-card/80 p-3">
                       <p className="text-[11px] text-muted-foreground uppercase">Meta Mensal de Referência</p>
@@ -507,7 +675,7 @@ export default function FinGoals() {
                           w.isCurrentWeek ? "ring-2 ring-emerald-500 border-emerald-500/50" : ""
                         }`}
                       >
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
                             <span className="font-bold text-base">{w.weekLabel}</span>
                             <span className="ml-2 text-xs text-muted-foreground">({w.dateRange})</span>
@@ -516,20 +684,124 @@ export default function FinGoals() {
                                 Semana Atual
                               </span>
                             )}
+                            {w.hasCustomGoal && (
+                              <span className="ml-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600">
+                                Meta Editada
+                              </span>
+                            )}
                           </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs gap-1.5 border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
-                            onClick={() => {
-                              navigator.clipboard.writeText(w.whatsappSummaryText);
-                              toast.success(`Resumo da ${w.weekLabel} copiado! Cole no WhatsApp da equipe.`);
-                            }}
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                            Copiar p/ WhatsApp
-                          </Button>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs gap-1"
+                              onClick={() =>
+                                editingWeekIdx === w.weekIndex ? setEditingWeekIdx(null) : openWeekEditor(w)
+                              }
+                            >
+                              <Edit2 className="h-3 w-3" />
+                              {editingWeekIdx === w.weekIndex ? "Fechar Edição" : "Alterar Meta / Avisos"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs gap-1.5 border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+                              onClick={() => {
+                                navigator.clipboard.writeText(w.whatsappSummaryText);
+                                toast.success(`Resumo da ${w.weekLabel} copiado! Cole no WhatsApp da equipe.`);
+                              }}
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                              WhatsApp
+                            </Button>
+                          </div>
                         </div>
+
+                        {/* Painel inline para editar meta da semana, análise e recado p/ funcionários */}
+                        {editingWeekIdx === w.weekIndex && (
+                          <div className="rounded-lg border-2 border-indigo-400/50 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 space-y-3 text-xs">
+                            <p className="font-bold text-indigo-700 dark:text-indigo-300">
+                              ✏️ Personalizar {w.weekLabel} ({w.dateRange})
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[11px] font-medium text-muted-foreground">
+                                  Meta da Semana (R$)
+                                </label>
+                                <Input
+                                  type="number"
+                                  step="50"
+                                  value={weekEditForm.customGoal}
+                                  onChange={(e) =>
+                                    setWeekEditForm((prev) => ({ ...prev, customGoal: e.target.value }))
+                                  }
+                                  className="h-8 text-xs mt-0.5 bg-background"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] font-medium text-muted-foreground">
+                                  Meta Potes "Leve p/ Casa" (un)
+                                </label>
+                                <Input
+                                  type="number"
+                                  step="1"
+                                  value={weekEditForm.customTakeHomePotes}
+                                  onChange={(e) =>
+                                    setWeekEditForm((prev) => ({ ...prev, customTakeHomePotes: e.target.value }))
+                                  }
+                                  className="h-8 text-xs mt-0.5 bg-background"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-medium text-muted-foreground">
+                                Análise da Gerência sobre esta Semana
+                              </label>
+                              <Textarea
+                                rows={2}
+                                placeholder="Ex: Semana com feriado na sexta, reforçar estoque de açaí e casquinha..."
+                                value={weekEditForm.managerAnalysis}
+                                onChange={(e) =>
+                                  setWeekEditForm((prev) => ({ ...prev, managerAnalysis: e.target.value }))
+                                }
+                                className="text-xs mt-0.5 bg-background"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-medium text-emerald-700">
+                                Orientação / Informação para os Funcionários nesta Semana (vai no WhatsApp)
+                              </label>
+                              <Textarea
+                                rows={2}
+                                placeholder="Ex: Equipe, foco em oferecer adicionais de Nutella e cobertura quente após as 18h!"
+                                value={weekEditForm.employeeNote}
+                                onChange={(e) =>
+                                  setWeekEditForm((prev) => ({ ...prev, employeeNote: e.target.value }))
+                                }
+                                className="text-xs mt-0.5 bg-background"
+                              />
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs"
+                                onClick={() => setEditingWeekIdx(null)}
+                              >
+                                Cancelar
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-7 text-xs gap-1"
+                                disabled={saveTeamConfigMutation.isPending}
+                                onClick={() => handleSaveWeekEdit(w.weekIndex)}
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                Salvar Semana
+                              </Button>
+                            </div>
+                          </div>
+                        )}
 
                         <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/30 p-2.5 text-xs">
                           <div>
@@ -537,7 +809,9 @@ export default function FinGoals() {
                             <p className="font-semibold">{fmt(w.originalGoal)}</p>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground">Meta c/ Recuperação</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {w.hasCustomGoal ? "Meta Definida" : "Meta c/ Recuperação"}
+                            </p>
                             <p className="font-bold text-primary">{fmt(w.recoveryGoal)}</p>
                           </div>
                           <div>
@@ -583,6 +857,20 @@ export default function FinGoals() {
                           <span className="font-semibold text-foreground">⛅ Estratégia de Balcão da Semana: </span>
                           {w.tacticalFocus}
                         </div>
+
+                        {/* Exibição da Análise da Gerência e Informação para Funcionários se preenchidas */}
+                        {w.managerAnalysis && (
+                          <div className="rounded-lg bg-indigo-500/10 border border-indigo-500/25 p-2.5 text-xs">
+                            <span className="font-bold text-indigo-700 dark:text-indigo-300">📊 Análise da Gerência: </span>
+                            <span className="text-foreground">{w.managerAnalysis}</span>
+                          </div>
+                        )}
+                        {w.employeeNote && (
+                          <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-2.5 text-xs">
+                            <span className="font-bold text-emerald-700 dark:text-emerald-300">📣 Recado para os Funcionários: </span>
+                            <span className="text-foreground">{w.employeeNote}</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -643,5 +931,6 @@ export default function FinGoals() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </DashboardLayout>
   );
 }

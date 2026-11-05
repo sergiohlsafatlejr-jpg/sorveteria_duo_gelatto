@@ -259,24 +259,34 @@ export default function Purchases() {
   // Items Data
   const [itemSearch, setItemSearch] = useState("");
   const [itemCategory, setItemCategory] = useState("all");
+  const [warehouseLowStockOnly, setWarehouseLowStockOnly] = useState(false);
+  const [sorveteLowStockOnly, setSorveteLowStockOnly] = useState(false);
   const { data: items = [] } = trpc.purchases.items.list.useQuery();
   const { data: lowStockItems = [] } = trpc.purchases.items.lowStock.useQuery();
+  const { data: boxStockList = [] } = trpc.boxStock.list.useQuery();
   const warehouseItems = useMemo(
     () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], items, "almoxarifado"),
     [monthlyItemsSummary?.categories, items],
   );
   const warehouseItemsSorvetes = useMemo(
-    () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], items, "duo_gelatto"),
-    [monthlyItemsSummary?.categories, items],
+    () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], items, "duo_gelatto", boxStockList),
+    [monthlyItemsSummary?.categories, items, boxStockList],
   );
   const priceVariationInput = useMemo(() => ({ month: purchaseMonth }), [purchaseMonth]);
   const { data: priceVariation } = trpc.purchaseInvoices.priceVariation.useQuery(priceVariationInput, {
     enabled: activeTab === "sorvetes",
   });
-  const filteredWarehouseItems = warehouseItems.filter(item =>
-    item.name.toLowerCase().includes(itemSearch.toLowerCase()) &&
-    (itemCategory === "all" || getInternalPurchaseGroup(item.category) === itemCategory)
-  );
+  const filteredWarehouseItems = warehouseItems.filter((item) => {
+    const matchesSearch = item.name.toLowerCase().includes(itemSearch.toLowerCase());
+    const matchesGroup = itemCategory === "all" || getInternalPurchaseGroup(item.category) === itemCategory;
+    if (!matchesSearch || !matchesGroup) return false;
+    if (warehouseLowStockOnly) {
+      const cur = Number(item.currentStock ?? 0);
+      const min = Number(item.minStock ?? 5);
+      return !item.stockConfigured || cur <= 0 || cur <= min;
+    }
+    return true;
+  });
   const warehousePurchaseSummary = useMemo(() => warehouseItems.reduce((summary, item) => ({
     purchasedProducts: summary.purchasedProducts + (item.purchasedQuantity > 0 ? 1 : 0),
     purchasedQuantity: summary.purchasedQuantity + item.purchasedQuantity,
@@ -375,6 +385,23 @@ export default function Purchases() {
       utils.purchases.invalidate();
     },
     onError: (err) => toast.error(err.message),
+  });
+  const upsertWarehouseStockMutation = trpc.purchases.stock.upsertWarehouseItemStock.useMutation({
+    onSuccess: () => {
+      toast.success("Estoque atualizado com sucesso!");
+      utils.purchases.invalidate();
+      utils.boxStock.invalidate();
+      utils.products.invalidate();
+    },
+    onError: (err) => toast.error(`Erro ao atualizar estoque: ${err.message}`),
+  });
+  const initializeBatchStockMutation = trpc.purchases.stock.initializeBatch.useMutation({
+    onSuccess: (res) => {
+      toast.success(`${res.initialized} produto(s) inicializado(s) com o saldo das notas!`);
+      utils.purchases.invalidate();
+      utils.boxStock.invalidate();
+    },
+    onError: (err) => toast.error(`Erro ao inicializar saldos: ${err.message}`),
   });
 
   return (
@@ -710,8 +737,73 @@ export default function Purchases() {
 
           {/* TAB: ALMOXARIFADO */}
           <TabsContent value="almoxarifado" className="space-y-6">
+            {/* Cards clicáveis por grupo do Almoxarifado */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <button
+                type="button"
+                onClick={() => setItemCategory("all")}
+                className={`text-left rounded-xl border p-3.5 transition-all ${
+                  itemCategory === "all"
+                    ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                    : "bg-card hover:bg-muted/40"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Todos os Grupos</span>
+                  <Badge variant="secondary">{warehouseItems.length} itens</Badge>
+                </div>
+                <p className="mt-1.5 text-sm font-bold text-foreground">
+                  Clique nos grupos ao lado para filtrar
+                </p>
+              </button>
+              {Object.entries(INTERNAL_PURCHASE_GROUPS).map(([key, label]) => {
+                const groupItems = warehouseItems.filter((i) => i.category === key);
+                const lowCount = groupItems.filter((i) => {
+                  const cur = Number(i.currentStock ?? 0);
+                  const min = Number(i.minStock ?? 0);
+                  return !i.stockConfigured || cur <= 0 || (min > 0 && cur <= min);
+                }).length;
+                const isSelected = itemCategory === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setItemCategory(isSelected ? "all" : key)}
+                    className={`text-left rounded-xl border p-3.5 transition-all ${
+                      isSelected
+                        ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                        : lowCount > 0
+                        ? "border-amber-200 bg-amber-50/30 hover:bg-amber-50/60"
+                        : "bg-card hover:bg-muted/40"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground truncate">
+                        {label}
+                      </span>
+                      {lowCount > 0 ? (
+                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                          {lowCount} baixo/sem saldo
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-700">
+                          OK
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="mt-1.5 text-lg font-bold text-foreground">
+                      {groupItems.length} <span className="text-xs font-normal text-muted-foreground">produto(s)</span>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {isSelected ? "✓ Exibindo itens deste grupo (clique p/ todos)" : "Clique para ver os itens do grupo"}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div className="flex w-full sm:w-auto space-x-2">
+              <div className="flex flex-wrap w-full sm:w-auto gap-2">
                 <div className="relative w-full sm:w-64">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
                   <Input 
@@ -732,85 +824,125 @@ export default function Purchases() {
                     ))}
                   </SelectContent>
                 </Select>
+                <Button
+                  type="button"
+                  variant={warehouseLowStockOnly ? "destructive" : "outline"}
+                  onClick={() => setWarehouseLowStockOnly((v) => !v)}
+                  className="gap-1.5"
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  {warehouseLowStockOnly ? "Mostrando Apenas Baixo Estoque" : "Filtrar Baixo Estoque / Sem Saldo"}
+                </Button>
               </div>
               
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button><Plus className="w-4 h-4 mr-2"/> Novo Item</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Novo Item Operacional</DialogTitle>
-                  </DialogHeader>
-                  <form className="space-y-4" onSubmit={(e) => {
-                    e.preventDefault();
-                    const formData = new FormData(e.currentTarget);
-                    createItemMutation.mutate({
-                      name: formData.get('name') as string,
-                      category: formData.get('category') as any,
-                      unit: formData.get('unit') as string,
-                      minStock: String(formData.get('minStock') || '0'),
-                      currentStock: String(formData.get('currentStock') || '0'),
-                      referencePrice: String(formData.get('referencePrice') || '0'),
-                    });
-                  }}>
-                    <div className="space-y-2">
-                      <Label>Nome do Item</Label>
-                      <Input name="name" required />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                {warehouseItems.some((i) => !i.stockConfigured) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-cyan-300 text-cyan-800 hover:bg-cyan-50"
+                    disabled={initializeBatchStockMutation.isPending}
+                    onClick={() => {
+                      const unconfigured = warehouseItems
+                        .filter((i) => !i.stockConfigured && i.purchasedQuantity > 0)
+                        .map((i) => ({
+                          name: i.name,
+                          category: i.category,
+                          unit: i.unit,
+                          quantity: Number(i.purchasedQuantity),
+                          minStock: 2,
+                          referencePrice: Number(i.referencePrice || 0),
+                        }));
+                      if (unconfigured.length === 0) {
+                        toast.info("Todos os itens com quantidade já possuem saldo configurado.");
+                        return;
+                      }
+                      initializeBatchStockMutation.mutate({ items: unconfigured });
+                    }}
+                  >
+                    <Package className="w-4 h-4 mr-2" />
+                    Inicializar Saldos pelas Notas ({warehouseItems.filter((i) => !i.stockConfigured).length})
+                  </Button>
+                )}
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button><Plus className="w-4 h-4 mr-2"/> Novo Item</Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Novo Item Operacional</DialogTitle>
+                    </DialogHeader>
+                    <form className="space-y-4" onSubmit={(e) => {
+                      e.preventDefault();
+                      const formData = new FormData(e.currentTarget);
+                      createItemMutation.mutate({
+                        name: formData.get('name') as string,
+                        category: formData.get('category') as any,
+                        unit: formData.get('unit') as string,
+                        minStock: String(formData.get('minStock') || '0'),
+                        currentStock: String(formData.get('currentStock') || '0'),
+                        referencePrice: String(formData.get('referencePrice') || '0'),
+                      });
+                    }}>
                       <div className="space-y-2">
-                        <Label>Categoria</Label>
-                        <Select name="category" defaultValue="limpeza">
-                          <SelectTrigger><SelectValue/></SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
-                              <SelectItem key={k} value={k}>{v.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label>Nome do Item</Label>
+                        <Input name="name" required />
                       </div>
-                      <div className="space-y-2">
-                        <Label>Unidade de Medida</Label>
-                        <Select name="unit" defaultValue="un">
-                          <SelectTrigger><SelectValue/></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="un">Unidade (un)</SelectItem>
-                            <SelectItem value="kg">Quilo (kg)</SelectItem>
-                            <SelectItem value="l">Litro (l)</SelectItem>
-                            <SelectItem value="cx">Caixa (cx)</SelectItem>
-                            <SelectItem value="pct">Pacote (pct)</SelectItem>
-                          </SelectContent>
-                        </Select>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Categoria</Label>
+                          <Select name="category" defaultValue="limpeza">
+                            <SelectTrigger><SelectValue/></SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
+                                <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Unidade de Medida</Label>
+                          <Select name="unit" defaultValue="un">
+                            <SelectTrigger><SelectValue/></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="un">Unidade (un)</SelectItem>
+                              <SelectItem value="kg">Quilo (kg)</SelectItem>
+                              <SelectItem value="l">Litro (l)</SelectItem>
+                              <SelectItem value="cx">Caixa (cx)</SelectItem>
+                              <SelectItem value="pct">Pacote (pct)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="space-y-2">
-                        <Label>Estoque Mín.</Label>
-                        <Input type="number" step="0.01" name="minStock" required />
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>Estoque Mín.</Label>
+                          <Input type="number" step="0.01" name="minStock" required />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Estoque Atual</Label>
+                          <Input type="number" step="0.01" name="currentStock" defaultValue={0} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Preço Ref. (R$)</Label>
+                          <Input type="number" step="0.01" name="referencePrice" defaultValue={0} />
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Estoque Atual</Label>
-                        <Input type="number" step="0.01" name="currentStock" defaultValue={0} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Preço Ref. (R$)</Label>
-                        <Input type="number" step="0.01" name="referencePrice" defaultValue={0} />
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button type="submit" disabled={createItemMutation.isPending}>Salvar</Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
+                      <DialogFooter>
+                        <Button type="submit" disabled={createItemMutation.isPending}>Salvar</Button>
+                      </DialogFooter>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredWarehouseItems.map(item => {
                 const currentStock = Number(item.currentStock ?? 0);
                 const minStock = Number(item.minStock ?? 0);
-                const stockLow = item.stockConfigured && minStock > 0 && currentStock <= minStock;
+                const stockLow = item.stockConfigured && (currentStock <= 0 || (minStock > 0 && currentStock <= minStock));
+                const suggestedQty = item.stockConfigured ? currentStock : Number(item.purchasedQuantity || 0);
                 return (
                 <Card key={item.key} className="overflow-hidden">
                   <div className={`h-1 w-full ${!item.stockConfigured ? 'bg-cyan-500' : stockLow ? 'bg-red-500' : currentStock <= minStock * 2 ? 'bg-yellow-400' : 'bg-green-500'}`} />
@@ -821,8 +953,8 @@ export default function Purchases() {
                         <Badge variant="outline" className={CATEGORY_LABELS[item.category]?.color}>
                           {CATEGORY_LABELS[item.category]?.label || item.category}
                         </Badge>
-                        <Badge variant="secondary" className={!item.stockConfigured ? "bg-cyan-50 text-cyan-700" : ""}>
-                          {item.stockConfigured ? "Saldo conferido" : "Encontrado nas notas"}
+                        <Badge variant={stockLow ? "destructive" : "secondary"} className={!item.stockConfigured ? "bg-cyan-50 text-cyan-700" : ""}>
+                          {!item.stockConfigured ? "Aguardando saldo" : stockLow ? "Estoque baixo" : "Saldo conferido"}
                         </Badge>
                       </div>
                     </div>
@@ -843,8 +975,8 @@ export default function Purchases() {
                           </>
                         ) : (
                           <>
-                            <p className="text-sm font-semibold text-cyan-700">Aguardando conferência</p>
-                            <p className="mt-1 text-xs text-slate-500">Não calculado pelas notas históricas</p>
+                            <p className="text-sm font-semibold text-cyan-700">Clique em Atualizar</p>
+                            <p className="mt-1 text-xs text-slate-500">Sugerido: {formatQuantity(item.purchasedQuantity)} {item.unit}</p>
                           </>
                         )}
                       </div>
@@ -897,12 +1029,69 @@ export default function Purchases() {
                             </DialogFooter>
                           </form>
                         </DialogContent>
-                      </Dialog> : (
-                        <Button asChild variant="outline" className="flex-1" size="sm">
-                          <a href="/purchases/invoices"><ReceiptText className="mr-2 h-3 w-3"/> Conferir entrada</a>
-                        </Button>
-                      )}
-                      {item.operationalItemId && <Dialog><DialogTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500" title="Ajustar estoque"><Edit className="w-4 h-4"/></Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Ajustar Estoque - {item.name}</DialogTitle></DialogHeader><form className="space-y-4" onSubmit={(e) => { e.preventDefault(); const qty = Number(new FormData(e.currentTarget).get("qty")); adjustStockMutation.mutate({ itemId: item.operationalItemId!, quantity: qty, reason: "Contagem física" }); }}><div className="space-y-2"><Label>Quantidade atual em estoque ({item.unit})</Label><Input type="number" step="0.01" name="qty" defaultValue={currentStock} required /><p className="text-xs text-muted-foreground">Informe a quantidade real que você tem hoje.</p></div><DialogFooter><Button type="submit" disabled={adjustStockMutation.isPending}>Salvar</Button></DialogFooter></form></DialogContent></Dialog>}
+                      </Dialog> : null}
+
+                      {/* Modal Universal para Definir / Atualizar Estoque */}
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button
+                            variant={item.stockConfigured ? "outline" : "default"}
+                            size="sm"
+                            className={item.operationalItemId ? "" : "flex-1"}
+                            title="Definir ou atualizar estoque físico"
+                          >
+                            <Edit className="w-3.5 h-3.5 mr-1.5" />
+                            {item.stockConfigured ? "Atualizar Estoque" : "Definir Saldo Inicial"}
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Atualizar Estoque — {item.name}</DialogTitle>
+                          </DialogHeader>
+                          <form
+                            className="space-y-4"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              const fd = new FormData(e.currentTarget);
+                              const qty = Number(fd.get("qty"));
+                              const min = Number(fd.get("minStock") || 0);
+                              upsertWarehouseStockMutation.mutate({
+                                operationalItemId: item.operationalItemId,
+                                boxStockId: (item as any).boxStockId ?? null,
+                                name: item.name,
+                                category: item.category,
+                                unit: item.unit,
+                                quantity: qty,
+                                minStock: min,
+                                referencePrice: Number(item.referencePrice || 0),
+                                reason: "Atualização manual na tela de Almoxarifado",
+                              });
+                            }}
+                          >
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label>Quantidade atual em estoque ({item.unit})</Label>
+                                <Input type="number" step="0.01" name="qty" defaultValue={suggestedQty} required />
+                                <p className="text-xs text-muted-foreground">
+                                  Comprado nas notas: {formatQuantity(item.purchasedQuantity)} {item.unit}
+                                </p>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Estoque Mínimo p/ Alerta ({item.unit})</Label>
+                                <Input type="number" step="0.01" name="minStock" defaultValue={minStock > 0 ? minStock : 2} />
+                                <p className="text-xs text-muted-foreground">
+                                  Avisa quando o saldo ficar igual ou abaixo deste valor.
+                                </p>
+                              </div>
+                            </div>
+                            <DialogFooter>
+                              <Button type="submit" disabled={upsertWarehouseStockMutation.isPending}>
+                                Salvar Estoque
+                              </Button>
+                            </DialogFooter>
+                          </form>
+                        </DialogContent>
+                      </Dialog>
                     </div>
                   </CardContent>
                 </Card>
@@ -915,16 +1104,61 @@ export default function Purchases() {
             </div>
           </TabsContent>
 
-          {/* TAB: PEDIDOS */}
+          {/* TAB: SORVETES */}
           <TabsContent value="sorvetes" className="space-y-6">
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   <div>
-                    <CardTitle className="flex items-center gap-2"><IceCream className="h-5 w-5 text-pink-500" />Sorvetes — Itens da Duo Gelatto</CardTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">Itens comprados da Duo Gelatto com entrada unificada por NF-e (convertida em unidades) e baixa automática pelas vendas do PDV INOVE.</p>
+                    <CardTitle className="flex items-center gap-2"><IceCream className="h-5 w-5 text-pink-500" />Sorvetes — Controle de Estoque por Grupo & Baixa Automática PDV</CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Clique em qualquer <strong>grupo de produto</strong> abaixo para ver os itens daquele tipo, filtrar <strong>estoque baixo</strong> ou atualizar os saldos físicos.
+                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant={sorveteLowStockOnly ? "destructive" : "outline"}
+                      size="sm"
+                      className="h-9 gap-1.5"
+                      onClick={() => setSorveteLowStockOnly((v) => !v)}
+                    >
+                      <AlertTriangle className="h-4 w-4" />
+                      {sorveteLowStockOnly ? "Mostrando: Baixo Estoque / Sem Saldo" : "Ver Baixo Estoque / Sem Saldo"}
+                    </Button>
+                    {warehouseItemsSorvetes.some((i) => !i.stockConfigured) && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 border-cyan-300 text-cyan-800 hover:bg-cyan-50"
+                        disabled={initializeBatchStockMutation.isPending}
+                        onClick={() => {
+                          const toInit = warehouseItemsSorvetes
+                            .filter((i) => !i.stockConfigured && i.totalUnits > 0)
+                            .map((i) => ({
+                              name: i.name,
+                              category: i.category,
+                              unit: i.category === "caixas_10l" ? "cx" : "un",
+                              quantity: Number(i.totalUnits),
+                              minStock: i.category === "caixas_10l" ? 2 : 10,
+                              referencePrice: Number(i.referencePrice || 0),
+                            }));
+                          if (toInit.length === 0) {
+                            toast.info("Todos os sorvetes já estão com estoque inicializado.");
+                            return;
+                          }
+                          initializeBatchStockMutation.mutate({ items: toInit });
+                        }}
+                      >
+                        {initializeBatchStockMutation.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Package className="mr-2 h-4 w-4" />
+                        )}
+                        Ativar Estoque pelas Notas ({warehouseItemsSorvetes.filter((i) => !i.stockConfigured).length})
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -976,6 +1210,7 @@ export default function Purchases() {
                         "Qtd. Comprada": item.purchasedQuantity,
                         "Unidade": item.unit,
                         "Qtd. Unidades": item.totalUnits,
+                        "Saldo em Estoque": item.stockConfigured ? Number(item.currentStock ?? 0) : "Aguardando ativação",
                         "Valor Total": Number(item.purchasedValue.toFixed(2)),
                         "Preço Médio": Number(item.referencePrice.toFixed(2)),
                       }));
@@ -1000,96 +1235,239 @@ export default function Purchases() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {/* Totalização por categoria */}
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    {/* Cards de Tipos de Produtos (Clicáveis para abrir os itens do grupo e ver estoque baixo) */}
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                       {Object.entries(
-                        warehouseItemsSorvetes.reduce<Record<string, { total: number; count: number }>>((acc, item) => {
-                          const cat = SORVETE_CATEGORY_LABELS[item.category] ?? item.category;
-                          if (!acc[cat]) acc[cat] = { total: 0, count: 0 };
-                          acc[cat].total += item.purchasedValue;
-                          acc[cat].count += item.totalUnits;
+                        warehouseItemsSorvetes.reduce<
+                          Record<
+                            string,
+                            {
+                              catKey: string;
+                              label: string;
+                              total: number;
+                              count: number;
+                              stockUnits: number;
+                              itemsCount: number;
+                              lowOrUnconfiguredCount: number;
+                            }
+                          >
+                        >((acc, item) => {
+                          const catKey = item.category;
+                          const label = SORVETE_CATEGORY_LABELS[catKey] ?? catKey;
+                          if (!acc[catKey]) {
+                            acc[catKey] = {
+                              catKey,
+                              label,
+                              total: 0,
+                              count: 0,
+                              stockUnits: 0,
+                              itemsCount: 0,
+                              lowOrUnconfiguredCount: 0,
+                            };
+                          }
+                          acc[catKey].total += item.purchasedValue;
+                          acc[catKey].count += item.totalUnits;
+                          acc[catKey].itemsCount += 1;
+                          const cur = Number(item.currentStock ?? 0);
+                          const min = Number(item.minStock ?? 0);
+                          if (item.stockConfigured) {
+                            acc[catKey].stockUnits += cur;
+                          }
+                          if (!item.stockConfigured || cur <= 0 || (min > 0 && cur <= min)) {
+                            acc[catKey].lowOrUnconfiguredCount += 1;
+                          }
                           return acc;
                         }, {})
-                      ).sort((a, b) => b[1].total - a[1].total).map(([cat, data]) => (
-                        <div key={cat} className="rounded-lg border bg-muted/30 p-3">
-                          <p className="text-xs font-medium text-muted-foreground truncate">{cat}</p>
-                          <p className="text-sm font-bold">{formatCurrency(data.total)}</p>
-                          <p className="text-xs text-muted-foreground">{data.count.toLocaleString("pt-BR")} un</p>
-                        </div>
-                      ))}
+                      )
+                        .sort((a, b) => b[1].total - a[1].total)
+                        .map(([catKey, data]) => {
+                          const isSelected = sorveteCategoryFilter === catKey;
+                          return (
+                            <button
+                              key={catKey}
+                              type="button"
+                              onClick={() =>
+                                setSorveteCategoryFilter(isSelected ? "all" : catKey)
+                              }
+                              className={`text-left rounded-xl border p-3 transition-all ${
+                                isSelected
+                                  ? "border-pink-500 bg-pink-50/60 ring-2 ring-pink-500/20 dark:bg-pink-950/20"
+                                  : data.lowOrUnconfiguredCount > 0
+                                  ? "border-amber-200/80 bg-muted/30 hover:border-pink-300 hover:bg-muted/60"
+                                  : "bg-muted/30 hover:border-pink-300 hover:bg-muted/60"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <p className="text-xs font-semibold text-foreground truncate">
+                                  {data.label}
+                                </p>
+                                {data.lowOrUnconfiguredCount > 0 ? (
+                                  <Badge
+                                    variant="destructive"
+                                    className="text-[10px] px-1.5 py-0 shrink-0"
+                                  >
+                                    {data.lowOrUnconfiguredCount} atenção
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] px-1.5 py-0 border-emerald-300 text-emerald-700 shrink-0"
+                                  >
+                                    OK
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="mt-1 text-sm font-bold">{formatCurrency(data.total)}</p>
+                              <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                                <span>{data.itemsCount} sab./itens · {data.count.toLocaleString("pt-BR")} comprados</span>
+                              </div>
+                              <p className="mt-1 text-[11px] font-medium text-pink-600 dark:text-pink-400">
+                                {isSelected ? "✓ Grupo aberto (clique p/ todos)" : "Clique p/ ver os itens"}
+                              </p>
+                            </button>
+                          );
+                        })}
                     </div>
+
+                    {sorveteCategoryFilter !== "all" && (
+                      <div className="flex items-center justify-between rounded-lg border border-pink-200 bg-pink-50/50 px-4 py-2 text-sm">
+                        <span>
+                          Exibindo grupo: <strong>{SORVETE_CATEGORY_LABELS[sorveteCategoryFilter] ?? sorveteCategoryFilter}</strong>
+                        </span>
+                        <Button variant="ghost" size="sm" onClick={() => setSorveteCategoryFilter("all")}>
+                          Mostrar todos os grupos
+                        </Button>
+                      </div>
+                    )}
+
                     {/* Tabela de itens */}
                     <div className="overflow-x-auto">
-                    <table className="w-full min-w-[850px] text-sm">
-                      <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd. Comprada</th><th className="px-4 py-3 text-right">Qtd. Unidades</th><th className="px-4 py-3 text-right">Saldo em Estoque</th><th className="px-4 py-3 text-right">Valor Total</th><th className="px-4 py-3 text-right">Preço Médio</th><th className="px-4 py-3 text-center">PDV / Ajuste</th></tr></thead>
+                    <table className="w-full min-w-[920px] text-sm">
+                      <thead>
+                        <tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                          <th className="px-5 py-3">Produto</th>
+                          <th className="px-4 py-3">Tipo / Grupo</th>
+                          <th className="px-4 py-3 text-right">Qtd. Comprada</th>
+                          <th className="px-4 py-3 text-right">Qtd. Unidades</th>
+                          <th className="px-4 py-3 text-right">Saldo em Estoque</th>
+                          <th className="px-4 py-3 text-right">Est. Mínimo</th>
+                          <th className="px-4 py-3 text-right">Valor Total</th>
+                          <th className="px-4 py-3 text-center">Atualizar Estoque / PDV</th>
+                        </tr>
+                      </thead>
                       <tbody>
-                        {warehouseItemsSorvetes.filter(item => sorveteCategoryFilter === "all" || item.category === sorveteCategoryFilter).map((item) => {
+                        {warehouseItemsSorvetes
+                          .filter(item => sorveteCategoryFilter === "all" || item.category === sorveteCategoryFilter)
+                          .filter(item => {
+                            if (!sorveteLowStockOnly) return true;
+                            const cur = Number(item.currentStock ?? 0);
+                            const min = Number(item.minStock ?? 0);
+                            return !item.stockConfigured || cur <= 0 || (min > 0 && cur <= min);
+                          })
+                          .map((item) => {
                           const currentStock = Number(item.currentStock ?? 0);
+                          const minStock = Number(item.minStock ?? 0);
+                          const isLow = item.stockConfigured && (currentStock <= 0 || (minStock > 0 && currentStock <= minStock));
+                          const suggestedQty = item.stockConfigured ? currentStock : Number(item.totalUnits || item.purchasedQuantity || 0);
+                          const unitLabel = item.category === "caixas_10l" ? "cx" : "un";
                           return (
-                          <tr key={item.key} className="border-b hover:bg-muted/20">
+                          <tr key={item.key} className={`border-b hover:bg-muted/20 ${isLow ? "bg-red-50/30 dark:bg-red-950/10" : ""}`}>
                             <td className="px-5 py-3 font-medium">{item.name}</td>
-                            <td className="px-4 py-3"><Badge variant="outline">{SORVETE_CATEGORY_LABELS[item.category] ?? item.category}</Badge></td>
+                            <td className="px-4 py-3">
+                              <Badge
+                                variant="outline"
+                                className="cursor-pointer hover:bg-muted"
+                                onClick={() => setSorveteCategoryFilter(item.category)}
+                              >
+                                {SORVETE_CATEGORY_LABELS[item.category] ?? item.category}
+                              </Badge>
+                            </td>
                             <td className="px-4 py-3 text-right">{item.purchasedQuantity.toLocaleString("pt-BR")} {item.unit}</td>
                             <td className="px-4 py-3 text-right font-medium text-primary">{item.totalUnits.toLocaleString("pt-BR")} un</td>
                             <td className="px-4 py-3 text-right">
                               {item.stockConfigured ? (
-                                <Badge variant={currentStock <= 0 ? "destructive" : "secondary"} className="font-semibold">
-                                  {formatQuantity(currentStock)} un
+                                <Badge variant={isLow ? "destructive" : "secondary"} className="font-semibold">
+                                  {formatQuantity(currentStock)} {unitLabel}
+                                  {isLow ? " ⚠️ Baixo" : ""}
                                 </Badge>
                               ) : (
-                                <span className="text-xs text-muted-foreground">Aguardando NF</span>
+                                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800 text-xs">
+                                  Não ativado (sug: {item.totalUnits} {unitLabel})
+                                </Badge>
                               )}
                             </td>
+                            <td className="px-4 py-3 text-right text-xs text-muted-foreground">
+                              {item.stockConfigured ? `${formatQuantity(minStock)} ${unitLabel}` : "—"}
+                            </td>
                             <td className="px-4 py-3 text-right font-semibold">{formatCurrency(item.purchasedValue)}</td>
-                            <td className="px-4 py-3 text-right">{formatCurrency(item.referencePrice)}</td>
                             <td className="px-4 py-3 text-center">
-                              <div className="flex items-center justify-center gap-1">
+                              <div className="flex items-center justify-center gap-1.5">
                                 {item.inoveProductId ? (
                                   <Badge variant="outline" className="text-xs border-emerald-200 text-emerald-700 bg-emerald-50">
                                     PDV #{item.inoveProductId}
                                   </Badge>
                                 ) : null}
-                                {item.operationalItemId ? (
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500" title="Ajustar estoque e vínculo PDV">
-                                        <Edit className="h-3.5 w-3.5" />
-                                      </Button>
-                                    </DialogTrigger>
-                                    <DialogContent>
-                                      <DialogHeader>
-                                        <DialogTitle>Configurar Estoque / PDV — {item.name}</DialogTitle>
-                                      </DialogHeader>
-                                      <form
-                                        className="space-y-4"
-                                        onSubmit={(e) => {
-                                          e.preventDefault();
-                                          const fd = new FormData(e.currentTarget);
-                                          const qty = Number(fd.get("qty"));
-                                          const pdvRaw = (fd.get("inoveProductId") as string)?.trim();
-                                          const inoveProductId = pdvRaw ? Number(pdvRaw) : null;
-                                          if (qty !== currentStock) {
-                                            adjustStockMutation.mutate({
-                                              itemId: item.operationalItemId!,
-                                              quantity: qty,
-                                              reason: "Contagem física (Sorvetes)",
-                                            });
-                                          }
-                                          if (inoveProductId !== (item.inoveProductId ?? null)) {
-                                            updateOperationalItemMutation.mutate({
-                                              id: item.operationalItemId!,
-                                              inoveProductId,
-                                            });
-                                          }
-                                        }}
-                                      >
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant={item.stockConfigured ? "outline" : "default"}
+                                      size="sm"
+                                      className="h-7 px-2.5 text-xs"
+                                      title="Definir ou ajustar saldo físico e estoque mínimo"
+                                    >
+                                      <Edit className="h-3 w-3 mr-1" />
+                                      {item.stockConfigured ? "Ajustar" : "Definir Saldo"}
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Atualizar Estoque — {item.name}</DialogTitle>
+                                    </DialogHeader>
+                                    <form
+                                      className="space-y-4"
+                                      onSubmit={(e) => {
+                                        e.preventDefault();
+                                        const fd = new FormData(e.currentTarget);
+                                        const qty = Number(fd.get("qty"));
+                                        const min = Number(fd.get("minStock") || 0);
+                                        const pdvRaw = (fd.get("inoveProductId") as string)?.trim();
+                                        const inoveProductId = pdvRaw ? Number(pdvRaw) : null;
+                                        upsertWarehouseStockMutation.mutate({
+                                          operationalItemId: item.operationalItemId,
+                                          boxStockId: (item as any).boxStockId ?? null,
+                                          name: item.name,
+                                          category: item.category,
+                                          unit: unitLabel,
+                                          quantity: qty,
+                                          minStock: min,
+                                          referencePrice: Number(item.referencePrice || 0),
+                                          inoveProductId,
+                                          reason: "Contagem física / Ajuste na aba Sorvetes",
+                                        });
+                                      }}
+                                    >
+                                      <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-2">
-                                          <Label>Saldo físico atual (unidades)</Label>
-                                          <Input type="number" step="1" name="qty" defaultValue={currentStock} required />
+                                          <Label>Saldo físico atual ({unitLabel})</Label>
+                                          <Input type="number" step="0.01" name="qty" defaultValue={suggestedQty} required />
                                           <p className="text-xs text-muted-foreground">
-                                            Informe a quantidade real em unidades disponível hoje.
+                                            Comprado nas notas deste mês: <strong>{item.totalUnits} {unitLabel}</strong>
                                           </p>
                                         </div>
+                                        <div className="space-y-2">
+                                          <Label>Estoque Mínimo p/ Alerta ({unitLabel})</Label>
+                                          <Input
+                                            type="number"
+                                            step="0.01"
+                                            name="minStock"
+                                            defaultValue={minStock > 0 ? minStock : item.category === "caixas_10l" ? 2 : 10}
+                                          />
+                                          <p className="text-xs text-muted-foreground">
+                                            Destaca em vermelho quando atingir este limite.
+                                          </p>
+                                        </div>
+                                      </div>
+                                      {item.category !== "caixas_10l" && (
                                         <div className="space-y-2">
                                           <Label>ID do Produto no PDV INOVE (opcional)</Label>
                                           <Input
@@ -1097,21 +1475,21 @@ export default function Purchases() {
                                             step="1"
                                             name="inoveProductId"
                                             defaultValue={item.inoveProductId ?? ""}
-                                            placeholder="Vinculado automaticamente pelo nome"
+                                            placeholder="Vinculado automaticamente pelo nome nas vendas"
                                           />
                                           <p className="text-xs text-muted-foreground">
-                                            Usado para baixar automaticamente o estoque a cada venda no PDV INOVE.
+                                            O sistema também vincula automaticamente pelo nome ao clicar em "Sincronizar Baixas PDV".
                                           </p>
                                         </div>
-                                        <DialogFooter>
-                                          <Button type="submit" disabled={adjustStockMutation.isPending || updateOperationalItemMutation.isPending}>
-                                            Salvar
-                                          </Button>
-                                        </DialogFooter>
-                                      </form>
-                                    </DialogContent>
-                                  </Dialog>
-                                ) : null}
+                                      )}
+                                      <DialogFooter>
+                                        <Button type="submit" disabled={upsertWarehouseStockMutation.isPending}>
+                                          Salvar Saldo
+                                        </Button>
+                                      </DialogFooter>
+                                    </form>
+                                  </DialogContent>
+                                </Dialog>
                               </div>
                             </td>
                           </tr>

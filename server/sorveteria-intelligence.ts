@@ -593,54 +593,95 @@ export async function getWeatherSalesIntelligence(
   const daysInMonth = new Date(year, month, 0).getDate();
   const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
   const dateTo = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+  const todayStr = businessDate();
 
-  // Busca clima de todo o mês (Open-Meteo forecast cobre past_days=92 e 15 dias à frente)
+  // Open-Meteo /v1/forecast aceita apenas até 15 dias à frente e ~90 dias no passado.
+  // Se end_date ultrapassar today + 15 dias (ex.: fim do mês atual), a API inteira retornava HTTP 400!
+  const minForecastDate = addDays(todayStr, -90);
+  const maxForecastDate = addDays(todayStr, 15);
+  const forecastStart = dateFrom > minForecastDate ? dateFrom : minForecastDate;
+  const forecastEnd = dateTo < maxForecastDate ? dateTo : maxForecastDate;
+
   const weatherByDate = new Map<
     string,
     { code: number; tempMax: number; precip: number; precipProb: number; peakHoursRainProb: number | null; peakHoursPrecip: number | null }
   >();
 
-  try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=-16.6864&longitude=-49.2643&daily=weathercode,temperature_2m_max,precipitation_sum,precipitation_probability_max&hourly=precipitation_probability,precipitation&timezone=America%2FSao_Paulo&start_date=${dateFrom}&end_date=${dateTo}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(4500) });
-    if (res.ok) {
-      const data = await res.json();
-      const daily = data.daily ?? {};
-      const hourly = data.hourly ?? {};
-      const hTimes: string[] = hourly.time ?? [];
-      const hProbs: number[] = hourly.precipitation_probability ?? [];
-      const hPrecip: number[] = hourly.precipitation ?? [];
-      const peakStatsMap = new Map<string, { maxProb: number; sumPrecip: number }>();
-      hTimes.forEach((iso, idx) => {
-        const [dStr, tStr] = iso.split("T");
-        const h = Number((tStr ?? "00").slice(0, 2));
-        if (h >= 13 && h <= 20) {
-          const peak = peakStatsMap.get(dStr) ?? { maxProb: 0, sumPrecip: 0 };
-          const p = Number(hProbs[idx] ?? 0);
-          peak.maxProb = Math.max(peak.maxProb, p);
-          peak.sumPrecip += Number(hPrecip[idx] ?? 0);
-          peakStatsMap.set(dStr, peak);
+  const parseOpenMeteoResponse = (data: any) => {
+    const daily = data?.daily ?? {};
+    const hourly = data?.hourly ?? {};
+    const hTimes: string[] = hourly.time ?? [];
+    const hProbs: number[] = hourly.precipitation_probability ?? [];
+    const hPrecip: number[] = hourly.precipitation ?? [];
+    const peakStatsMap = new Map<string, { maxProb: number; sumPrecip: number; hasProb: boolean }>();
+    hTimes.forEach((iso, idx) => {
+      const [dStr, tStr] = iso.split("T");
+      const h = Number((tStr ?? "00").slice(0, 2));
+      if (h >= 13 && h <= 20) {
+        const peak = peakStatsMap.get(dStr) ?? { maxProb: 0, sumPrecip: 0, hasProb: false };
+        if (hProbs[idx] != null && Number.isFinite(Number(hProbs[idx]))) {
+          peak.maxProb = Math.max(peak.maxProb, Number(hProbs[idx]));
+          peak.hasProb = true;
         }
+        peak.sumPrecip += Number(hPrecip[idx] ?? 0);
+        peakStatsMap.set(dStr, peak);
+      }
+    });
+    (daily.time ?? []).forEach((dStr: string, i: number) => {
+      if (
+        daily.weathercode?.[i] == null ||
+        daily.temperature_2m_max?.[i] == null ||
+        !Number.isFinite(Number(daily.weathercode[i])) ||
+        Number(daily.weathercode[i]) < 0 ||
+        !Number.isFinite(Number(daily.temperature_2m_max[i]))
+      ) {
+        return;
+      }
+      const peak = peakStatsMap.get(dStr);
+      const precipSum = Number(daily.precipitation_sum?.[i] ?? 0);
+      const precipProb =
+        daily.precipitation_probability_max?.[i] != null
+          ? Number(daily.precipitation_probability_max[i])
+          : precipSum > 5
+            ? 80
+            : precipSum > 1
+              ? 50
+              : 0;
+      weatherByDate.set(dStr, {
+        code: Number(daily.weathercode[i]),
+        tempMax: Number(daily.temperature_2m_max[i]),
+        precip: precipSum,
+        precipProb,
+        peakHoursRainProb: peak ? (peak.hasProb ? peak.maxProb : peak.sumPrecip > 2 ? 75 : 0) : null,
+        peakHoursPrecip: peak ? Number(peak.sumPrecip.toFixed(1)) : null,
       });
-      (daily.time ?? []).forEach((dStr: string, i: number) => {
-        // Nunca inventar sol/28°C quando a API omite observações.
-        if (daily.weathercode?.[i] == null || daily.temperature_2m_max?.[i] == null ||
-            !Number.isFinite(Number(daily.weathercode[i])) || Number(daily.weathercode[i]) < 0 ||
-            !Number.isFinite(Number(daily.temperature_2m_max[i]))) return;
-        const peak = peakStatsMap.get(dStr);
-        weatherByDate.set(dStr, {
-          code: daily.weathercode[i],
-          tempMax: daily.temperature_2m_max[i],
-          precip: daily.precipitation_sum?.[i] ?? 0,
-          precipProb: daily.precipitation_probability_max?.[i] ?? 0,
-          peakHoursRainProb: peak ? peak.maxProb : null,
-          peakHoursPrecip: peak ? Number(peak.sumPrecip.toFixed(1)) : null,
-        });
-      });
-    }
-  } catch { /* fallback sem API externa */ }
+    });
+  };
 
-  const todayStr = businessDate();
+  if (forecastStart <= forecastEnd) {
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=-16.6864&longitude=-49.2643&daily=weathercode,temperature_2m_max,precipitation_sum,precipitation_probability_max&hourly=precipitation_probability,precipitation&timezone=America%2FSao_Paulo&start_date=${forecastStart}&end_date=${forecastEnd}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(4500) });
+      if (res.ok) {
+        parseOpenMeteoResponse(await res.json());
+      }
+    } catch { /* fallback sem API externa */ }
+  }
+
+  // Para meses históricos (>90 dias atrás), consulta o Archive API da Open-Meteo
+  if (dateFrom < minForecastDate) {
+    const archiveEnd = dateTo < minForecastDate ? dateTo : addDays(minForecastDate, -1);
+    if (dateFrom <= archiveEnd) {
+      try {
+        const archiveUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=-16.6864&longitude=-49.2643&daily=weathercode,temperature_2m_max,precipitation_sum&hourly=precipitation&timezone=America%2FSao_Paulo&start_date=${dateFrom}&end_date=${archiveEnd}`;
+        const archRes = await fetch(archiveUrl, { signal: AbortSignal.timeout(4500) });
+        if (archRes.ok) {
+          parseOpenMeteoResponse(await archRes.json());
+        }
+      } catch { /* fallback sem arquivo histórico */ }
+    }
+  }
+
   const allDays = Array.from({ length: daysInMonth }, (_, i) => {
     const dStr = `${year}-${String(month).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`;
     const w = weatherByDate.get(dStr) ?? null;
@@ -671,14 +712,14 @@ export async function getWeatherSalesIntelligence(
 
   // Agrupamento por faixa térmica (Curva Térmica da Sorveteria)
   const bands = [
-    { key: "hot", label: "Calor Forte (≥ 31°C sem chuva)", days: 0, totalReal: 0, totalExpected: 0 },
-    { key: "warm", label: "Clima Ideal (27°C a 30.9°C sem chuva)", days: 0, totalReal: 0, totalExpected: 0 },
-    { key: "mild", label: "Clima Ameno (< 27°C sem chuva)", days: 0, totalReal: 0, totalExpected: 0 },
-    { key: "rain", label: "Dias Chuvosos / Tempestade", days: 0, totalReal: 0, totalExpected: 0 },
+    { key: "hot", label: "Calor Forte (≥ 31°C sem chuva)", days: 0, totalReal: 0, totalExpected: 0, forecastDaysCount: 0, totalForecastExpected: 0 },
+    { key: "warm", label: "Clima Ideal (27°C a 30.9°C sem chuva)", days: 0, totalReal: 0, totalExpected: 0, forecastDaysCount: 0, totalForecastExpected: 0 },
+    { key: "mild", label: "Clima Ameno (< 27°C sem chuva)", days: 0, totalReal: 0, totalExpected: 0, forecastDaysCount: 0, totalForecastExpected: 0 },
+    { key: "rain", label: "Dias Chuvosos / Tempestade", days: 0, totalReal: 0, totalExpected: 0, forecastDaysCount: 0, totalForecastExpected: 0 },
   ];
 
   allDays.forEach((d) => {
-    if (!d.realAmount || d.realAmount <= 0 || !d.weather) return;
+    if (!d.weather) return;
     const isRain = d.weather.label === "rain" || d.weather.label === "storm";
     const band = isRain
       ? bands[3]
@@ -687,15 +728,20 @@ export async function getWeatherSalesIntelligence(
         : d.weather.tempMax >= 27
           ? bands[1]
           : bands[2];
-    band.days += 1;
-    band.totalReal += d.realAmount;
-    band.totalExpected += d.weatherExpected;
+    band.forecastDaysCount += 1;
+    band.totalForecastExpected += d.weatherExpected;
+    if (d.realAmount && d.realAmount > 0) {
+      band.days += 1;
+      band.totalReal += d.realAmount;
+      band.totalExpected += d.weatherExpected;
+    }
   });
 
   const thermalCurve = bands.map((b) => ({
     ...b,
     avgRealRevenue: b.days > 0 ? Math.round(b.totalReal / b.days) : 0,
     avgExpectedRevenue: b.days > 0 ? Math.round(b.totalExpected / b.days) : 0,
+    avgForecastRevenue: b.forecastDaysCount > 0 ? Math.round(b.totalForecastExpected / b.forecastDaysCount) : 0,
     efficiencyPct: b.totalExpected > 0 ? Math.round((b.totalReal / b.totalExpected) * 100) : null,
   }));
 
@@ -710,6 +756,99 @@ export async function getWeatherSalesIntelligence(
 // ─────────────────────────────────────────────────────────────────────────────
 // PILAR 4: Metas Semanais da Equipe + Metas Táticas de Balcão + WhatsApp
 // ─────────────────────────────────────────────────────────────────────────────
+
+export const WEEKLY_TEAM_CONFIG_LABEL = "__WEEKLY_TEAM_CONFIG__";
+
+export type WeeklyTeamWeekOverride = {
+  customGoal?: number | null;
+  customTakeHomePotes?: number | null;
+  managerAnalysis?: string;
+  employeeNote?: string;
+};
+
+export type WeeklyTeamStoredConfig = {
+  monthlyAnalysis?: string;
+  teamGeneralNotice?: string;
+  targetMonthlyRevenueOverride?: number | null;
+  targetTicketOverride?: number | null;
+  weeks?: Record<string, WeeklyTeamWeekOverride>;
+};
+
+function parseWeeklyTeamConfig(rawNotes: string | null | undefined): WeeklyTeamStoredConfig {
+  if (!rawNotes) return {};
+  try {
+    const parsed = JSON.parse(rawNotes);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function saveWeeklyTeamGoalsConfig(
+  _userId: number,
+  input: {
+    month: string;
+    monthlyAnalysis?: string;
+    teamGeneralNotice?: string;
+    targetMonthlyRevenueOverride?: number | null;
+    targetTicketOverride?: number | null;
+    weekIndex?: number;
+    weekOverride?: WeeklyTeamWeekOverride;
+  },
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+
+  const existingRows = await db
+    .select()
+    .from(finGoals)
+    .where(and(eq(finGoals.month, input.month), eq(finGoals.label, WEEKLY_TEAM_CONFIG_LABEL)));
+
+  const currentRow = existingRows[0];
+  const currentConfig = parseWeeklyTeamConfig(currentRow?.notes);
+
+  const nextConfig: WeeklyTeamStoredConfig = {
+    ...currentConfig,
+    ...(input.monthlyAnalysis !== undefined ? { monthlyAnalysis: input.monthlyAnalysis } : {}),
+    ...(input.teamGeneralNotice !== undefined ? { teamGeneralNotice: input.teamGeneralNotice } : {}),
+    ...(input.targetMonthlyRevenueOverride !== undefined
+      ? { targetMonthlyRevenueOverride: input.targetMonthlyRevenueOverride }
+      : {}),
+    ...(input.targetTicketOverride !== undefined
+      ? { targetTicketOverride: input.targetTicketOverride }
+      : {}),
+    weeks: {
+      ...(currentConfig.weeks ?? {}),
+      ...(input.weekIndex !== undefined && input.weekOverride !== undefined
+        ? {
+            [String(input.weekIndex)]: {
+              ...(currentConfig.weeks?.[String(input.weekIndex)] ?? {}),
+              ...input.weekOverride,
+            },
+          }
+        : {}),
+    },
+  };
+
+  const notesJson = JSON.stringify(nextConfig);
+  if (currentRow) {
+    await db
+      .update(finGoals)
+      .set({ notes: notesJson, updatedAt: new Date() })
+      .where(eq(finGoals.id, currentRow.id));
+  } else {
+    await db.insert(finGoals).values({
+      month: input.month,
+      label: WEEKLY_TEAM_CONFIG_LABEL,
+      targetRevenue: "0",
+      salary: "0",
+      notes: notesJson,
+      sortOrder: -999,
+    });
+  }
+
+  return { success: true, config: nextConfig };
+}
 
 export async function getWeeklyTeamGoalsPlan(
   userId: number,
@@ -734,19 +873,30 @@ export async function getWeeklyTeamGoalsPlan(
   const realMap = new Map<string, number>();
   realRevenues.forEach((r: any) => realMap.set(r.revenueDate, Number(r.realAmount) || 0));
 
+  const configRow = savedGoals.find((g: any) => g.label === WEEKLY_TEAM_CONFIG_LABEL);
+  const storedConfig = parseWeeklyTeamConfig(configRow?.notes);
+  const scenarioGoals = savedGoals.filter((g: any) => g.label !== WEEKLY_TEAM_CONFIG_LABEL);
+
   // Se o usuário cadastrou metas em FinGoals, usa a maior/principal ou o override informado
   const defaultGoalFromDb =
-    savedGoals.length > 0
-      ? Math.max(...savedGoals.map((g) => Number(g.targetRevenue || 0)))
+    scenarioGoals.length > 0
+      ? Math.max(...scenarioGoals.map((g) => Number(g.targetRevenue || 0)))
       : 0;
   const targetMonthlyRevenue =
     params.targetMonthlyRevenue && params.targetMonthlyRevenue > 0
       ? params.targetMonthlyRevenue
-      : defaultGoalFromDb > 0
-        ? defaultGoalFromDb
-        : forecastMonth.summary.totalThermalProjected;
+      : storedConfig.targetMonthlyRevenueOverride && storedConfig.targetMonthlyRevenueOverride > 0
+        ? storedConfig.targetMonthlyRevenueOverride
+        : defaultGoalFromDb > 0
+          ? defaultGoalFromDb
+          : forecastMonth.summary.totalThermalProjected;
 
-  const targetTicket = params.targetTicket && params.targetTicket > 0 ? params.targetTicket : 31.5;
+  const targetTicket =
+    params.targetTicket && params.targetTicket > 0
+      ? params.targetTicket
+      : storedConfig.targetTicketOverride && storedConfig.targetTicketOverride > 0
+        ? storedConfig.targetTicketOverride
+        : 31.5;
 
   const totalThermalWeight = Math.max(
     1,
@@ -801,7 +951,10 @@ export async function getWeeklyTeamGoalsPlan(
   const weeks = weekRanges.map((range) => {
     const wDays = dailyPlans.filter((d) => d.day >= range.start && d.day <= range.end);
     const originalGoal = wDays.reduce((s, d) => s + d.originalGoal, 0);
-    const recoveryGoal = wDays.reduce((s, d) => s + d.recoveryGoal, 0);
+    const computedRecoveryGoal = wDays.reduce((s, d) => s + d.recoveryGoal, 0);
+    const weekOverride = storedConfig.weeks?.[String(range.index)];
+    const hasCustomGoal = weekOverride?.customGoal != null && weekOverride.customGoal > 0;
+    const recoveryGoal = hasCustomGoal ? Number(weekOverride!.customGoal) : computedRecoveryGoal;
     const realized = wDays.reduce((s, d) => s + d.real, 0);
     const expectedUntilToday = wDays
       .filter((d) => d.date <= todayStr)
@@ -819,8 +972,11 @@ export async function getWeeklyTeamGoalsPlan(
     const targetTicketsCount = Math.ceil(recoveryGoal / Math.max(1, targetTicket));
     // Se houver previsão de chuva/nublado, aumenta o foco na meta "Leve para Casa" (Potes 1.5L/2L e Combos)
     const takeHomeShareTargetPct = rainyOrCloudyDays >= 2 ? 28 : 18;
-    const takeHomeRevenueTarget = Math.round(recoveryGoal * (takeHomeShareTargetPct / 100));
-    const takeHomePotesTarget = Math.ceil(takeHomeRevenueTarget / 42); // ticket médio pote 1.5L/2L ~ R$ 42
+    const defaultTakeHomeRevenueTarget = Math.round(recoveryGoal * (takeHomeShareTargetPct / 100));
+    const defaultTakeHomePotesTarget = Math.ceil(defaultTakeHomeRevenueTarget / 42); // ticket médio pote 1.5L/2L ~ R$ 42
+    const hasCustomPotes = weekOverride?.customTakeHomePotes != null && weekOverride.customTakeHomePotes >= 0;
+    const takeHomePotesTarget = hasCustomPotes ? Number(weekOverride!.customTakeHomePotes) : defaultTakeHomePotesTarget;
+    const takeHomeRevenueTarget = hasCustomPotes ? takeHomePotesTarget * 42 : defaultTakeHomeRevenueTarget;
 
     const tacticalFocus =
       rainyOrCloudyDays >= 2
@@ -829,11 +985,14 @@ export async function getWeeklyTeamGoalsPlan(
           ? "Semana de calor forte (≥31°C): garantir cubas de 10L cheias antes das 13h, agilidade no peso e oferta ativa de água/picolés na fila."
           : "Semana de clima estável: focar em elevar o Ticket Médio oferecendo 1 adicional/cobertura ou troca do copinho pelo cascão.";
 
+    const managerAnalysis = weekOverride?.managerAnalysis?.trim() ?? "";
+    const employeeNote = weekOverride?.employeeNote?.trim() ?? "";
+
     const startStr = `${params.month}-${String(range.start).padStart(2, "0")}`;
     const endStr = `${params.month}-${String(range.end).padStart(2, "0")}`;
     const isCurrentWeek = todayStr >= startStr && todayStr <= endStr;
 
-    const whatsappSummaryText = [
+    const whatsappSummaryLines = [
       `🍨 *META DA SEMANA — DUO GELATTO (${range.label}: ${String(range.start).padStart(2, "0")}/${String(month).padStart(2, "0")} a ${String(range.end).padStart(2, "0")}/${String(month).padStart(2, "0")})*`,
       ``,
       `🎯 *Meta da Semana:* ${recoveryGoal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`,
@@ -842,7 +1001,14 @@ export async function getWeeklyTeamGoalsPlan(
       `🏠 *Meta "Leve para Casa" (Potes 1,5L/2L & Combos):* ${takeHomePotesTarget} un (${takeHomeRevenueTarget.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })})`,
       ``,
       `⛅ *Clima & Foco Tático:* ${tacticalFocus}`,
-    ].join("\n");
+    ];
+    if (employeeNote) {
+      whatsappSummaryLines.push(``, `📢 *Orientação da Gerência p/ Equipe:* ${employeeNote}`);
+    }
+    if (storedConfig.teamGeneralNotice?.trim()) {
+      whatsappSummaryLines.push(``, `📌 *Comunicado Geral:* ${storedConfig.teamGeneralNotice.trim()}`);
+    }
+    const whatsappSummaryText = whatsappSummaryLines.join("\n");
 
     return {
       weekIndex: range.index,
@@ -850,7 +1016,9 @@ export async function getWeeklyTeamGoalsPlan(
       dateRange: `${String(range.start).padStart(2, "0")}/${String(month).padStart(2, "0")} a ${String(range.end).padStart(2, "0")}/${String(month).padStart(2, "0")}`,
       isCurrentWeek,
       originalGoal,
+      computedRecoveryGoal,
       recoveryGoal,
+      hasCustomGoal,
       realized,
       expectedUntilToday,
       progressPct,
@@ -862,7 +1030,10 @@ export async function getWeeklyTeamGoalsPlan(
       takeHomeShareTargetPct,
       takeHomeRevenueTarget,
       takeHomePotesTarget,
+      hasCustomPotes,
       tacticalFocus,
+      managerAnalysis,
+      employeeNote,
       whatsappSummaryText,
       days: wDays,
     };
@@ -876,6 +1047,9 @@ export async function getWeeklyTeamGoalsPlan(
     monthlyProgressPct:
       targetMonthlyRevenue > 0 ? Math.round((realizedSoFar / targetMonthlyRevenue) * 100) : 0,
     targetTicket,
+    monthlyAnalysis: storedConfig.monthlyAnalysis ?? "",
+    teamGeneralNotice: storedConfig.teamGeneralNotice ?? "",
+    targetMonthlyRevenueOverride: storedConfig.targetMonthlyRevenueOverride ?? null,
     weeks,
   };
 }

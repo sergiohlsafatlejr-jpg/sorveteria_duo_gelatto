@@ -780,9 +780,10 @@ export async function saveForecastSettings(
 export async function getFinGoals(month: string): Promise<FinGoal[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(finGoals)
+  const rows = await db.select().from(finGoals)
     .where(eq(finGoals.month, month))
     .orderBy(finGoals.sortOrder, finGoals.id);
+  return rows.filter((r) => r.label !== "__WEEKLY_TEAM_CONFIG__");
 }
 
 export async function createFinGoal(data: InsertFinGoal): Promise<FinGoal | null> {

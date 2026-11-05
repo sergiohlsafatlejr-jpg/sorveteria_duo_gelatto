@@ -30,9 +30,19 @@ export type PurchaseWarehouseOperationalItem = {
   unitsPerPackage?: number | null;
 };
 
+export type PurchaseWarehouseBoxItem = {
+  id: number;
+  name: string;
+  currentStock: number | string;
+  minStock: number | string;
+  costPrice?: number | string | null;
+  inoveProductId?: number | null;
+};
+
 export type PurchaseWarehouseItem = {
   key: string;
   operationalItemId: number | null;
+  boxStockId?: number | null;
   inoveProductId?: number | null;
   name: string;
   category: string;
@@ -120,6 +130,7 @@ export function buildPurchaseWarehouseCatalog(
   categories: PurchaseWarehouseCategory[],
   operationalItems: PurchaseWarehouseOperationalItem[],
   supplierFilter?: "all" | "duo_gelatto" | "almoxarifado",
+  boxStockItems: PurchaseWarehouseBoxItem[] = [],
 ): PurchaseWarehouseItem[] {
   const filter = supplierFilter ?? "all";
   const catalog = new Map<string, PurchaseWarehouseItem>();
@@ -176,6 +187,7 @@ export function buildPurchaseWarehouseCatalog(
     catalog.set(normalizedName, {
       key: `operational-${operationalItem.id}`,
       operationalItemId: operationalItem.id,
+      boxStockId: null,
       inoveProductId: operationalItem.inoveProductId ?? null,
       name: operationalItem.name,
       category: filter === "duo_gelatto" && existing ? existing.category : operationalItem.category,
@@ -190,6 +202,32 @@ export function buildPurchaseWarehouseCatalog(
       stockConfigured: true,
       totalUnits: existing?.totalUnits ?? 0,
     });
+  }
+
+  if (boxStockItems.length > 0 && filter !== "almoxarifado") {
+    const stripBoxPrefix = (str: string) =>
+      normalizePurchaseWarehouseName(
+        str.replace(/^CAIXA\s*10\s*(L|LT|LITRO|LITROS)\s*[-–—:]?\s*/i, "").trim(),
+      );
+    for (const [normKey, entry] of Array.from(catalog.entries())) {
+      if (entry.category !== "caixas_10l" && !isTenLiterPurchaseItem(entry.name)) continue;
+      const entryFlavor = stripBoxPrefix(entry.name);
+      const matchedBox = boxStockItems.find((b) => {
+        const bNorm = normalizePurchaseWarehouseName(b.name);
+        const bFlavor = stripBoxPrefix(b.name);
+        return bNorm === normKey || (entryFlavor.length > 0 && (bNorm === entryFlavor || bFlavor === entryFlavor));
+      });
+      if (matchedBox) {
+        catalog.set(normKey, {
+          ...entry,
+          boxStockId: matchedBox.id,
+          inoveProductId: matchedBox.inoveProductId ?? entry.inoveProductId ?? null,
+          currentStock: Number(matchedBox.currentStock ?? 0),
+          minStock: Number(matchedBox.minStock ?? 0),
+          stockConfigured: true,
+        });
+      }
+    }
   }
 
   return Array.from(catalog.values()).sort((a, b) => {

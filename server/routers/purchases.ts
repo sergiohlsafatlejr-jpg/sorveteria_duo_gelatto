@@ -122,6 +122,34 @@ export const purchasesRouter = router({
       }))
       .mutation(({ input, ctx }) => db.registerStockMovement({ ...input, type: "adjustment", userId: ctx.user.id })),
 
+    upsertWarehouseItemStock: managerProcedure
+      .input(z.object({
+        operationalItemId: z.number().int().positive().nullable().optional(),
+        boxStockId: z.number().int().positive().nullable().optional(),
+        name: z.string().min(1),
+        category: z.string().optional(),
+        unit: z.string().optional(),
+        quantity: z.number().min(0),
+        minStock: z.number().min(0).optional(),
+        referencePrice: z.number().min(0).optional(),
+        inoveProductId: z.number().int().positive().nullable().optional(),
+        reason: z.string().optional(),
+      }))
+      .mutation(({ input, ctx }) => db.upsertWarehouseItemStock({ ...input, userId: ctx.user.id })),
+
+    initializeBatch: managerProcedure
+      .input(z.object({
+        items: z.array(z.object({
+          name: z.string().min(1),
+          category: z.string().optional(),
+          unit: z.string().optional(),
+          quantity: z.number().min(0),
+          minStock: z.number().min(0).optional(),
+          referencePrice: z.number().min(0).optional(),
+        })).min(1).max(300),
+      }))
+      .mutation(({ input, ctx }) => db.initializeBatchWarehouseStock(input.items, ctx.user.id)),
+
     syncFromInove: protectedProcedure
       .input(z.object({ hoursBack: z.number().int().min(1).max(720).default(24) }).optional())
       .mutation(async ({ input }) => {

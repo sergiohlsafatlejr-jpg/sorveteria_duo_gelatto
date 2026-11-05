@@ -45,10 +45,11 @@ import {
   TrendingUp,
   Pencil,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { exportToExcel, fmtMoeda } from "@/lib/exportExcel";
+import { categorizeSorveteItem, SORVETE_CATEGORY_LABELS } from "@/lib/purchase-warehouse";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 type ProductForm = {
@@ -270,6 +271,38 @@ function InoveStockTab() {
         <AlertButton />
       </div>
 
+      {/* Resumo & Grupos Clicáveis no INOVE */}
+      {(data?.grupos ?? []).length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">
+            Separar por Tipo / Grupo de Produto (clique para abrir os itens do grupo):
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={grupo === "" ? "default" : "outline"}
+              className="h-8 text-xs"
+              onClick={() => { setGrupo(""); setPage(1); }}
+            >
+              Todos os grupos
+            </Button>
+            {(data?.grupos ?? []).map((g) => (
+              <Button
+                key={g}
+                type="button"
+                size="sm"
+                variant={grupo === g ? "default" : "outline"}
+                className="h-8 text-xs"
+                onClick={() => { setGrupo(grupo === g ? "" : g); setPage(1); }}
+              >
+                {g}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Resumo */}
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
         <span>{total.toLocaleString("pt-BR")} produto(s) encontrado(s)</span>
@@ -356,6 +389,11 @@ function Products() {
   const [quickStockOpen, setQuickStockOpen] = useState(false);
   const [quickStockProductId, setQuickStockProductId] = useState<number | null>(null);
   const [quickStockForm, setQuickStockForm] = useState<QuickStockForm>({ newStock: "", reason: "" });
+
+  // Agrupamento clicável por tipo de produto & filtro de baixo estoque
+  const [selectedTypeGroup, setSelectedTypeGroup] = useState<string>("all");
+  const [onlyLowStock, setOnlyLowStock] = useState<boolean>(false);
+  const [expandedLowGroup, setExpandedLowGroup] = useState<string | null>(null);
 
   // Filtro do relatório mensal
   const now = new Date();
@@ -571,45 +609,120 @@ function Products() {
           </div>
         </div>
 
-        {(lowStock?.length ?? 0) > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <span className="font-semibold text-amber-700 text-sm">Produtos com Estoque Baixo</span>
+        {(lowStock?.length ?? 0) > 0 && (() => {
+          const groupedLow = lowStock!.reduce<Record<string, { label: string; items: typeof lowStock }>>((acc, p) => {
+            const catKey = categorizeSorveteItem(p.name);
+            const label = SORVETE_CATEGORY_LABELS[catKey] ?? (p as any).categoryName ?? "Outros Produtos";
+            if (!acc[catKey]) acc[catKey] = { label, items: [] };
+            acc[catKey].items!.push(p);
+            return acc;
+          }, {});
+          const entries = Object.entries(groupedLow).sort((a, b) => (b[1].items?.length ?? 0) - (a[1].items?.length ?? 0));
+          const activeGroupKey = expandedLowGroup && groupedLow[expandedLowGroup] ? expandedLowGroup : null;
+          return (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <span className="font-semibold text-amber-800 text-sm">
+                    Produtos com Estoque Baixo Separados por Tipo ({lowStock!.length}) — Clique em um grupo para ver os itens e atualizar
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-green-700 border-green-300 hover:bg-green-50 text-xs h-7"
+                  onClick={() => {
+                    exportToExcel(
+                      lowStock!.map((p) => ({
+                        "Produto": p.name,
+                        "Estoque Atual": p.currentStock,
+                        "Estoque Mínimo": p.minStock,
+                        "Unidade": p.unit ?? "",
+                        "Preço Custo": fmtMoeda(p.costPrice ?? 0),
+                        "Preço Venda": fmtMoeda(p.salePrice ?? 0),
+                        "Média Vendas/Mês": p.avgSalesQty ?? 0,
+                      })),
+                      `Estoque_Baixo_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}`
+                    );
+                  }}
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  Exportar Excel
+                </Button>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 text-green-700 border-green-300 hover:bg-green-50 text-xs h-7"
-                onClick={() => {
-                  exportToExcel(
-                    lowStock!.map((p) => ({
-                      "Produto": p.name,
-                      "Estoque Atual": p.currentStock,
-                      "Estoque Mínimo": p.minStock,
-                      "Unidade": p.unit ?? "",
-                      "Preço Custo": fmtMoeda(p.costPrice ?? 0),
-                      "Preço Venda": fmtMoeda(p.salePrice ?? 0),
-                      "Média Vendas/Mês": p.avgSalesQty ?? 0,
-                    })),
-                    `Estoque_Baixo_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}`
+
+              {/* Cards clicáveis por tipo de produto com estoque baixo */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                {entries.map(([key, grp]) => {
+                  const isOpen = activeGroupKey === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setExpandedLowGroup(isOpen ? null : key)}
+                      className={`text-left rounded-lg border p-2.5 transition-all ${
+                        isOpen
+                          ? "border-amber-600 bg-amber-100/80 ring-2 ring-amber-500/30"
+                          : "border-amber-300 bg-white/80 hover:bg-amber-100/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-semibold text-amber-950 truncate">{grp.label}</span>
+                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                          {grp.items?.length ?? 0}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-[11px] text-amber-800">
+                        {isOpen ? "▼ Ocultar itens" : "▶ Ver itens do grupo"}
+                      </p>
+                    </button>
                   );
-                }}
-              >
-                <FileSpreadsheet className="h-3.5 w-3.5" />
-                Exportar Excel
-              </Button>
+                })}
+              </div>
+
+              {/* Itens dentro do grupo clicado */}
+              {activeGroupKey && groupedLow[activeGroupKey] && (
+                <div className="rounded-lg border border-amber-300 bg-white p-3 space-y-2">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <span className="text-xs font-bold uppercase tracking-wide text-amber-900">
+                      Itens com baixo estoque em: {groupedLow[activeGroupKey].label}
+                    </span>
+                    <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setExpandedLowGroup(null)}>
+                      Fechar grupo
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {groupedLow[activeGroupKey].items!.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-900 truncate">{p.name}</p>
+                          <p className="text-[11px] text-red-600 font-medium">
+                            Saldo: {p.currentStock} {p.unit} (Mín: {p.minStock})
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs border-amber-300 hover:bg-amber-100"
+                            onClick={() => openQuickStock(p.id)}
+                          >
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Atualizar
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {lowStock!.map((p) => (
-                <Badge key={p.id} variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">
-                  {p.name}: {p.currentStock}/{p.minStock} {p.unit}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         <Tabs defaultValue="products">
           <TabsList>
@@ -634,6 +747,91 @@ function Products() {
 
           {/* ── Aba: Produtos ── */}
           <TabsContent value="products" className="space-y-4 mt-4">
+            {/* Cards clicáveis por Tipo de Produto */}
+            {(products?.length ?? 0) > 0 && (() => {
+              const groups = products!.reduce<
+                Record<string, { label: string; total: number; lowCount: number }>
+              >((acc, p) => {
+                const key = categorizeSorveteItem(p.name);
+                const label = SORVETE_CATEGORY_LABELS[key] ?? (p as any).categoryName ?? "Outros";
+                if (!acc[key]) acc[key] = { label, total: 0, lowCount: 0 };
+                acc[key].total += 1;
+                if (p.currentStock <= p.minStock) acc[key].lowCount += 1;
+                return acc;
+              }, {});
+              return (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Clique em um tipo de produto para abrir seus itens:
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={onlyLowStock ? "destructive" : "outline"}
+                      className="h-8 text-xs gap-1.5"
+                      onClick={() => setOnlyLowStock((v) => !v)}
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {onlyLowStock ? "Mostrando Apenas Estoque Baixo" : "Filtrar Apenas Estoque Baixo"}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTypeGroup("all")}
+                      className={`text-left rounded-lg border p-2.5 transition-all ${
+                        selectedTypeGroup === "all"
+                          ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                          : "bg-card hover:bg-muted/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold truncate">Todos os Tipos</span>
+                        <Badge variant="secondary" className="text-[10px]">{products!.length}</Badge>
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground">Ver catálogo completo</p>
+                    </button>
+                    {Object.entries(groups)
+                      .sort((a, b) => b[1].total - a[1].total)
+                      .map(([key, grp]) => {
+                        const isSelected = selectedTypeGroup === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setSelectedTypeGroup(isSelected ? "all" : key)}
+                            className={`text-left rounded-lg border p-2.5 transition-all ${
+                              isSelected
+                                ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                                : grp.lowCount > 0
+                                ? "border-amber-200 bg-amber-50/20 hover:bg-muted/50"
+                                : "bg-card hover:bg-muted/50"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-semibold truncate">{grp.label}</span>
+                              {grp.lowCount > 0 ? (
+                                <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                  {grp.lowCount} baixo
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                  {grp.total}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {grp.total} item(ns) · {isSelected ? "✓ Aberto" : "Clique p/ abrir"}
+                            </p>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -663,7 +861,16 @@ function Products() {
               </Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {products!.map((p) => {
+                {products!
+                  .filter((p) => {
+                    if (selectedTypeGroup !== "all") {
+                      const key = categorizeSorveteItem(p.name);
+                      if (key !== selectedTypeGroup) return false;
+                    }
+                    if (onlyLowStock && p.currentStock > p.minStock) return false;
+                    return true;
+                  })
+                  .map((p) => {
                   const isLow = p.currentStock <= p.minStock;
                   return (
                     <Card key={p.id} className={`hover:shadow-md transition-shadow ${isLow ? "border-amber-300" : ""}`}>
@@ -680,8 +887,9 @@ function Products() {
                             <Button size="icon" variant="ghost" className="h-7 w-7" title="Registrar saída" onClick={() => openStock(p.id, "out")}>
                               <ArrowDown className="h-3.5 w-3.5 text-red-500" />
                             </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" title="Ajustar estoque" onClick={() => openQuickStock(p.id)}>
-                              <Pencil className="h-3.5 w-3.5 text-blue-500" />
+                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1 text-blue-600 border-blue-200 hover:bg-blue-50" title="Atualizar saldo de estoque" onClick={() => openQuickStock(p.id)}>
+                              <Pencil className="h-3 w-3" />
+                              Atualizar
                             </Button>
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(p)}>
                               <Edit className="h-3.5 w-3.5" />
