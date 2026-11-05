@@ -80,6 +80,13 @@ import {
   buildNextSevenDayForecast,
   DEFAULT_FORECAST_SETTINGS,
 } from "../forecast-calculation";
+import {
+  createPayablesFromPurchaseInvoice,
+  getReceivablesForecastAndLiquidity,
+  getWeatherSalesIntelligence,
+  getWeeklyPayablesBreakEven,
+  getWeeklyTeamGoalsPlan,
+} from "../sorveteria-intelligence";
 
 const optionalPositiveIdSchema = z.preprocess(
   toOptionalPositiveId,
@@ -950,5 +957,56 @@ export const finRouter = router({
       .query(({ ctx, input }) =>
         getCashflowMonthly(ctx.user.id, input?.monthsBack ?? 3, input?.monthsAhead ?? 6)
       ),
+  }),
+
+  // ─── Inteligência de Sorveteria (Break-Even, Liquidez D+1/D+30, Clima °C e Metas Semanais) ───────
+  intelligence: router({
+    weeklyBreakEven: protectedProcedure
+      .input(z.object({
+        year: z.number().int().min(2020).max(2030),
+        month: z.number().int().min(1).max(12),
+        contributionMarginPct: z.number().min(10).max(95).optional(),
+        avgTicket: z.number().positive().optional(),
+        avgSorveteKgPrice: z.number().positive().optional(),
+        avgPicolePrice: z.number().positive().optional(),
+      }))
+      .query(({ ctx, input }) => getWeeklyPayablesBreakEven(ctx.user.id, input)),
+
+    createPayablesFromInvoice: protectedProcedure
+      .input(z.object({
+        invoiceId: z.number().int().positive(),
+        installments: z.number().int().min(1).max(24).default(1),
+        firstDueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        intervalDays: z.number().int().min(1).max(90).default(28),
+        categoryId: optionalPositiveIdSchema,
+        bankId: optionalPositiveIdSchema,
+      }))
+      .mutation(({ ctx, input }) => createPayablesFromPurchaseInvoice(ctx.user.id, input)),
+
+    receivablesLiquidityForecast: protectedProcedure
+      .input(z.object({
+        horizonDays: z.number().int().min(7).max(45).default(15),
+        debitFeePct: z.number().min(0).max(15).optional(),
+        creditFeePct: z.number().min(0).max(20).optional(),
+        pixCashSharePct: z.number().min(0).max(100).optional(),
+        debitSharePct: z.number().min(0).max(100).optional(),
+        creditSharePct: z.number().min(0).max(100).optional(),
+      }).optional())
+      .query(({ ctx, input }) => getReceivablesForecastAndLiquidity(ctx.user.id, input ?? {})),
+
+    weatherSalesIntelligence: protectedProcedure
+      .input(z.object({
+        year: z.number().int().min(2020).max(2030),
+        month: z.number().int().min(1).max(12),
+      }))
+      .query(({ ctx, input }) => getWeatherSalesIntelligence(ctx.user.id, input)),
+
+    weeklyTeamGoals: protectedProcedure
+      .input(z.object({
+        month: z.string().regex(/^\d{4}-\d{2}$/),
+        targetMonthlyRevenue: z.number().min(0).optional(),
+        targetTicket: z.number().positive().optional(),
+      }))
+      .query(({ ctx, input }) => getWeeklyTeamGoalsPlan(ctx.user.id, input)),
   }),
 });

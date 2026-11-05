@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { CheckCircle2, Edit2, Plus, Trash2, XCircle, Download } from "lucide-react";
+import { CheckCircle2, Edit2, Plus, Trash2, XCircle, Download, AlertTriangle, TrendingUp, CalendarDays } from "lucide-react";
 import { exportToExcel } from "@/lib/exportExcel";
 import { cn } from "@/lib/utils";
 const fmtBRL = (v: number) =>
@@ -36,9 +36,13 @@ export default function FinReceivables() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<{ id: number } | null>(null);
   const [form, setForm] = useState(emptyForm());
+  const [horizonDays, setHorizonDays] = useState<number>(15);
+  const [showLiquidityTable, setShowLiquidityTable] = useState<boolean>(true);
   const setField = (k: string, v: string | boolean) => setForm(f => ({ ...f, [k]: v }));
 
   const utils = trpc.useUtils();
+  const { data: liquidityForecast, isLoading: loadingLiquidity } =
+    trpc.fin.intelligence.receivablesLiquidityForecast.useQuery({ horizonDays });
   const { data: types = [] } = trpc.fin.receivableTypes.list.useQuery();
   const { data: rawData = [], isLoading } = trpc.fin.receivables.list.useQuery({
     typeId: filters.categoryId ?? undefined,
@@ -147,7 +151,7 @@ export default function FinReceivables() {
 
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "A Receber", value: totalPending, color: "text-blue-500" },
+          { label: "A Receber (Títulos Manuais)", value: totalPending, color: "text-blue-500" },
           { label: "Recebido", value: totalReceived, color: "text-emerald-500" },
           { label: "Vencido", value: totalOverdue, color: "text-destructive" },
         ].map(s => (
@@ -156,6 +160,128 @@ export default function FinReceivables() {
             <p className={cn("text-xl font-bold", s.color)}>{fmtBRL(s.value)}</p>
           </div>
         ))}
+      </div>
+
+      {/* ─── PREVISÃO DE LIQUIDEZ & RECEBÍVEIS AUTOMÁTICOS (PDV + REDE + CLIMA) ─── */}
+      <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 via-card to-blue-500/5 p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-emerald-500" />
+              Previsão Inteligente de Recebíveis & Liquidez Diária (D+0 Pix / D+1 Débito / D+30 Crédito)
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Combina liquidação de cartões já vendidos (Rede), previsão de vendas futuras ajustada pelo clima (°C) e cruzamento com Contas a Pagar.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {[7, 15, 30].map((d) => (
+              <Button
+                key={d}
+                size="sm"
+                variant={horizonDays === d ? "default" : "outline"}
+                onClick={() => setHorizonDays(d)}
+              >
+                Próximos {d} dias
+              </Button>
+            ))}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowLiquidityTable((v) => !v)}
+            >
+              {showLiquidityTable ? "Ocultar tabela diária" : "Ver dia a dia"}
+            </Button>
+          </div>
+        </div>
+
+        {loadingLiquidity ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">Calculando projeção de recebíveis e liquidez...</div>
+        ) : liquidityForecast ? (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded-lg border bg-card/80 p-3">
+                <p className="text-[11px] text-muted-foreground uppercase">Cartões a Liquidar (Vendas Passadas)</p>
+                <p className="text-lg font-bold text-blue-500">
+                  {fmtBRL(liquidityForecast.summary.totalCardSettlementsFromPastSales)}
+                </p>
+                <p className="text-[11px] text-muted-foreground">Rede D+1 (Débito) e D+30 (Crédito)</p>
+              </div>
+              <div className="rounded-lg border bg-card/80 p-3">
+                <p className="text-[11px] text-muted-foreground uppercase">Entradas Projetadas (Vendas + Clima)</p>
+                <p className="text-lg font-bold text-emerald-600">
+                  {fmtBRL(liquidityForecast.summary.totalProjectedSalesInflow)}
+                </p>
+                <p className="text-[11px] text-muted-foreground">Pix/Dinheiro D+0 + Cartões Líquidos</p>
+              </div>
+              <div className="rounded-lg border bg-card/80 p-3">
+                <p className="text-[11px] text-muted-foreground uppercase">Contas a Pagar nos {horizonDays}d</p>
+                <p className="text-lg font-bold text-rose-500">
+                  {fmtBRL(liquidityForecast.summary.totalPayablesOutflow)}
+                </p>
+                <p className="text-[11px] text-muted-foreground">Boletos pendentes no período</p>
+              </div>
+              <div className="rounded-lg border bg-card/80 p-3">
+                <p className="text-[11px] text-muted-foreground uppercase">Fluxo Líquido Projetado ({horizonDays}d)</p>
+                <p className={cn("text-lg font-bold", liquidityForecast.summary.netProjectedCashflow >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                  {fmtBRL(liquidityForecast.summary.netProjectedCashflow)}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {liquidityForecast.summary.negativeDaysCount > 0
+                    ? `⚠ ${liquidityForecast.summary.negativeDaysCount} dia(s) com alerta de caixa`
+                    : "✓ Sem dias negativos previstos"}
+                </p>
+              </div>
+            </div>
+
+            {showLiquidityTable && liquidityForecast.days.length > 0 && (
+              <div className="rounded-lg border bg-card overflow-x-auto max-h-80">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 border-b sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Data</th>
+                      <th className="px-3 py-2 text-left">Clima Previsto</th>
+                      <th className="px-3 py-2 text-right">Pix/Dinheiro (D+0)</th>
+                      <th className="px-3 py-2 text-right">Cartões (D+1 / D+30)</th>
+                      <th className="px-3 py-2 text-right">Total Entradas</th>
+                      <th className="px-3 py-2 text-right">Boletos a Pagar</th>
+                      <th className="px-3 py-2 text-right">Saldo Acumulado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {liquidityForecast.days.map((d) => (
+                      <tr key={d.date} className={cn("hover:bg-muted/20", d.isCashGapAlert && "bg-amber-500/10")}>
+                        <td className="px-3 py-2 font-medium flex items-center gap-1.5">
+                          <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+                          {fmtDate(d.date)}
+                          {d.isCashGapAlert && (
+                            <span title="Dia com pressão de caixa (saídas altas ou saldo negativo)">
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {d.weather ? `${Math.round(d.weather.tempMax)}°C · ${d.weather.label === "rain" || d.weather.label === "storm" ? "Chuva" : d.weather.label === "cloud" ? "Nublado" : "Sol"}` : "Base histórica"}
+                        </td>
+                        <td className="px-3 py-2 text-right">{fmtBRL(d.projectedPixCashD0)}</td>
+                        <td className="px-3 py-2 text-right">
+                          {fmtBRL(d.pastCardSettlements + d.projectedDebitD1 + d.projectedCreditD30 + d.manualReceivables)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-emerald-600">{fmtBRL(d.totalInflow)}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-rose-500">
+                          {d.payablesOutflow > 0 ? `-${fmtBRL(d.payablesOutflow)}` : "—"}
+                        </td>
+                        <td className={cn("px-3 py-2 text-right font-bold", d.cumulativeBalance < 0 ? "text-rose-600" : "text-foreground")}>
+                          {fmtBRL(d.cumulativeBalance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : null}
       </div>
 
       <FinFilterBar

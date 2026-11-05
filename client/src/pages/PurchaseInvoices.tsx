@@ -97,6 +97,10 @@ export default function PurchaseInvoices() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [payableOpen, setPayableOpen] = useState(false);
+  const [payableInstallments, setPayableInstallments] = useState("1");
+  const [payableFirstDue, setPayableFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payableInterval, setPayableInterval] = useState("28");
   const [header, setHeader] = useState({ supplierName: "", supplierCnpj: "", invoiceNumber: "", issueDate: "", totalAmount: 0 });
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "processing">("idle");
@@ -156,6 +160,15 @@ export default function PurchaseInvoices() {
         utils.purchases.invalidate(),
         utils.boxStock.invalidate(),
       ]);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const createPayablesMutation = trpc.fin.intelligence.createPayablesFromInvoice.useMutation({
+    onSuccess: (res) => {
+      toast.success(`${res.createdCount} boleto(s) gerado(s) em Contas a Pagar para ${res.supplierName}!`);
+      setPayableOpen(false);
+      void utils.fin.transactions.invalidate();
     },
     onError: (error) => toast.error(error.message),
   });
@@ -325,7 +338,7 @@ export default function PurchaseInvoices() {
             <div className="space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/35 p-4">
                 <div className="flex flex-wrap items-center gap-3"><StatusBadge status={detail.invoice.status as keyof typeof STATUS} />{detail.invoice.operationNature && <Badge variant={detail.invoice.operationNature === "VENDA" ? "secondary" : "destructive"}>{detail.invoice.operationNature}</Badge>}<span className="text-sm text-muted-foreground">{detail.invoice.fileName}</span></div>
-                <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void openPdf()} disabled={fileUrlQuery.isFetching}><ExternalLink className="mr-2 h-4 w-4" />Abrir PDF</Button>{detail.invoice.status !== "confirmed" && <Button size="sm" variant="outline" onClick={() => reprocessMutation.mutate({ invoiceId: detail.invoice.id })} disabled={reprocessMutation.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${reprocessMutation.isPending ? "animate-spin" : ""}`} />Reprocessar</Button>}{!editing && detail.invoice.status !== "confirmed" && <Button size="sm" variant="outline" onClick={() => setEditing(true)}><Pencil className="mr-2 h-4 w-4" />Editar revisão</Button>}{!editing && detail.invoice.status === "extracted" && <Button size="sm" onClick={() => setConfirmOpen(true)}><PackageCheck className="mr-2 h-4 w-4" />Confirmar entradas</Button>}</div>
+                <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void openPdf()} disabled={fileUrlQuery.isFetching}><ExternalLink className="mr-2 h-4 w-4" />Abrir PDF</Button><Button size="sm" variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => setPayableOpen(true)}>Gerar Contas a Pagar</Button>{detail.invoice.status !== "confirmed" && <Button size="sm" variant="outline" onClick={() => reprocessMutation.mutate({ invoiceId: detail.invoice.id })} disabled={reprocessMutation.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${reprocessMutation.isPending ? "animate-spin" : ""}`} />Reprocessar</Button>}{!editing && detail.invoice.status !== "confirmed" && <Button size="sm" variant="outline" onClick={() => setEditing(true)}><Pencil className="mr-2 h-4 w-4" />Editar revisão</Button>}{!editing && detail.invoice.status === "extracted" && <Button size="sm" onClick={() => setConfirmOpen(true)}><PackageCheck className="mr-2 h-4 w-4" />Confirmar entradas</Button>}</div>
               </div>
 
               {getErrors(detail.invoice.validationErrors).length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900"><p className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Pontos que exigem conferência</p><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{getErrors(detail.invoice.validationErrors).map((error) => <li key={error}>{error}</li>)}</ul></div>}
@@ -372,6 +385,76 @@ export default function PurchaseInvoices() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={payableOpen} onOpenChange={setPayableOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Gerar Contas a Pagar da NF-e</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!selectedId) return;
+              createPayablesMutation.mutate({
+                invoiceId: selectedId,
+                installments: Number(payableInstallments) || 1,
+                firstDueDate: payableFirstDue,
+                intervalDays: Number(payableInterval) || 28,
+              });
+            }}
+          >
+            <div className="rounded-lg bg-muted/40 p-3 text-sm">
+              <p className="font-semibold">{header.supplierName || "Fornecedor"}</p>
+              <p className="text-muted-foreground">
+                NF #{header.invoiceNumber || selectedId} • Total: <strong>{money(header.totalAmount)}</strong>
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Nº de Parcelas / Boletos</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={payableInstallments}
+                  onChange={(e) => setPayableInstallments(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Intervalo (dias)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={90}
+                  value={payableInterval}
+                  onChange={(e) => setPayableInterval(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Data do 1º Vencimento</Label>
+              <Input
+                type="date"
+                value={payableFirstDue}
+                onChange={(e) => setPayableFirstDue(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setPayableOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={createPayablesMutation.isPending}>
+                {createPayablesMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Criar Boleto(s)
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

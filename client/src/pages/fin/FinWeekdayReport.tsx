@@ -38,7 +38,7 @@ function fmtDate(d: Date) {
   return new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
 }
 
-type ViewMode = "weekday" | "byweek";
+type ViewMode = "weekday" | "byweek" | "breakeven";
 
 export default function FinWeekdayReport() {
   const now = new Date();
@@ -55,6 +55,11 @@ export default function FinWeekdayReport() {
 
   // Dados agrupados por semana do mês
   const { data: weekData = [], isLoading: loadingWeek } = trpc.fin.weekdayReport.payablesByWeek.useQuery(
+    { year, month },
+  );
+
+  // Inteligência Break-Even Semanal & Ranking ABC (Sorveteria)
+  const { data: breakEvenData, isLoading: loadingBreakEven } = trpc.fin.intelligence.weeklyBreakEven.useQuery(
     { year, month },
   );
 
@@ -229,6 +234,16 @@ export default function FinWeekdayReport() {
           onClick={() => setViewMode("weekday")}
         >
           Visão Geral (Seg–Sex)
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            viewMode === "breakeven"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={() => setViewMode("breakeven")}
+        >
+          🍨 Break-Even Semanal & Ranking ABC
         </button>
       </div>
 
@@ -586,7 +601,7 @@ export default function FinWeekdayReport() {
                     </div>
                   )}
 
-                  {summaries.length === 0 && !isLoading && (
+                  { summaries.length === 0 && !isLoading && (
                     <div className="p-12 text-center text-muted-foreground">
                       <Calendar className="h-10 w-10 mx-auto mb-3 opacity-30" />
                       <p>Nenhum lançamento encontrado para {MONTH_NAMES[month - 1]} {year}</p>
@@ -597,6 +612,161 @@ export default function FinWeekdayReport() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {/* ─── VISÃO BREAK-EVEN SEMANAL & RANKING ABC (SORVETERIA) ─── */}
+      {viewMode === "breakeven" && (
+        <div className="space-y-6">
+          {loadingBreakEven ? (
+            <div className="p-12 text-center text-muted-foreground">Calculando Ponto de Equilíbrio Semanal...</div>
+          ) : breakEvenData ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="border-l-4 border-l-rose-500">
+                  <CardContent className="pt-4 pb-3">
+                    <p className="text-xs text-muted-foreground uppercase">Saídas Totais do Mês (Boletos + Extras)</p>
+                    <p className="text-xl font-bold text-rose-600">{fmt(breakEvenData.totalPayables)}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Margem de Contribuição considerada: {breakEvenData.contributionMarginPct}%
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-l-4 border-l-amber-500">
+                  <CardContent className="pt-4 pb-3">
+                    <p className="text-xs text-muted-foreground uppercase">Faturamento Break-Even do Mês</p>
+                    <p className="text-xl font-bold text-amber-600">{fmt(breakEvenData.totalBreakEvenRevenue)}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Venda necessária para cobrir 100% dos boletos + CMV
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-l-4 border-l-emerald-500">
+                  <CardContent className="pt-4 pb-3">
+                    <p className="text-xs text-muted-foreground uppercase">Receita Projetada (Clima + Realizado)</p>
+                    <p className="text-xl font-bold text-emerald-600">{fmt(breakEvenData.totalProjectedRevenue)}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Realizado até hoje: {fmt(breakEvenData.totalRealRevenue)}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Cards das Semanas com Tradução para Kg de Sorvete / Picolés / Tickets */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {breakEvenData.weeks.map((w) => (
+                  <Card key={w.weekIndex} className={w.hasCashCrunchAlert ? "border-amber-400/70" : ""}>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-base">
+                          {w.weekLabel} <span className="text-xs font-normal text-muted-foreground">({w.dateRange})</span>
+                        </CardTitle>
+                        <Badge
+                          variant={w.coveragePct >= 100 ? "default" : "destructive"}
+                          className={w.coveragePct >= 100 ? "bg-emerald-600" : ""}
+                        >
+                          Cobertura: {w.coveragePct}%
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      <div className="grid grid-cols-2 gap-3 bg-muted/30 rounded-lg p-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Boletos da Semana</p>
+                          <p className="text-lg font-bold text-rose-600">{fmt(w.payablesTotal)}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Seg–Qua: {fmt(w.monWedPayables)} ({w.monWedSharePct}%)
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Break-Even (Venda Necessária)</p>
+                          <p className="text-lg font-bold text-amber-600">{fmt(w.breakEvenRevenue)}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Média: {fmt(w.dailyBreakEven)}/dia
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border p-3 space-y-1.5 bg-card">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          🍨 Equivalência Física para Pagar a Semana:
+                        </p>
+                        <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                          <div className="bg-muted/20 rounded p-2">
+                            <p className="text-sm font-bold">{w.requiredTickets.toLocaleString("pt-BR")}</p>
+                            <p className="text-[10px] text-muted-foreground">Clientes (Tickets)</p>
+                          </div>
+                          <div className="bg-muted/20 rounded p-2">
+                            <p className="text-sm font-bold text-pink-600">{w.requiredSorveteKg.toLocaleString("pt-BR")} kg</p>
+                            <p className="text-[10px] text-muted-foreground">Equiv. Buffet Kg</p>
+                          </div>
+                          <div className="bg-muted/20 rounded p-2">
+                            <p className="text-sm font-bold text-indigo-600">{w.requiredPicoles.toLocaleString("pt-BR")} un</p>
+                            <p className="text-[10px] text-muted-foreground">Equiv. Picolés</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {w.cashCrunchMessage && (
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                          <span><strong>Alerta "Vale da Morte" (Seg–Qua):</strong> {w.cashCrunchMessage}</span>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Tabela Ranking ABC de Saídas */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Ranking ABC de Saídas por Categoria</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/30 text-xs uppercase text-muted-foreground">
+                          <th className="px-4 py-2.5 text-left">Classe</th>
+                          <th className="px-4 py-2.5 text-left">Categoria / Grupo de Despesa</th>
+                          <th className="px-4 py-2.5 text-center">Qtd. Boletos</th>
+                          <th className="px-4 py-2.5 text-right">Valor Total</th>
+                          <th className="px-4 py-2.5 text-right">% das Saídas</th>
+                          <th className="px-4 py-2.5 text-right">% sobre Faturamento</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {breakEvenData.abcCategories.map((c) => (
+                          <tr key={c.category} className="hover:bg-muted/20">
+                            <td className="px-4 py-2.5">
+                              <Badge
+                                variant="outline"
+                                className={
+                                  c.abcClass === "A"
+                                    ? "border-rose-400 text-rose-600 bg-rose-50"
+                                    : c.abcClass === "B"
+                                      ? "border-amber-400 text-amber-600 bg-amber-50"
+                                      : "border-slate-300 text-slate-600"
+                                }
+                              >
+                                Classe {c.abcClass}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-2.5 font-medium">{c.category}</td>
+                            <td className="px-4 py-2.5 text-center text-muted-foreground">{c.count}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold">{fmt(c.amount)}</td>
+                            <td className="px-4 py-2.5 text-right">{c.shareOfPayablesPct}%</td>
+                            <td className="px-4 py-2.5 text-right font-medium text-primary">{c.shareOfRevenuePct}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+        </div>
       )}
     </div>
   );

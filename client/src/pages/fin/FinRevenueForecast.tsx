@@ -181,6 +181,10 @@ export default function FinRevenueForecast() {
     avgWeekday, avgSaturday, avgSundayHoliday, rainFactor, months: 6,
   });
 
+  const { data: weatherIntel } = trpc.fin.intelligence.weatherSalesIntelligence.useQuery({
+    year, month,
+  });
+
   const duplicateDaysMut = trpc.fin.forecastCalendar.duplicateDaysToNextMonth.useMutation({
     onSuccess: (r: { created: number }) => {
       utils.fin.forecastCalendar.getRealRevenues.invalidate();
@@ -875,6 +879,122 @@ export default function FinRevenueForecast() {
                   </tfoot>
                 </table>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ─── INTELIGÊNCIA CLIMÁTICA DA SORVETERIA (CURVA TÉRMICA °C + PERFORMANCE DESCONTANDO O CLIMA) ─── */}
+        {weatherIntel && (
+          <Card className="border-amber-500/30 bg-gradient-to-br from-amber-500/5 via-card to-sky-500/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <Sun className="h-4 w-4 text-amber-500" />
+                Inteligência Climática da Sorveteria — Curva Térmica (°C) & Performance Descontando o Clima
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Analisa a sensibilidade real de vendas por faixa de temperatura, probabilidade de chuva no pico comercial (13h–20h) e separa queda por chuva de queda operacional.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {weatherIntel.thermalCurve.map((band) => (
+                  <div key={band.key} className="rounded-lg border bg-card/80 p-3 space-y-1">
+                    <p className="text-xs font-semibold text-foreground">{band.label}</p>
+                    <p className="text-[11px] text-muted-foreground">{band.days} dia(s) com faturamento registrado</p>
+                    <div className="flex items-baseline justify-between pt-1">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Média Real</p>
+                        <p className="text-sm font-bold text-emerald-500">
+                          {band.days > 0 ? fmtBRL(band.avgRealRevenue) : "—"}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-muted-foreground">Esperado (Clima)</p>
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {band.days > 0 ? fmtBRL(band.avgExpectedRevenue) : "—"}
+                        </p>
+                      </div>
+                    </div>
+                    {band.efficiencyPct !== null && (
+                      <p className={cn(
+                        "text-[11px] font-semibold pt-1",
+                        band.efficiencyPct >= 100 ? "text-emerald-500" : band.efficiencyPct >= 88 ? "text-amber-500" : "text-rose-500"
+                      )}>
+                        Eficiência Operacional: {band.efficiencyPct}%
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {weatherIntel.days.some((d) => d.realAmount !== null && d.realAmount > 0) && (
+                <div className="rounded-lg border bg-card overflow-x-auto max-h-72">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/40 border-b sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Dia</th>
+                        <th className="px-3 py-2 text-left">Clima & Pico (13h–20h)</th>
+                        <th className="px-3 py-2 text-right">Potencial Climático</th>
+                        <th className="px-3 py-2 text-right">Real Faturado</th>
+                        <th className="px-3 py-2 text-center">Eficiência vs Clima</th>
+                        <th className="px-3 py-2 text-left">Diagnóstico & Recomendação Tática</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {weatherIntel.days
+                        .filter((d) => (d.realAmount !== null && d.realAmount > 0) || !d.isPast)
+                        .slice(0, 18)
+                        .map((d) => (
+                          <tr key={d.date} className="hover:bg-muted/20">
+                            <td className="px-3 py-2 font-medium">
+                              {new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })}
+                            </td>
+                            <td className="px-3 py-2">
+                              {d.weather ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <WeatherIcon label={d.weather.label} size={13} />
+                                  <span>{Math.round(d.weather.tempMax)}°C</span>
+                                  {d.weather.peakHoursRainProb != null && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      (Chuva 13h–20h: {d.weather.peakHoursRainProb}%)
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">Sem dados</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium text-primary">{fmtBRL(d.weatherExpected)}</td>
+                            <td className="px-3 py-2 text-right font-bold text-emerald-500">
+                              {d.realAmount ? fmtBRL(d.realAmount) : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {d.operationalEfficiencyPct !== null ? (
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded-full text-[11px] font-bold",
+                                  d.diagnosis === "outperformed"
+                                    ? "bg-emerald-500/15 text-emerald-500"
+                                    : d.diagnosis === "on_track"
+                                      ? "bg-amber-500/15 text-amber-500"
+                                      : "bg-rose-500/15 text-rose-500"
+                                )}>
+                                  {d.operationalEfficiencyPct}%
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">Futuro</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-[11px] text-muted-foreground">
+                              {d.diagnosis === "outperformed" && "🔥 Vendeu acima do potencial climático! "}
+                              {d.diagnosis === "underperformed" && "⚠️ Abaixo do esperado para esse clima (revisar atendimento/ruptura). "}
+                              {d.weather?.tacticalRecommendation ?? ""}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

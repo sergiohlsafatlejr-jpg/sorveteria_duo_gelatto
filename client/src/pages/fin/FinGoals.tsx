@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import {
   ArrowLeft, Target, Plus, Trash2, Edit2, Check, X, TrendingUp,
-  DollarSign, AlertCircle, CheckCircle2, Calculator, CalendarDays
+  DollarSign, AlertCircle, CheckCircle2, Calculator, CalendarDays, Copy, Share2
 } from "lucide-react";
 import {
   AlertDialog,
@@ -43,6 +43,11 @@ export default function FinGoals() {
   const { data: summary, isLoading: loadingSummary } = trpc.fin.goals.summary.useQuery({ month });
   const { data: goals = [], isLoading: loadingGoals } = trpc.fin.goals.list.useQuery({ month });
   const { data: extraCosts = [], isLoading: loadingExtra } = trpc.fin.goals.listExtraCosts.useQuery({ month });
+  const [customTargetTicket, setCustomTargetTicket] = useState<string>("31.50");
+  const { data: weeklyTeamPlan, isLoading: loadingWeeklyPlan } = trpc.fin.intelligence.weeklyTeamGoals.useQuery({
+    month,
+    targetTicket: parseFloat(customTargetTicket) || 31.5,
+  });
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const createGoal = trpc.fin.goals.create.useMutation({
@@ -442,6 +447,145 @@ export default function FinGoals() {
                   <p className="mt-1">Custos Fixos = Contas a Pagar ({fmt(summary?.totalPayables ?? 0)}) + Custos Extras ({fmt(summary?.totalExtraCosts ?? 0)})</p>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* ─── PAINEL DE METAS SEMANAIS DA EQUIPE (CLIMA + BALCÃO + WHATSAPP) ─── */}
+          <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 via-card to-indigo-500/5">
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Target className="h-5 w-5 text-emerald-500" />
+                    Metas Semanais da Equipe (Ponderadas por Clima + Recálculo de Recuperação)
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Desdobra a meta mensal em semanas levando em conta o peso de Seg–Dom, previsão do tempo (°C / chuva) e metas táticas de balcão.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Meta Ticket Médio (R$):</span>
+                  <Input
+                    type="number"
+                    step="0.50"
+                    value={customTargetTicket}
+                    onChange={(e) => setCustomTargetTicket(e.target.value)}
+                    className="w-24 h-8 text-xs font-bold"
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {loadingWeeklyPlan ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">Calculando plano semanal da equipe...</div>
+              ) : weeklyTeamPlan ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded-lg border bg-card/80 p-3">
+                      <p className="text-[11px] text-muted-foreground uppercase">Meta Mensal de Referência</p>
+                      <p className="text-lg font-bold text-primary">{fmt(weeklyTeamPlan.targetMonthlyRevenue)}</p>
+                    </div>
+                    <div className="rounded-lg border bg-card/80 p-3">
+                      <p className="text-[11px] text-muted-foreground uppercase">Realizado no Mês até Agora</p>
+                      <p className="text-lg font-bold text-emerald-600">
+                        {fmt(weeklyTeamPlan.realizedMonthlySoFar)} ({weeklyTeamPlan.monthlyProgressPct}%)
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-card/80 p-3">
+                      <p className="text-[11px] text-muted-foreground uppercase">Saldo a Realizar nas Semanas Restantes</p>
+                      <p className="text-lg font-bold text-amber-600">{fmt(weeklyTeamPlan.remainingMonthlyTarget)}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {weeklyTeamPlan.weeks.map((w) => (
+                      <div
+                        key={w.weekIndex}
+                        className={`rounded-xl border p-4 space-y-3 bg-card ${
+                          w.isCurrentWeek ? "ring-2 ring-emerald-500 border-emerald-500/50" : ""
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-bold text-base">{w.weekLabel}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">({w.dateRange})</span>
+                            {w.isCurrentWeek && (
+                              <span className="ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500">
+                                Semana Atual
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs gap-1.5 border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+                            onClick={() => {
+                              navigator.clipboard.writeText(w.whatsappSummaryText);
+                              toast.success(`Resumo da ${w.weekLabel} copiado! Cole no WhatsApp da equipe.`);
+                            }}
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                            Copiar p/ WhatsApp
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/30 p-2.5 text-xs">
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">Meta Original</p>
+                            <p className="font-semibold">{fmt(w.originalGoal)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">Meta c/ Recuperação</p>
+                            <p className="font-bold text-primary">{fmt(w.recoveryGoal)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">Realizado ({w.progressPct}%)</p>
+                            <p className="font-bold text-emerald-600">{fmt(w.realized)}</p>
+                          </div>
+                        </div>
+
+                        {/* Barra de progresso da semana */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-muted-foreground">
+                            <span>Progresso da Semana: {w.progressPct}%</span>
+                            <span>Ritmo até hoje (Pace): <strong>{w.pacePct}%</strong></span>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                w.pacePct >= 95 ? "bg-emerald-500" : w.pacePct >= 80 ? "bg-amber-500" : "bg-rose-500"
+                              }`}
+                              style={{ width: `${Math.min(100, w.progressPct)}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Metas Táticas de Balcão */}
+                        <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                          <div className="rounded-lg border p-2.5 bg-muted/15">
+                            <p className="text-[10px] text-muted-foreground uppercase font-semibold">🎫 Meta Ticket & Fluxo</p>
+                            <p className="font-bold text-sm mt-0.5">{fmt(w.targetTicket)} / cliente</p>
+                            <p className="text-[11px] text-muted-foreground">~{w.targetTicketsCount} atendimentos na semana</p>
+                          </div>
+                          <div className="rounded-lg border p-2.5 bg-muted/15">
+                            <p className="text-[10px] text-muted-foreground uppercase font-semibold">🏠 Meta "Leve p/ Casa"</p>
+                            <p className="font-bold text-sm mt-0.5 text-indigo-600">{w.takeHomePotesTarget} Potes / Combos</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {fmt(w.takeHomeRevenueTarget)} ({w.takeHomeShareTargetPct}% da semana)
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Foco Tático por Clima */}
+                        <div className="rounded-lg bg-amber-500/10 border border-amber-500/25 p-2.5 text-xs text-muted-foreground">
+                          <span className="font-semibold text-foreground">⛅ Estratégia de Balcão da Semana: </span>
+                          {w.tacticalFocus}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </CardContent>
           </Card>
         </div>

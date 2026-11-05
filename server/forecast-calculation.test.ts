@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildWeatherTacticalRecommendation,
   calculateForecastDay,
+  calculateThermalMultiplier,
   DEFAULT_FORECAST_SETTINGS,
   getNextSevenForecastDates,
   getWeatherEligibleDates,
@@ -33,5 +35,23 @@ describe("forecast-calculation", () => {
     expect(getWeatherEligibleDates(month, new Date("2026-08-27T15:00:00Z"))).toEqual(
       month.slice(0, 11),
     );
+  });
+
+  it("calcula elasticidade térmica para sorveteria e ignora chuva fora do horário de pico (13h-20h)", () => {
+    expect(calculateThermalMultiplier(34)).toBe(1.12);
+    expect(calculateThermalMultiplier(28)).toBe(1);
+    expect(calculateThermalMultiplier(22)).toBe(0.82);
+
+    // Chuva na madrugada (precipProb=75), mas janela de pico 13h-20h seca (peakHoursRainProb=15, peakHoursPrecip=0)
+    const dryAfternoon = calculateForecastDay(
+      "2026-08-29", // Sábado
+      DEFAULT_FORECAST_SETTINGS,
+      null,
+      { code: 61, tempMax: 33, precip: 6, precipProb: 75, peakHoursRainProb: 15, peakHoursPrecip: 0 },
+      "2026-08-27",
+    );
+    expect(dryAfternoon.weather?.label).toBe("cloud");
+    expect(dryAfternoon.thermalAdjustedAmount).toBeGreaterThan(dryAfternoon.projectedAmount);
+    expect(buildWeatherTacticalRecommendation("sun", 34, 10)).toContain("Calor Forte");
   });
 });
