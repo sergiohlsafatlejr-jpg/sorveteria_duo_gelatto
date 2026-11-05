@@ -124,19 +124,21 @@ export async function registerStockMovement(data: { itemId: number, type: 'in' |
   const currentStock = parseFloat(item.currentStock || "0");
   const quantity = data.quantity;
   let newStock = currentStock;
+  let movementQuantity = quantity;
 
   if (data.type === 'in') {
     newStock += quantity;
   } else if (data.type === 'consumption' || data.type === 'loss') {
     newStock -= quantity;
   } else if (data.type === 'adjustment') {
-    newStock += quantity;
+    newStock = quantity;
+    movementQuantity = newStock - currentStock;
   }
 
   const [movement] = await db.insert(operationalStockMovements).values({
     itemId: data.itemId,
     type: data.type,
-    quantity: String(data.quantity),
+    quantity: String(movementQuantity),
     previousStock: String(currentStock),
     newStock: String(newStock),
     reason: data.reason,

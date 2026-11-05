@@ -22,6 +22,7 @@ import {
 } from "../drizzle/schema";
 import { boxStock } from "../drizzle/schema";
 import { detectBoxOpenings } from "./box-opening";
+import { deductStockFromInoveSales } from "./stock-auto-deduction";
 import { eq, and, sql } from "drizzle-orm";
 import * as mssqlLib from "mssql";
 import { ENV } from "./_core/env";
@@ -290,7 +291,14 @@ async function syncSalesFromInoveBackground(): Promise<void> {
       insertedCount++;
     }
 
-    const msg = `Sincronização de vendas concluída: ${insertedCount} novas vendas importadas para o BD local.`;
+    const stockDeductRes = await deductStockFromInoveSales({ hoursBack: 24 }).catch((e) => ({
+      salesChecked: 0,
+      itemsDeducted: 0,
+      unmatchedItems: 0,
+      message: `Erro na baixa de estoque: ${e instanceof Error ? e.message : String(e)}`,
+    }));
+
+    const msg = `Sincronização de vendas concluída: ${insertedCount} novas vendas importadas | ${stockDeductRes.itemsDeducted} item(ns) baixado(s) do estoque.`;
     console.log(`[cron/sync-sales-background] ✅ ${msg}`);
     await logCronJob("sync-sales-background", "success", msg, Date.now() - startedAt);
 

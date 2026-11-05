@@ -26,11 +26,14 @@ export type PurchaseWarehouseOperationalItem = {
   currentStock: string | number;
   minStock: string | number;
   referencePrice: string | number | null;
+  inoveProductId?: number | null;
+  unitsPerPackage?: number | null;
 };
 
 export type PurchaseWarehouseItem = {
   key: string;
   operationalItemId: number | null;
+  inoveProductId?: number | null;
   name: string;
   category: string;
   unit: string;
@@ -148,6 +151,7 @@ export function buildPurchaseWarehouseCatalog(
       catalog.set(normalizedName, {
         key: `invoice-${normalizedName}`,
         operationalItemId: null,
+        inoveProductId: null,
         name: existing?.name ?? item.description,
         category: itemCategory,
         unit: existing?.unit ?? item.unit,
@@ -168,11 +172,13 @@ export function buildPurchaseWarehouseCatalog(
     const normalizedName = normalizePurchaseWarehouseName(operationalItem.name);
     if (!normalizedName) continue;
     const existing = catalog.get(normalizedName);
+    if (filter === "duo_gelatto" && !existing) continue;
     catalog.set(normalizedName, {
       key: `operational-${operationalItem.id}`,
       operationalItemId: operationalItem.id,
+      inoveProductId: operationalItem.inoveProductId ?? null,
       name: operationalItem.name,
-      category: operationalItem.category,
+      category: filter === "duo_gelatto" && existing ? existing.category : operationalItem.category,
       unit: operationalItem.unit,
       currentStock: Number(operationalItem.currentStock ?? 0),
       minStock: Number(operationalItem.minStock ?? 0),

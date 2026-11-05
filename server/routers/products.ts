@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, managerProcedure, router } from "../_core/trpc";
 import * as db from "../db";
+import { deductStockFromInoveSales, syncInoveCatalogLinks } from "../stock-auto-deduction";
 
 export const productsRouter = router({
   list: protectedProcedure
@@ -43,6 +44,7 @@ export const productsRouter = router({
         purchaseUnit: z.string().default("un"),
         conversionFactor: z.number().int().min(1).default(1),
         supplierCode: z.string().optional(),
+        inoveProductId: z.number().int().positive().nullable().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -78,6 +80,7 @@ export const productsRouter = router({
         purchaseUnit: z.string().optional(),
         conversionFactor: z.number().int().min(1).optional(),
         supplierCode: z.string().optional(),
+        inoveProductId: z.number().int().positive().nullable().optional(),
         active: z.boolean().optional(),
       })
     )
@@ -145,4 +148,23 @@ export const productsRouter = router({
   purchaseReport: protectedProcedure
     .input(z.object({ year: z.number(), month: z.number() }))
     .query(({ input }) => db.getMonthlyPurchaseReport(input.year, input.month)),
+
+  syncInoveStock: protectedProcedure
+    .input(z.object({
+      hoursBack: z.number().int().min(1).max(720).default(24),
+      createMissingProducts: z.boolean().default(false),
+    }).optional())
+    .mutation(async ({ input }) => {
+      const links = await syncInoveCatalogLinks({
+        createMissingProducts: input?.createMissingProducts ?? false,
+      });
+      const deductions = await deductStockFromInoveSales({
+        hoursBack: input?.hoursBack ?? 24,
+      });
+      return {
+        ...links,
+        ...deductions,
+        message: `${links.message} • ${deductions.message}`,
+      };
+    }),
 });

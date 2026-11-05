@@ -288,6 +288,13 @@
       "when": 1793815175880,
       "tag": "0040_open_weapon_omega",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "5",
+      "when": 1793819741725,
+      "tag": "0041_pretty_radioactive_man",
+      "breakpoints": true
     }
   ]
 }

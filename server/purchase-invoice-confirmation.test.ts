@@ -4,8 +4,11 @@ import {
   boxStock,
   boxStockMovements,
   operationalItems,
+  operationalStockMovements,
+  products,
   purchaseInvoiceItems,
   purchaseInvoices,
+  stockMovements,
 } from "../drizzle/schema";
 import { confirmPurchaseInvoiceStock } from "./purchase-invoice-confirmation";
 
@@ -80,5 +83,89 @@ describe("confirmação de nota no estoque", () => {
 
     await expect(confirmPurchaseInvoiceStock(db, 1, 42)).rejects.toMatchObject<Partial<TRPCError>>({ code: "CONFLICT" });
     expect(state.movements).toHaveLength(1);
+  });
+
+  it("converte pacotes/caixas de picolés em unidades individuais no almoxarifado e em produtos", async () => {
+    const state: any = {
+      invoice: { id: 2, status: "extracted", invoiceNumber: "901", supplierName: "Duo Gelatto Indústria", operationalSupplierId: 7, reviewedBy: null, reviewedAt: null },
+      items: [{ id: 11, invoiceId: 2, description: "PICOLÉ CAJÁ - FRUTA 30 UND", category: "insumos", quantity: "2.000", unit: "CX", unitPrice: "90.0000", boxStockId: null, operationalItemId: null, linkStatus: "unlinked" }],
+      opItems: [] as any[],
+      opMovements: [] as any[],
+      prodItems: [] as any[],
+      prodMovements: [] as any[],
+    };
+
+    const tx: any = {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === purchaseInvoices) return query([state.invoice]);
+          if (table === purchaseInvoiceItems) return query(state.items);
+          if (table === operationalItems) return query(state.opItems);
+          if (table === products) return query(state.prodItems);
+          return query([]);
+        },
+      }),
+      insert: (table: unknown) => ({
+        values: (values: any) => {
+          let returningId: number | null = null;
+          if (table === operationalItems) {
+            returningId = 200 + state.opItems.length;
+            state.opItems.push({ id: returningId, ...values });
+          }
+          if (table === operationalStockMovements) state.opMovements.push(values);
+          if (table === products) {
+            returningId = 300 + state.prodItems.length;
+            state.prodItems.push({ id: returningId, ...values });
+          }
+          if (table === stockMovements) state.prodMovements.push(values);
+          const result: any = {
+            $returningId: async () => returningId ? [{ id: returningId }] : [],
+            then: (resolve: (value: undefined) => unknown, reject: (reason: unknown) => unknown) => Promise.resolve(undefined).then(resolve, reject),
+          };
+          return result;
+        },
+      }),
+      update: (table: unknown) => ({
+        set: (values: any) => ({
+          where: async () => {
+            if (table === operationalItems && state.opItems[0]) Object.assign(state.opItems[0], values);
+            if (table === products && state.prodItems[0]) Object.assign(state.prodItems[0], values);
+            if (table === purchaseInvoiceItems) Object.assign(state.items[0], values);
+            if (table === purchaseInvoices) Object.assign(state.invoice, values);
+          },
+        }),
+      }),
+    };
+    const db: any = { transaction: (callback: (transaction: any) => unknown) => callback(tx) };
+
+    const result = await confirmPurchaseInvoiceStock(db, 2, 42);
+    expect(result).toEqual({ success: true, operationalEntries: 1, boxEntries: 0, totalItems: 1 });
+    // 2 caixas x 30 unidades = 60 unidades a R$ 3,00/un
+    expect(state.opItems[0]).toMatchObject({
+      id: 200,
+      unit: "un",
+      unitsPerPackage: 30,
+      currentStock: "60.00",
+      referencePrice: "3.00",
+    });
+    expect(state.opMovements[0]).toMatchObject({
+      itemId: 200,
+      type: "in",
+      quantity: "60.00",
+      unitCost: "3.00",
+    });
+    expect(state.prodItems[0]).toMatchObject({
+      id: 300,
+      unit: "un",
+      currentStock: 60,
+      costPrice: "3.00",
+    });
+    expect(state.prodMovements[0]).toMatchObject({
+      productId: 300,
+      type: "in",
+      quantity: 60,
+      previousStock: 0,
+      newStock: 60,
+    });
   });
 });

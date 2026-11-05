@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, managerProcedure, router } from "../_core/trpc";
 import * as db from "../db.purchases";
+import { deductStockFromInoveSales, syncInoveCatalogLinks } from "../stock-auto-deduction";
 
 export const purchasesRouter = router({
   suppliers: router({
@@ -70,7 +71,8 @@ export const purchasesRouter = router({
         currentStock: z.string().optional(),
         minStock: z.string().optional(),
         referencePrice: z.string().optional(),
-        preferredSupplierId: z.number().optional()
+        preferredSupplierId: z.number().optional(),
+        inoveProductId: z.number().int().positive().nullable().optional(),
       }))
       .mutation(({ input }) => db.createOperationalItem(input)),
       
@@ -85,6 +87,7 @@ export const purchasesRouter = router({
         minStock: z.string().optional(),
         referencePrice: z.string().optional(),
         preferredSupplierId: z.number().optional(),
+        inoveProductId: z.number().int().positive().nullable().optional(),
         active: z.boolean().optional()
       }))
       .mutation(({ input }) => {
@@ -117,7 +120,19 @@ export const purchasesRouter = router({
         quantity: z.number(),
         reason: z.string().optional()
       }))
-      .mutation(({ input, ctx }) => db.registerStockMovement({ ...input, type: "adjustment", userId: ctx.user.id }))
+      .mutation(({ input, ctx }) => db.registerStockMovement({ ...input, type: "adjustment", userId: ctx.user.id })),
+
+    syncFromInove: protectedProcedure
+      .input(z.object({ hoursBack: z.number().int().min(1).max(720).default(24) }).optional())
+      .mutation(async ({ input }) => {
+        const links = await syncInoveCatalogLinks();
+        const deductions = await deductStockFromInoveSales({ hoursBack: input?.hoursBack ?? 24 });
+        return {
+          ...links,
+          ...deductions,
+          message: `${links.message} • ${deductions.message}`,
+        };
+      }),
   }),
   
   orders: router({

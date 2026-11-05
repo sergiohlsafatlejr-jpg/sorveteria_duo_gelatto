@@ -138,6 +138,7 @@ export const products = mysqlTable("products", {
   conversionFactor: int("conversionFactor").default(1).notNull(),
   supplierCode: varchar("supplierCode", { length: 100 }),
   externalCode: varchar("externalCode", { length: 100 }), // Código do PDV externo (para vinculação com importação de vendas)
+  inoveProductId: int("inoveProductId"), // ID numérico (PRODUTO) no PDV INOVE para baixa automática de estoque
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -965,6 +966,8 @@ export const operationalItems = mysqlTable("operational_items", {
   minStock: decimal("minStock", { precision: 10, scale: 2 }).default("0").notNull(),
   referencePrice: decimal("referencePrice", { precision: 10, scale: 2 }), // último preço pago
   preferredSupplierId: int("preferredSupplierId"), // FK → operational_suppliers
+  inoveProductId: int("inoveProductId"), // ID numérico (PRODUTO) no PDV INOVE para baixa automática
+  unitsPerPackage: int("unitsPerPackage").default(1).notNull(), // Qtd de unidades por embalagem de compra (ex: 30 un/cx)
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -1126,3 +1129,19 @@ export const boxOpenTracking = mysqlTable("box_open_tracking", {
 });
 export type BoxOpenTracking = typeof boxOpenTracking.$inferSelect;
 export type InsertBoxOpenTracking = typeof boxOpenTracking.$inferInsert;
+
+// ─── Log Idempotente de Baixas Automáticas de Estoque por Vendas do INOVE ───
+export const inoveStockDeductionLog = mysqlTable("inove_stock_deduction_log", {
+  id: int("id").autoincrement().primaryKey(),
+  inoveSaleId: int("inoveSaleId").notNull(), // VENDAS.VENDA
+  inoveItemVendaId: int("inoveItemVendaId").notNull().unique(), // ITENS_VENDAS.ITEM_VENDA
+  inoveProductId: int("inoveProductId").notNull(), // ITENS_VENDAS.PRODUTO
+  productName: varchar("productName", { length: 255 }),
+  quantitySold: decimal("quantitySold", { precision: 10, scale: 3 }).notNull(),
+  productId: int("productId"), // FK opcional → products.id
+  operationalItemId: int("operationalItemId"), // FK opcional → operational_items.id
+  soldAt: timestamp("soldAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type InoveStockDeductionLog = typeof inoveStockDeductionLog.$inferSelect;
+export type InsertInoveStockDeductionLog = typeof inoveStockDeductionLog.$inferInsert;

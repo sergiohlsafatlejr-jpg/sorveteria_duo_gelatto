@@ -5,11 +5,14 @@ import {
   boxStockMovements,
   operationalItems,
   operationalStockMovements,
+  products,
   purchaseInvoiceItems,
   purchaseInvoices,
+  stockMovements,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { isTenLiterItem } from "./purchase-invoice-extraction";
+import { extractUnitsPerPackage, normalizeCoreFlavorName } from "./stock-auto-deduction";
 
 type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 type OperationalCategory = "limpeza" | "guloseimas" | "caldas" | "descartaveis" | "embalagens" | "manutencao" | "insumos";
@@ -84,6 +87,19 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
       .from(boxStock)
       .where(eq(boxStock.active, true)))
       .map((item) => ({ ...item, normalizedName: normalizeCatalogName(item.name) }));
+    const productCatalog = (await tx
+      .select({
+        id: products.id,
+        name: products.name,
+        currentStock: products.currentStock,
+      })
+      .from(products)
+      .where(eq(products.active, true)))
+      .map((item) => ({
+        ...item,
+        normalizedName: normalizeCatalogName(item.name),
+        coreName: normalizeCoreFlavorName(item.name),
+      }));
 
     let operationalEntries = 0;
     let boxEntries = 0;
@@ -140,16 +156,22 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
         continue;
       }
 
+      const unitsPerPkg = extractUnitsPerPackage(item.description);
+      const entryQuantity = quantity * unitsPerPkg;
+      const entryUnitCost = unitsPerPkg > 1 ? unitPrice / unitsPerPkg : unitPrice;
+      const effectiveUnit = unitsPerPkg > 1 ? "un" : item.unit.toLowerCase();
+
       const normalizedName = normalizeCatalogName(item.description);
       let operationalItem = operationalCatalog.find((candidate) => candidate.normalizedName === normalizedName);
       if (!operationalItem) {
         const inserted = await tx.insert(operationalItems).values({
           name: item.description,
           category: toOperationalCategory(item.category),
-          unit: item.unit.toLowerCase(),
+          unit: effectiveUnit,
+          unitsPerPackage: unitsPerPkg,
           currentStock: "0.00",
           minStock: "0.00",
-          referencePrice: unitPrice.toFixed(2),
+          referencePrice: entryUnitCost.toFixed(2),
           preferredSupplierId: invoice.operationalSupplierId,
           active: true,
         }).$returningId();
@@ -159,26 +181,81 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
         operationalCatalog.push(operationalItem);
       }
       const previousStock = Number(operationalItem.currentStock);
-      const newStock = previousStock + quantity;
+      const newStock = previousStock + entryQuantity;
       await tx.insert(operationalStockMovements).values({
         itemId: operationalItem.id,
         type: "in",
-        quantity: quantity.toFixed(2),
+        quantity: entryQuantity.toFixed(2),
         previousStock: previousStock.toFixed(2),
         newStock: newStock.toFixed(2),
         reason: movementReference.slice(0, 255),
-        unitCost: unitPrice.toFixed(2),
+        unitCost: entryUnitCost.toFixed(2),
         userId,
       });
       await tx
         .update(operationalItems)
         .set({
+          unit: effectiveUnit,
+          unitsPerPackage: unitsPerPkg,
           currentStock: newStock.toFixed(2),
-          referencePrice: unitPrice.toFixed(2),
+          referencePrice: entryUnitCost.toFixed(2),
           preferredSupplierId: invoice.operationalSupplierId,
         })
         .where(eq(operationalItems.id, operationalItem.id));
       operationalItem.currentStock = newStock.toFixed(2);
+
+      // Sincronizar também na tabela de Produtos (/products) para itens de revenda/unidades
+      const coreName = normalizeCoreFlavorName(item.description);
+      let matchedProduct = productCatalog.find(
+        (candidate) =>
+          candidate.normalizedName === normalizedName ||
+          (coreName.length >= 3 && candidate.coreName === coreName)
+      );
+      const isDuoGelatto = (invoice.supplierName ?? "").toUpperCase().includes("DUO GELATTO");
+      if (!matchedProduct && (isDuoGelatto || unitsPerPkg > 1)) {
+        const insertedProd = await tx.insert(products).values({
+          name: item.description,
+          costPrice: entryUnitCost.toFixed(2),
+          salePrice: "0.00",
+          currentStock: 0,
+          minStock: 5,
+          unit: effectiveUnit,
+          purchaseUnit: item.unit.toLowerCase(),
+          conversionFactor: unitsPerPkg,
+          active: true,
+        }).$returningId();
+        const prodId = insertedProd[0]?.id;
+        if (prodId) {
+          matchedProduct = { id: prodId, name: item.description, currentStock: 0, normalizedName, coreName };
+          productCatalog.push(matchedProduct);
+        }
+      }
+      if (matchedProduct) {
+        const prevProdStock = Number(matchedProduct.currentStock ?? 0);
+        const addedUnits = Math.round(entryQuantity);
+        const nextProdStock = prevProdStock + addedUnits;
+        await tx.insert(stockMovements).values({
+          productId: matchedProduct.id,
+          type: "in",
+          quantity: addedUnits,
+          previousStock: prevProdStock,
+          newStock: nextProdStock,
+          reason: movementReference.slice(0, 255),
+          supplier: invoice.supplierName ?? undefined,
+          unitCost: entryUnitCost.toFixed(2),
+          userId,
+        });
+        await tx
+          .update(products)
+          .set({
+            currentStock: nextProdStock,
+            costPrice: entryUnitCost.toFixed(2),
+            conversionFactor: unitsPerPkg,
+          })
+          .where(eq(products.id, matchedProduct.id));
+        matchedProduct.currentStock = nextProdStock;
+      }
+
       await tx
         .update(purchaseInvoiceItems)
         .set({ operationalItemId: operationalItem.id, boxStockId: null, linkStatus: "linked" })

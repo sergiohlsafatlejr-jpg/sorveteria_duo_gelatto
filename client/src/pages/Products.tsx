@@ -57,6 +57,7 @@ type ProductForm = {
   categoryId: string;
   sku: string;
   barcode: string;
+  inoveProductId: string;
   costPrice: string;
   salePrice: string;
   currentStock: string;
@@ -79,7 +80,7 @@ type QuickStockForm = {
 };
 
 const emptyForm: ProductForm = {
-  name: "", description: "", categoryId: "", sku: "", barcode: "",
+  name: "", description: "", categoryId: "", sku: "", barcode: "", inoveProductId: "",
   costPrice: "0", salePrice: "0", currentStock: "0", minStock: "5", unit: "un",
 };
 
@@ -395,13 +396,27 @@ function Products() {
     onError: (e) => toast.error(e.message),
   });
 
+  const syncInoveStockMutation = trpc.products.syncInoveStock.useMutation({
+    onSuccess: (res) => {
+      utils.products.list.invalidate();
+      utils.products.lowStock.invalidate();
+      utils.purchases.invalidate();
+      toast.success(
+        `Sincronização concluída! ${res.createdProducts} produto(s) importado(s), ${res.linkedProducts + res.linkedOperational} vinculado(s) e ${res.itemsDeducted} venda(s) baixada(s).`,
+      );
+    },
+    onError: (e) => toast.error(`Erro na sincronização com INOVE: ${e.message}`),
+  });
+
   function openCreate() { setEditId(null); setForm(emptyForm); setOpen(true); }
 
   function openEdit(p: NonNullable<typeof products>[0]) {
     setEditId(p.id);
     setForm({
       name: p.name, description: p.description ?? "", categoryId: p.categoryId ? String(p.categoryId) : "",
-      sku: p.sku ?? "", barcode: p.barcode ?? "", costPrice: String(p.costPrice),
+      sku: p.sku ?? "", barcode: p.barcode ?? "",
+      inoveProductId: (p as any).inoveProductId ? String((p as any).inoveProductId) : "",
+      costPrice: String(p.costPrice),
       salePrice: String(p.salePrice), currentStock: String(p.currentStock),
       minStock: String(p.minStock), unit: p.unit,
     });
@@ -455,6 +470,7 @@ function Products() {
       name: form.name, description: form.description || undefined,
       categoryId: form.categoryId ? parseInt(form.categoryId) : undefined,
       sku: form.sku || undefined, barcode: form.barcode || undefined,
+      inoveProductId: form.inoveProductId ? parseInt(form.inoveProductId) : null,
       costPrice: parseFloat(form.costPrice), salePrice: parseFloat(form.salePrice),
       currentStock: parseInt(form.currentStock), minStock: parseInt(form.minStock), unit: form.unit,
     };
@@ -510,7 +526,20 @@ function Products() {
               )}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+              disabled={syncInoveStockMutation.isPending}
+              onClick={() => syncInoveStockMutation.mutate({ hoursBack: 24, createMissingProducts: true })}
+            >
+              {syncInoveStockMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Sincronizar Catálogo & Baixas PDV
+            </Button>
             <Button variant="outline" className="gap-2" disabled={!products?.length} onClick={() => {
               exportToExcel(
                 (products || []).map((p: any) => ({
@@ -675,6 +704,11 @@ function Products() {
                           <Badge variant="outline" className="text-xs">
                             Venda: {formatCurrency(p.salePrice)}
                           </Badge>
+                          {(p as any).inoveProductId && (
+                            <Badge variant="outline" className="text-xs border-emerald-200 text-emerald-700 bg-emerald-50">
+                              PDV #{(p as any).inoveProductId}
+                            </Badge>
+                          )}
                         </div>
                         {isLow && (
                           <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
@@ -900,7 +934,7 @@ function Products() {
                 <Input type="number" value={form.minStock} onChange={(e) => setForm((f) => ({ ...f, minStock: e.target.value }))} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label>SKU / Código</Label>
                 <Input value={form.sku} onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))} placeholder="Opcional" />
@@ -908,6 +942,10 @@ function Products() {
               <div>
                 <Label>Código de Barras</Label>
                 <Input value={form.barcode} onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))} placeholder="Opcional" />
+              </div>
+              <div>
+                <Label>ID PDV INOVE</Label>
+                <Input type="number" value={form.inoveProductId} onChange={(e) => setForm((f) => ({ ...f, inoveProductId: e.target.value }))} placeholder="Auto" />
               </div>
             </div>
             <div className="flex gap-2 justify-end pt-2">

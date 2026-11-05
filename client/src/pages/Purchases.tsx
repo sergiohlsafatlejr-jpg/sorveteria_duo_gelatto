@@ -266,8 +266,8 @@ export default function Purchases() {
     [monthlyItemsSummary?.categories, items],
   );
   const warehouseItemsSorvetes = useMemo(
-    () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], [], "duo_gelatto"),
-    [monthlyItemsSummary?.categories],
+    () => buildPurchaseWarehouseCatalog(monthlyItemsSummary?.categories ?? [], items, "duo_gelatto"),
+    [monthlyItemsSummary?.categories, items],
   );
   const priceVariationInput = useMemo(() => ({ month: purchaseMonth }), [purchaseMonth]);
   const { data: priceVariation } = trpc.purchaseInvoices.priceVariation.useQuery(priceVariationInput, {
@@ -357,6 +357,23 @@ export default function Purchases() {
   const deliverOrderMutation = trpc.purchases.orders.deliver.useMutation(orderMutationOpts);
   const adjustStockMutation = trpc.purchases.stock.adjust.useMutation({
     onSuccess: () => { toast.success("Estoque ajustado!"); utils.purchases.invalidate(); },
+    onError: (err) => toast.error(err.message),
+  });
+  const syncInoveStockMutation = trpc.purchases.stock.syncFromInove.useMutation({
+    onSuccess: (res) => {
+      toast.success(
+        `Sincronização PDV concluída! ${res.itemsDeducted} venda(s) baixada(s) e ${res.linkedOperational + res.linkedProducts} item(ns) vinculado(s).`,
+      );
+      utils.purchases.invalidate();
+      utils.products.invalidate();
+    },
+    onError: (err) => toast.error(`Erro ao sincronizar baixas do PDV: ${err.message}`),
+  });
+  const updateOperationalItemMutation = trpc.purchases.items.update.useMutation({
+    onSuccess: () => {
+      toast.success("Item atualizado com sucesso!");
+      utils.purchases.invalidate();
+    },
     onError: (err) => toast.error(err.message),
   });
 
@@ -905,9 +922,23 @@ export default function Purchases() {
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2"><IceCream className="h-5 w-5 text-pink-500" />Sorvetes — Itens da Duo Gelatto</CardTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">Itens comprados da Duo Gelatto (apenas visualização — controle pelo INOVE).</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Itens comprados da Duo Gelatto com entrada unificada por NF-e (convertida em unidades) e baixa automática pelas vendas do PDV INOVE.</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                      disabled={syncInoveStockMutation.isPending}
+                      onClick={() => syncInoveStockMutation.mutate({ hoursBack: 24 })}
+                    >
+                      {syncInoveStockMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Sincronizar Baixas PDV
+                    </Button>
                     <Select
                       value={purchaseMonth ?? monthlyItemsSummary?.month ?? undefined}
                       onValueChange={setPurchaseMonth}
@@ -989,19 +1020,102 @@ export default function Purchases() {
                     </div>
                     {/* Tabela de itens */}
                     <div className="overflow-x-auto">
-                    <table className="w-full min-w-[700px] text-sm">
-                      <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd. Comprada</th><th className="px-4 py-3 text-right">Qtd. Unidades</th><th className="px-4 py-3 text-right">Valor Total</th><th className="px-5 py-3 text-right">Preço Médio</th></tr></thead>
+                    <table className="w-full min-w-[850px] text-sm">
+                      <thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-5 py-3">Produto</th><th className="px-4 py-3">Categoria</th><th className="px-4 py-3 text-right">Qtd. Comprada</th><th className="px-4 py-3 text-right">Qtd. Unidades</th><th className="px-4 py-3 text-right">Saldo em Estoque</th><th className="px-4 py-3 text-right">Valor Total</th><th className="px-4 py-3 text-right">Preço Médio</th><th className="px-4 py-3 text-center">PDV / Ajuste</th></tr></thead>
                       <tbody>
-                        {warehouseItemsSorvetes.filter(item => sorveteCategoryFilter === "all" || item.category === sorveteCategoryFilter).map((item) => (
+                        {warehouseItemsSorvetes.filter(item => sorveteCategoryFilter === "all" || item.category === sorveteCategoryFilter).map((item) => {
+                          const currentStock = Number(item.currentStock ?? 0);
+                          return (
                           <tr key={item.key} className="border-b hover:bg-muted/20">
                             <td className="px-5 py-3 font-medium">{item.name}</td>
                             <td className="px-4 py-3"><Badge variant="outline">{SORVETE_CATEGORY_LABELS[item.category] ?? item.category}</Badge></td>
                             <td className="px-4 py-3 text-right">{item.purchasedQuantity.toLocaleString("pt-BR")} {item.unit}</td>
                             <td className="px-4 py-3 text-right font-medium text-primary">{item.totalUnits.toLocaleString("pt-BR")} un</td>
+                            <td className="px-4 py-3 text-right">
+                              {item.stockConfigured ? (
+                                <Badge variant={currentStock <= 0 ? "destructive" : "secondary"} className="font-semibold">
+                                  {formatQuantity(currentStock)} un
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Aguardando NF</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-right font-semibold">{formatCurrency(item.purchasedValue)}</td>
-                            <td className="px-5 py-3 text-right">{formatCurrency(item.referencePrice)}</td>
+                            <td className="px-4 py-3 text-right">{formatCurrency(item.referencePrice)}</td>
+                            <td className="px-4 py-3 text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                {item.inoveProductId ? (
+                                  <Badge variant="outline" className="text-xs border-emerald-200 text-emerald-700 bg-emerald-50">
+                                    PDV #{item.inoveProductId}
+                                  </Badge>
+                                ) : null}
+                                {item.operationalItemId ? (
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500" title="Ajustar estoque e vínculo PDV">
+                                        <Edit className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </DialogTrigger>
+                                    <DialogContent>
+                                      <DialogHeader>
+                                        <DialogTitle>Configurar Estoque / PDV — {item.name}</DialogTitle>
+                                      </DialogHeader>
+                                      <form
+                                        className="space-y-4"
+                                        onSubmit={(e) => {
+                                          e.preventDefault();
+                                          const fd = new FormData(e.currentTarget);
+                                          const qty = Number(fd.get("qty"));
+                                          const pdvRaw = (fd.get("inoveProductId") as string)?.trim();
+                                          const inoveProductId = pdvRaw ? Number(pdvRaw) : null;
+                                          if (qty !== currentStock) {
+                                            adjustStockMutation.mutate({
+                                              itemId: item.operationalItemId!,
+                                              quantity: qty,
+                                              reason: "Contagem física (Sorvetes)",
+                                            });
+                                          }
+                                          if (inoveProductId !== (item.inoveProductId ?? null)) {
+                                            updateOperationalItemMutation.mutate({
+                                              id: item.operationalItemId!,
+                                              inoveProductId,
+                                            });
+                                          }
+                                        }}
+                                      >
+                                        <div className="space-y-2">
+                                          <Label>Saldo físico atual (unidades)</Label>
+                                          <Input type="number" step="1" name="qty" defaultValue={currentStock} required />
+                                          <p className="text-xs text-muted-foreground">
+                                            Informe a quantidade real em unidades disponível hoje.
+                                          </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Label>ID do Produto no PDV INOVE (opcional)</Label>
+                                          <Input
+                                            type="number"
+                                            step="1"
+                                            name="inoveProductId"
+                                            defaultValue={item.inoveProductId ?? ""}
+                                            placeholder="Vinculado automaticamente pelo nome"
+                                          />
+                                          <p className="text-xs text-muted-foreground">
+                                            Usado para baixar automaticamente o estoque a cada venda no PDV INOVE.
+                                          </p>
+                                        </div>
+                                        <DialogFooter>
+                                          <Button type="submit" disabled={adjustStockMutation.isPending || updateOperationalItemMutation.isPending}>
+                                            Salvar
+                                          </Button>
+                                        </DialogFooter>
+                                      </form>
+                                    </DialogContent>
+                                  </Dialog>
+                                ) : null}
+                              </div>
+                            </td>
                           </tr>
-                        ))}
+                        )})}
                       </tbody>
                     </table>
                   </div>
@@ -1378,8 +1492,27 @@ export default function Purchases() {
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle>Histórico de Baixas</CardTitle>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Histórico de Baixas</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Inclui baixas manuais (consumo/perda) e baixas automáticas geradas pelas vendas do PDV INOVE.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                  disabled={syncInoveStockMutation.isPending}
+                  onClick={() => syncInoveStockMutation.mutate({ hoursBack: 24 })}
+                >
+                  {syncInoveStockMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Sincronizar Baixas PDV
+                </Button>
               </CardHeader>
               <CardContent>
                 <table className="w-full text-sm text-left">
