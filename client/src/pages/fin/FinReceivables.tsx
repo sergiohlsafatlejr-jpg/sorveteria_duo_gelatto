@@ -59,21 +59,21 @@ export default function FinReceivables() {
   });
 
   const createMut = trpc.fin.receivables.create.useMutation({
-    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Conta a receber criada!"); setModalOpen(false); },
+    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); utils.fin.intelligence.receivablesLiquidityForecast.invalidate(); toast.success("Conta a receber criada!"); setModalOpen(false); },
     onError: (e) => toast.error(e.message),
   });
   const updateMut = trpc.fin.receivables.update.useMutation({
-    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Atualizado!"); setModalOpen(false); setEditItem(null); },
+    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); utils.fin.intelligence.receivablesLiquidityForecast.invalidate(); toast.success("Atualizado!"); setModalOpen(false); setEditItem(null); },
     onError: (e) => toast.error(e.message),
   });
   const deleteMut = trpc.fin.receivables.delete.useMutation({
-    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Excluído!"); },
+    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); utils.fin.intelligence.receivablesLiquidityForecast.invalidate(); toast.success("Excluído!"); },
   });
   const markReceivedMut = trpc.fin.receivables.markReceived.useMutation({
-    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Marcado como recebido!"); },
+    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); utils.fin.intelligence.receivablesLiquidityForecast.invalidate(); toast.success("Marcado como recebido!"); },
   });
   const markPendingMut = trpc.fin.receivables.markPending.useMutation({
-    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); toast.success("Marcado como pendente!"); },
+    onSuccess: () => { utils.fin.receivables.list.invalidate(); utils.fin.dashboard.invalidate(); utils.fin.intelligence.receivablesLiquidityForecast.invalidate(); toast.success("Marcado como pendente!"); },
   });
 
   const openCreate = () => { setForm(emptyForm()); setEditItem(null); setModalOpen(true); };
@@ -114,15 +114,15 @@ export default function FinReceivables() {
   const typeMap = new Map(types.map(t => [t.id, t.description]));
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="w-full min-w-0 p-4 sm:p-6 space-y-5">
         <BackButton to="/fin/dashboard" />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Contas a Receber</h1>
           <p className="text-sm text-muted-foreground">Gerencie seus recebimentos e cobranças</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {data.length > 0 && (
             <Button
               variant="outline"
@@ -174,7 +174,7 @@ export default function FinReceivables() {
               Combina liquidação de cartões já vendidos (Rede), previsão de vendas futuras ajustada pelo clima (°C) e cruzamento com Contas a Pagar.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {[7, 15, 30].map((d) => (
               <Button
                 key={d}
@@ -292,7 +292,7 @@ export default function FinReceivables() {
         showStatus
       />
 
-      <div className="rounded-xl border border-border/50 overflow-hidden">
+      <div className="rounded-xl border border-border/50 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/30 border-b border-border/50">
             <tr>

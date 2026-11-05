@@ -145,6 +145,12 @@ export default function FinRevenueForecast() {
   const [realNote, setRealNote] = useState("");
 
   const utils = trpc.useUtils();
+  const invalidateIntelligence = () => {
+    utils.fin.intelligence.weatherSalesIntelligence.invalidate();
+    utils.fin.intelligence.weeklyTeamGoals.invalidate();
+    utils.fin.intelligence.weeklyBreakEven.invalidate();
+    utils.fin.intelligence.receivablesLiquidityForecast.invalidate();
+  };
 
   // Carregar configurações salvas do banco
   const { data: savedSettings } = trpc.fin.forecastCalendar.getSettings.useQuery();
@@ -160,7 +166,7 @@ export default function FinRevenueForecast() {
   }, [savedSettings, settingsLoaded]);
 
   const saveSettingsMut = trpc.fin.forecastCalendar.saveSettings.useMutation({
-    onSuccess: () => toast.success("Médias salvas com sucesso!"),
+    onSuccess: () => { invalidateIntelligence(); utils.fin.forecastCalendar.getSettings.invalidate(); utils.fin.forecastCalendar.getNext7DaysForecast.invalidate(); toast.success("Médias salvas com sucesso!"); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -188,6 +194,8 @@ export default function FinRevenueForecast() {
   const duplicateDaysMut = trpc.fin.forecastCalendar.duplicateDaysToNextMonth.useMutation({
     onSuccess: (r: { created: number }) => {
       utils.fin.forecastCalendar.getRealRevenues.invalidate();
+      utils.fin.forecastCalendar.getAccuracyHistory.invalidate();
+      invalidateIntelligence();
       const nextMonthName = MONTHS[month === 12 ? 0 : month];
       toast.success(`${r.created} dia(s) duplicado(s) para ${nextMonthName}!`);
       setSelectedDates(new Set());
@@ -199,6 +207,7 @@ export default function FinRevenueForecast() {
     onSuccess: () => {
       utils.fin.forecastCalendar.getRealRevenues.invalidate();
       utils.fin.forecastCalendar.getAccuracyHistory.invalidate();
+      invalidateIntelligence();
       toast.success("Faturamento real salvo!");
       setModalOpen(false);
       setRealAmount("");
@@ -211,6 +220,7 @@ export default function FinRevenueForecast() {
     onSuccess: () => {
       utils.fin.forecastCalendar.getRealRevenues.invalidate();
       utils.fin.forecastCalendar.getAccuracyHistory.invalidate();
+      invalidateIntelligence();
       toast.success("Valor real removido!");
       setModalOpen(false);
       setRealAmount("");
@@ -228,6 +238,7 @@ export default function FinRevenueForecast() {
     onSuccess: (r: { deleted: number }) => {
       utils.fin.forecastCalendar.getRealRevenues.invalidate();
       utils.fin.forecastCalendar.getAccuracyHistory.invalidate();
+      invalidateIntelligence();
       toast.success(`${r.deleted} valor(es) real(is) removido(s)!`);
       setShowClearConfirm(false);
     },
@@ -344,7 +355,7 @@ export default function FinRevenueForecast() {
 
   return (
     <TooltipProvider>
-      <div className="p-6 space-y-5">
+      <div className="w-full min-w-0 p-4 sm:p-6 space-y-5">
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
@@ -359,7 +370,7 @@ export default function FinRevenueForecast() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline" size="sm"
               onClick={() => setShowInoveImport(true)}
@@ -735,7 +746,7 @@ export default function FinRevenueForecast() {
           <Card className="border-border/50">
             <CardHeader className="pb-2 pt-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button onClick={toggleSelectAllDates} className="text-muted-foreground hover:text-foreground transition-colors">
                     {selectedDates.size === data.days.length && data.days.length > 0
                       ? <CheckSquare className="h-4 w-4 text-primary" />

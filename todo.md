@@ -178,3 +178,22 @@
 - [x] Exibir o KPI em vermelho enquanto estiver abaixo da meta e em verde após atingir ou superar a meta
 - [x] Tratar corretamente dias sem meta cadastrada e manter a origem e atualização dos dados visíveis
 - [x] Adicionar teste de regressão do estado visual da Meta do Dia e validar responsividade e build
+
+## Atualização GitHub main — 05/11/2026
+
+- [x] Buscar main do GitHub correto e confirmar commits aef75a6, 673f56e e 84846b5.
+- [x] Integrar os módulos sem perder Meta do Dia, segurança financeira e correções de importação.
+- [x] Revisar segurança e idempotência das rotinas automáticas de estoque e caixas.
+- [x] Inspecionar MySQL e aplicar somente migrações pendentes 0040 e 0041, preservando dados.
+- [x] Garantir transação, bloqueio de linhas e vínculos não ambíguos nas baixas automáticas.
+- [x] Impedir baixa retroativa sobre saldo já sincronizado e mistura de caixas legadas com unidades.
+- [x] Adequar os novos horários a callbacks seguros de agendamento persistente, sem ativar antes da publicação.
+- [x] Corrigir dupla contagem na liquidez, contrato/status Rede e redistribuição das metas semanais reproduzidos nos testes.
+- [x] Corrigir diagnóstico climático sem dados e invalidar os novos painéis após alterações.
+- [x] Impedir duplicação de parcelas da NF-e e conversão repetida de quantidades já em unidades.
+- [x] Validar esquema final, testes de regressão, pnpm check e pnpm build.
+- [x] Reiniciar prévia e validar rotas/APIs da versão integrada.
+- [x] Salvar checkpoint e liberar a versão para Publicar.
+- [ ] Validar a nova versão em produção após publicação.
+- [ ] Conferir saldo físico/unidades legadas e configurar vínculos reais e rendimento das caixas antes de ativar automação.
+- [ ] Ativar e verificar os novos agendamentos persistentes após a publicação dos callbacks.

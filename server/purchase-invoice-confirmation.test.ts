@@ -25,10 +25,11 @@ function query(rows: unknown[]) {
 
 function createFakeDatabase() {
   const state: any = {
-    invoice: { id: 1, status: "extracted", invoiceNumber: "900", supplierName: "Duo Gelatto Indústria", operationalSupplierId: 7, reviewedBy: null, reviewedAt: null },
+    invoice: { id: 1, status: "extracted", invoiceNumber: "900", supplierName: "Duo Gelatto Indústria", operationalSupplierId: 7, reviewedBy: 42, reviewedAt: new Date("2026-11-05T12:00:00Z") },
     items: [{ id: 10, invoiceId: 1, description: "SORVETE CHOCOLATE 10 LT", category: "insumos", quantity: "2.000", unit: "UN", unitPrice: "50.0000", boxStockId: null, operationalItemId: null, linkStatus: "unlinked" }],
     boxes: [] as any[],
     movements: [] as any[],
+    operational: [] as any[],
   };
 
   const tx: any = {
@@ -36,7 +37,7 @@ function createFakeDatabase() {
       from: (table: unknown) => {
         if (table === purchaseInvoices) return query([state.invoice]);
         if (table === purchaseInvoiceItems) return query(state.items);
-        if (table === operationalItems) return query([]);
+        if (table === operationalItems) return query(state.operational);
         if (table === boxStock) return query(state.boxes);
         return query([]);
       },
@@ -85,9 +86,33 @@ describe("confirmação de nota no estoque", () => {
     expect(state.movements).toHaveLength(1);
   });
 
+  it.each(["DEVOLUÇÃO", "TROCA"])("bloqueia natureza %s sem entrada de estoque", async (nature) => {
+    const { db, state } = createFakeDatabase();
+    state.invoice.operationNature = nature;
+    await expect(confirmPurchaseInvoiceStock(db, 1, 42)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect(state.movements).toHaveLength(0);
+    expect(state.boxes).toHaveLength(0);
+  });
+
+  it("não mistura saldo legado em caixas com entrada convertida em unidades", async () => {
+    const { db, state } = createFakeDatabase();
+    state.items[0] = { ...state.items[0], description: "PICOLÉ CAJÁ 30 UND", unit: "CX" };
+    state.operational = [{ id: 200, name: "PICOLÉ CAJÁ 30 UND", currentStock: "2.00", unit: "cx", unitsPerPackage: 1 }];
+    await expect(confirmPurchaseInvoiceStock(db, 1, 42)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect(state.operational[0].currentStock).toBe("2.00");
+    expect(state.invoice.status).toBe("extracted");
+  });
+
+  it("recusa embalagem cuja quantidade resulte em fração de unidade", async () => {
+    const { db, state } = createFakeDatabase();
+    state.items[0] = { ...state.items[0], description: "PICOLÉ CAJÁ 30 UND", unit: "CX", quantity: "0.015" };
+    await expect(confirmPurchaseInvoiceStock(db, 1, 42)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(state.invoice.status).toBe("extracted");
+  });
+
   it("converte pacotes/caixas de picolés em unidades individuais no almoxarifado e em produtos", async () => {
     const state: any = {
-      invoice: { id: 2, status: "extracted", invoiceNumber: "901", supplierName: "Duo Gelatto Indústria", operationalSupplierId: 7, reviewedBy: null, reviewedAt: null },
+      invoice: { id: 2, status: "extracted", invoiceNumber: "901", supplierName: "Duo Gelatto Indústria", operationalSupplierId: 7, reviewedBy: 42, reviewedAt: new Date("2026-11-05T12:00:00Z") },
       items: [{ id: 11, invoiceId: 2, description: "PICOLÉ CAJÁ - FRUTA 30 UND", category: "insumos", quantity: "2.000", unit: "CX", unitPrice: "90.0000", boxStockId: null, operationalItemId: null, linkStatus: "unlinked" }],
       opItems: [] as any[],
       opMovements: [] as any[],

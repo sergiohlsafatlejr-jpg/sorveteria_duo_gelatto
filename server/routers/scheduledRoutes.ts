@@ -18,6 +18,7 @@ import * as mssqlLib from "mssql";
 import { notifyOwner } from "../_core/notification";
 import { sdk } from "../_core/sdk";
 import { ENV } from "../_core/env";
+import { stockScheduledRouter } from "../stock-scheduled-routes";
 
 // ── Tipo do pool mssql ──────────────────────────────────────────────────────
 type MssqlPool = {
@@ -641,3 +642,4 @@ scheduledRouter.post("/api/scheduled/sync-instagram", async (req, res) => {
 });
 
 // scheduledRouter já exportado na linha 181
+scheduledRouter.use(stockScheduledRouter);

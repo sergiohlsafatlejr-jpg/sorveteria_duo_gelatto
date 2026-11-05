@@ -51,23 +51,23 @@ export default function FinGoals() {
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const createGoal = trpc.fin.goals.create.useMutation({
-    onSuccess: () => { utils.fin.goals.list.invalidate(); setNewGoal({ label: "", targetRevenue: "", salary: "" }); setAddingGoal(false); },
+    onSuccess: () => { utils.fin.goals.list.invalidate(); utils.fin.intelligence.weeklyTeamGoals.invalidate(); setNewGoal({ label: "", targetRevenue: "", salary: "" }); setAddingGoal(false); },
     onError: (e) => toast.error(e.message),
   });
   const updateGoal = trpc.fin.goals.update.useMutation({
-    onSuccess: () => { utils.fin.goals.list.invalidate(); setEditingId(null); },
+    onSuccess: () => { utils.fin.goals.list.invalidate(); utils.fin.intelligence.weeklyTeamGoals.invalidate(); setEditingId(null); },
     onError: (e) => toast.error(e.message),
   });
   const deleteGoal = trpc.fin.goals.delete.useMutation({
-    onSuccess: () => utils.fin.goals.list.invalidate(),
+    onSuccess: () => { utils.fin.goals.list.invalidate(); utils.fin.intelligence.weeklyTeamGoals.invalidate(); },
     onError: (e) => toast.error(e.message),
   });
   const createExtra = trpc.fin.goals.createExtraCost.useMutation({
-    onSuccess: () => { utils.fin.goals.listExtraCosts.invalidate(); utils.fin.goals.summary.invalidate(); setNewExtra({ description: "", amount: "" }); setAddingExtra(false); },
+    onSuccess: () => { utils.fin.goals.listExtraCosts.invalidate(); utils.fin.goals.summary.invalidate(); utils.fin.intelligence.weeklyBreakEven.invalidate(); setNewExtra({ description: "", amount: "" }); setAddingExtra(false); },
     onError: (e) => toast.error(e.message),
   });
   const deleteExtra = trpc.fin.goals.deleteExtraCost.useMutation({
-    onSuccess: () => { utils.fin.goals.listExtraCosts.invalidate(); utils.fin.goals.summary.invalidate(); },
+    onSuccess: () => { utils.fin.goals.listExtraCosts.invalidate(); utils.fin.goals.summary.invalidate(); utils.fin.intelligence.weeklyBreakEven.invalidate(); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -87,6 +87,8 @@ export default function FinGoals() {
   const populateForecast = trpc.fin.goals.populateForecast.useMutation({
     onSuccess: (result) => {
       toast.success(`Previsão populada! ${result.populated} dia(s) preenchido(s)${result.skipped > 0 ? `, ${result.skipped} ignorado(s)` : ""}.`);
+      utils.fin.forecastCalendar.getGoalForecasts.invalidate();
+      utils.fin.revenueForecast.list.invalidate();
       setPopulateConfirm(null);
     },
     onError: (e) => toast.error(e.message),

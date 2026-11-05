@@ -10,6 +10,8 @@ import {
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
+// Integração opt-in, sempre com um banco de testes dedicado; não usar produção.
+const integration = process.env.RUN_FIN_DB_INTEGRATION === "1" ? describe : describe.skip;
 const TEST_PREFIX = "__TEST_FIN_OPTIONAL_IDS__";
 
 function makeCtx(): TrpcContext {
@@ -38,7 +40,7 @@ afterEach(async () => {
   }
 });
 
-describe("fin.transactions optional IDs", () => {
+integration("fin.transactions optional IDs", () => {
   it("persiste IDs inválidos como NULL sem gerar NaN no MySQL", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const created = await caller.fin.transactions.create({

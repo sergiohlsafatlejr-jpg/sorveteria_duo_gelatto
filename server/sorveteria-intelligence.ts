@@ -12,7 +12,8 @@
  *    Meta de Recuperação Automática, Metas Táticas de Balcão (Ticket Médio e "Leve para Casa")
  *    e Resumo formatado para WhatsApp.
  */
-import { and, eq, gte, lte } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import { and, eq, gte, like, lte, or } from "drizzle-orm";
 import {
   finBanks,
   finCategories,
@@ -25,7 +26,6 @@ import {
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import {
-  createFinTransaction,
   getDailyRevenues,
   getForecastSettings,
 } from "./db.fin";
@@ -36,14 +36,23 @@ import {
   DEFAULT_FORECAST_SETTINGS,
   ForecastSettingsValues,
 } from "./forecast-calculation";
+import { getRedePaymentFamily, isAcceptedRedeSale } from "./rede-excel-parsing";
 
 function formatIsoDate(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return date.toISOString().slice(0, 10);
+}
+
+function businessDate(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const value = (type: string) => parts.find(p => p.type === type)!.value;
+  return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(y, m - 1, d + days, 12, 0, 0);
+  const dt = new Date(Date.UTC(y, m - 1, d + days, 12));
   return formatIsoDate(dt);
 }
 
@@ -53,7 +62,7 @@ function nextBusinessDay(dateStr: string, daysToAdd = 1): string {
   while (remaining > 0) {
     current = addDays(current, 1);
     const [y, m, d] = current.split("-").map(Number);
-    const dow = new Date(y, m - 1, d, 12, 0, 0).getDay();
+    const dow = new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
     if (dow !== 0 && dow !== 6) {
       remaining--;
     }
@@ -64,11 +73,13 @@ function nextBusinessDay(dateStr: string, daysToAdd = 1): string {
 async function resolveUserForecastSettings(userId: number): Promise<ForecastSettingsValues> {
   const saved = await getForecastSettings(userId);
   if (!saved) return DEFAULT_FORECAST_SETTINGS;
+  const numeric = (value: unknown, fallback: number) =>
+    value != null && Number.isFinite(Number(value)) ? Number(value) : fallback;
   return {
-    avgWeekday: Number(saved.avgWeekday) || DEFAULT_FORECAST_SETTINGS.avgWeekday,
-    avgSaturday: Number(saved.avgSaturday) || DEFAULT_FORECAST_SETTINGS.avgSaturday,
-    avgSundayHoliday: Number(saved.avgSundayHoliday) || DEFAULT_FORECAST_SETTINGS.avgSundayHoliday,
-    rainFactor: Number(saved.rainFactor) || DEFAULT_FORECAST_SETTINGS.rainFactor,
+    avgWeekday: numeric(saved.avgWeekday, DEFAULT_FORECAST_SETTINGS.avgWeekday),
+    avgSaturday: numeric(saved.avgSaturday, DEFAULT_FORECAST_SETTINGS.avgSaturday),
+    avgSundayHoliday: numeric(saved.avgSundayHoliday, DEFAULT_FORECAST_SETTINGS.avgSundayHoliday),
+    rainFactor: numeric(saved.rainFactor, DEFAULT_FORECAST_SETTINGS.rainFactor),
   };
 }
 
@@ -292,51 +303,53 @@ export async function createPayablesFromPurchaseInvoice(
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível");
 
-  const [invoice] = await db
-    .select()
-    .from(purchaseInvoices)
-    .where(eq(purchaseInvoices.id, input.invoiceId))
-    .limit(1);
+  return db.transaction(async (tx) => {
+    // Serializa cliques/retries da mesma nota; nada é criado fora desta transação.
+    const [invoice] = await tx.select().from(purchaseInvoices)
+      .where(eq(purchaseInvoices.id, input.invoiceId)).limit(1).for("update");
+    if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada" });
+    if (invoice.operationNature !== "VENDA" ||
+        !["extracted", "confirmed"].includes(invoice.status) ||
+        !invoice.reviewedBy || !invoice.reviewedAt) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Revise a nota de compra com natureza VENDA antes de gerar boletos." });
+    }
 
-  if (!invoice) throw new Error("Nota fiscal não encontrada");
+    const totalCents = Math.round(Number(invoice.totalAmount) * 100);
+    if (!Number.isFinite(totalCents) || totalCents <= 0) {
+      throw new Error("A nota fiscal não possui valor total válido para gerar boletos");
+    }
+    const installments = Math.max(1, Math.min(24, input.installments));
+    const intervalDays = Math.max(1, input.intervalDays ?? 28);
+    const legacyNotes = `Gerado automaticamente da NF-e #${invoice.invoiceNumber || invoice.id} (${invoice.supplierName})`;
+    const markerPrefix = `[NF-e invoiceID=${invoice.id} parcel=`;
+    // Qualquer parcela prévia (inclusive paga, outro usuário ou lote parcial) bloqueia TODO o lote.
+    const existing = await tx.select({ id: finTransactions.id }).from(finTransactions)
+      .where(or(like(finTransactions.notes, `%${markerPrefix}%`), eq(finTransactions.notes, legacyNotes)))
+      .limit(1).for("update");
+    if (existing.length > 0) {
+      throw new TRPCError({ code: "CONFLICT", message: "Esta nota já possui boletos gerados. Revise as parcelas existentes; não serão duplicadas." });
+    }
 
-  const totalAmount = Number(invoice.totalAmount || 0);
-  if (totalAmount <= 0) throw new Error("A nota fiscal não possui valor total válido para gerar boletos");
-
-  const installments = Math.max(1, Math.min(24, input.installments));
-  const intervalDays = Math.max(1, input.intervalDays ?? 28);
-  const baseInstallment = Math.floor((totalAmount / installments) * 100) / 100;
-
-  const createdIds: number[] = [];
-  for (let i = 0; i < installments; i++) {
-    const isLast = i === installments - 1;
-    const amount = isLast
-      ? Number((totalAmount - baseInstallment * (installments - 1)).toFixed(2))
-      : baseInstallment;
-    const dueStr = addDays(input.firstDueDate, i * intervalDays);
-    const dueDate = new Date(`${dueStr}T12:00:00`);
-    const suffix = installments > 1 ? ` (${i + 1}/${installments})` : "";
-    const description = `NF-e #${invoice.invoiceNumber || invoice.id} — ${invoice.supplierName}${suffix}`;
-
-    const created = await createFinTransaction({
+    const baseCents = Math.floor(totalCents / installments);
+    const values = Array.from({ length: installments }, (_, i) => ({
       userId,
-      description,
-      amount: String(amount),
-      dueDate,
+      description: `NF-e #${invoice.invoiceNumber || invoice.id} — ${invoice.supplierName}${installments > 1 ? ` (${i + 1}/${installments})` : ""}`,
+      amount: ((i === installments - 1 ? totalCents - baseCents * (installments - 1) : baseCents) / 100).toFixed(2),
+      dueDate: new Date(`${addDays(input.firstDueDate, i * intervalDays)}T12:00:00Z`),
       categoryId: input.categoryId,
       bankId: input.bankId,
       isPaid: false,
-      notes: `Gerado automaticamente da NF-e #${invoice.invoiceNumber || invoice.id} (${invoice.supplierName})`,
-    });
-    if (created?.id) createdIds.push(created.id);
-  }
-
-  return {
-    createdCount: createdIds.length,
-    totalAmount,
-    invoiceNumber: invoice.invoiceNumber,
-    supplierName: invoice.supplierName,
-  };
+      notes: `${legacyNotes} ${markerPrefix}${i + 1}/${installments}]`,
+    }));
+    const createdIds = await tx.insert(finTransactions).values(values).$returningId();
+    if (createdIds.length !== installments) throw new Error("Falha ao gerar todas as parcelas; operação revertida.");
+    return {
+      createdCount: createdIds.length,
+      totalAmount: totalCents / 100,
+      invoiceNumber: invoice.invoiceNumber,
+      supplierName: invoice.supplierName,
+    };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -363,7 +376,7 @@ export async function getReceivablesForecastAndLiquidity(
   const creditShare = (params.creditSharePct ?? 25) / 100;
 
   const now = new Date();
-  const todayStr = formatIsoDate(now);
+  const todayStr = businessDate(now);
   const dateStrings = Array.from({ length: horizonDays }, (_, i) => addDays(todayStr, i));
   const endStr = dateStrings[dateStrings.length - 1];
 
@@ -388,8 +401,9 @@ export async function getReceivablesForecastAndLiquidity(
     };
   }
 
-  const thirtyDaysAgoStr = addDays(todayStr, -32);
-  const [banks, manualReceivables, payables, recentCardSales] = await Promise.all([
+  // Inclui parcelas tardias de contratos convencionais (até 24 parcelas mensais).
+  const lookbackStr = addDays(todayStr, -(24 * 30 + 7));
+  const [banks, manualReceivables, payables, recentCardSales, realRevenues] = await Promise.all([
     db.select().from(finBanks),
     db
       .select()
@@ -414,32 +428,49 @@ export async function getReceivablesForecastAndLiquidity(
       .from(redeSalesImport)
       .where(
         and(
-          gte(redeSalesImport.dataDaVenda, new Date(`${thirtyDaysAgoStr}T00:00:00`)),
+          gte(redeSalesImport.dataDaVenda, new Date(`${lookbackStr}T00:00:00Z`)),
           lte(redeSalesImport.dataDaVenda, new Date(`${todayStr}T23:59:59`)),
         ),
       ),
+    getDailyRevenues(userId, Number(todayStr.slice(0, 4)), Number(todayStr.slice(5, 7))),
   ]);
 
   const initialBankBalance = banks.reduce((s, b) => s + Number(b.initialBalance || 0), 0);
 
   // Mapa de liquidação de vendas de cartão já realizadas (Rede)
-  // Débito cai em D+1 útil; Crédito à vista cai em D+30
+  // Prazo contratado prevalece; D+1 antecipado liquida todas as parcelas juntas.
   const pastCardSettlementByDate = new Map<string, number>();
+  const todayActual = { pix: 0, debit: 0, credit: 0 };
   recentCardSales.forEach((sale) => {
     if (!sale.dataDaVenda || sale.canceladaPeloEstabelecimento) return;
+    if (sale.statusDaVenda && !isAcceptedRedeSale(sale.statusDaVenda, sale.canceladaPeloEstabelecimento)) return;
     const saleDateStr = formatIsoDate(new Date(sale.dataDaVenda));
-    const netAmount = Number(sale.valorLiquido || sale.valorDaVendaOriginal || 0);
-    if (netAmount <= 0) return;
-    const mod = (sale.modalidade || "").toUpperCase();
-    if (mod.includes("PIX")) return; // Pix já liquidou em D+0
-    const settlementDate = mod.includes("DEB") || mod.includes("DÉB")
-      ? nextBusinessDay(saleDateStr, 1)
-      : addDays(saleDateStr, 30);
-    if (settlementDate >= todayStr && settlementDate <= endStr) {
-      pastCardSettlementByDate.set(
-        settlementDate,
-        (pastCardSettlementByDate.get(settlementDate) ?? 0) + netAmount,
-      );
+    const family = getRedePaymentFamily(sale.modalidade);
+    if (family !== "pix" && family !== "debit" && family !== "credit") return;
+    const fee = family === "debit" ? debitFeePct : family === "credit" ? creditFeePct : 0;
+    const netAmount = sale.valorLiquido != null
+      ? Number(sale.valorLiquido)
+      : Number(sale.valorDaVendaAtualizado ?? sale.valorDaVendaOriginal ?? 0) * (1 - fee / 100);
+    if (!Number.isFinite(netAmount) || netAmount <= 0) return;
+    if (saleDateStr === todayStr) todayActual[family] += netAmount;
+    if (family === "pix") return; // Pix já liquidou em D+0, não é recebível futuro.
+
+    const term = (sale.prazoDeRecebimento ?? "").toLowerCase();
+    const explicitDays = term.match(/d\s*\+\s*(\d+)\b/);
+    const termDays = term.includes("mesmo dia") ? 0 : explicitDays ? Number(explicitDays[1]) : null;
+    const daysToSettle = termDays ?? (family === "debit" ? 1 : 30);
+    const count = family === "credit" && daysToSettle >= 30
+      ? Math.max(1, Math.min(24, Math.trunc(sale.numeroDeParcelas ?? 1))) : 1;
+    const totalCents = Math.round(netAmount * 100);
+    const baseCents = Math.floor(totalCents / count);
+    for (let i = 0; i < count; i++) {
+      const settlementDate = daysToSettle === 1
+        ? nextBusinessDay(saleDateStr)
+        : addDays(saleDateStr, daysToSettle + 30 * i);
+      const amount = (i === count - 1 ? totalCents - baseCents * (count - 1) : baseCents) / 100;
+      if (settlementDate >= todayStr && settlementDate <= endStr) {
+        pastCardSettlementByDate.set(settlementDate, (pastCardSettlementByDate.get(settlementDate) ?? 0) + amount);
+      }
     }
   });
 
@@ -450,11 +481,16 @@ export async function getReceivablesForecastAndLiquidity(
   const projectedSalesCashByDate = new Map<string, { d0PixCash: number; d1Debit: number; d30Credit: number }>();
   dateStrings.forEach((d) => projectedSalesCashByDate.set(d, { d0PixCash: 0, d1Debit: 0, d30Credit: 0 }));
 
+  const todayRealRevenue = Number(realRevenues.find(r => r.revenueDate === todayStr)?.realAmount ?? 0);
   forecastDays.forEach((fDay) => {
     const rev = fDay.thermalAdjustedAmount;
-    const d0 = rev * pixCashShare;
-    const d1 = rev * debitShare * (1 - debitFeePct / 100);
-    const d30 = rev * creditShare * (1 - creditFeePct / 100);
+    const isToday = fDay.date === todayStr;
+    // PDV e Rede são duas observações do mesmo realizado, nunca devem ser somados.
+    const d0 = Math.max(0, rev * pixCashShare - (isToday ? Math.max(todayActual.pix, todayRealRevenue * pixCashShare) : 0));
+    const d1 = Math.max(0, rev * debitShare * (1 - debitFeePct / 100) -
+      (isToday ? Math.max(todayActual.debit, todayRealRevenue * debitShare * (1 - debitFeePct / 100)) : 0));
+    const d30 = Math.max(0, rev * creditShare * (1 - creditFeePct / 100) -
+      (isToday ? Math.max(todayActual.credit, todayRealRevenue * creditShare * (1 - creditFeePct / 100)) : 0));
 
     const curD0 = projectedSalesCashByDate.get(fDay.date);
     if (curD0) curD0.d0PixCash += d0;
@@ -561,11 +597,11 @@ export async function getWeatherSalesIntelligence(
   // Busca clima de todo o mês (Open-Meteo forecast cobre past_days=92 e 15 dias à frente)
   const weatherByDate = new Map<
     string,
-    { code: number; tempMax: number; precip: number; precipProb: number; peakHoursRainProb: number | null }
+    { code: number; tempMax: number; precip: number; precipProb: number; peakHoursRainProb: number | null; peakHoursPrecip: number | null }
   >();
 
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=-16.6864&longitude=-49.2643&daily=weathercode,temperature_2m_max,precipitation_sum,precipitation_probability_max&hourly=precipitation_probability&timezone=America%2FSao_Paulo&start_date=${dateFrom}&end_date=${dateTo}`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=-16.6864&longitude=-49.2643&daily=weathercode,temperature_2m_max,precipitation_sum,precipitation_probability_max&hourly=precipitation_probability,precipitation&timezone=America%2FSao_Paulo&start_date=${dateFrom}&end_date=${dateTo}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(4500) });
     if (res.ok) {
       const data = await res.json();
@@ -573,28 +609,38 @@ export async function getWeatherSalesIntelligence(
       const hourly = data.hourly ?? {};
       const hTimes: string[] = hourly.time ?? [];
       const hProbs: number[] = hourly.precipitation_probability ?? [];
-      const peakProbMap = new Map<string, number>();
+      const hPrecip: number[] = hourly.precipitation ?? [];
+      const peakStatsMap = new Map<string, { maxProb: number; sumPrecip: number }>();
       hTimes.forEach((iso, idx) => {
         const [dStr, tStr] = iso.split("T");
         const h = Number((tStr ?? "00").slice(0, 2));
         if (h >= 13 && h <= 20) {
+          const peak = peakStatsMap.get(dStr) ?? { maxProb: 0, sumPrecip: 0 };
           const p = Number(hProbs[idx] ?? 0);
-          if (p > (peakProbMap.get(dStr) ?? 0)) peakProbMap.set(dStr, p);
+          peak.maxProb = Math.max(peak.maxProb, p);
+          peak.sumPrecip += Number(hPrecip[idx] ?? 0);
+          peakStatsMap.set(dStr, peak);
         }
       });
       (daily.time ?? []).forEach((dStr: string, i: number) => {
+        // Nunca inventar sol/28°C quando a API omite observações.
+        if (daily.weathercode?.[i] == null || daily.temperature_2m_max?.[i] == null ||
+            !Number.isFinite(Number(daily.weathercode[i])) || Number(daily.weathercode[i]) < 0 ||
+            !Number.isFinite(Number(daily.temperature_2m_max[i]))) return;
+        const peak = peakStatsMap.get(dStr);
         weatherByDate.set(dStr, {
-          code: daily.weathercode?.[i] ?? 0,
-          tempMax: daily.temperature_2m_max?.[i] ?? 28,
+          code: daily.weathercode[i],
+          tempMax: daily.temperature_2m_max[i],
           precip: daily.precipitation_sum?.[i] ?? 0,
           precipProb: daily.precipitation_probability_max?.[i] ?? 0,
-          peakHoursRainProb: peakProbMap.get(dStr) ?? null,
+          peakHoursRainProb: peak ? peak.maxProb : null,
+          peakHoursPrecip: peak ? Number(peak.sumPrecip.toFixed(1)) : null,
         });
       });
     }
   } catch { /* fallback sem API externa */ }
 
-  const todayStr = formatIsoDate(new Date());
+  const todayStr = businessDate();
   const allDays = Array.from({ length: daysInMonth }, (_, i) => {
     const dStr = `${year}-${String(month).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`;
     const w = weatherByDate.get(dStr) ?? null;
@@ -602,7 +648,7 @@ export async function getWeatherSalesIntelligence(
     const realAmount = realMap.get(dStr) ?? null;
     const weatherExpected = calc.thermalAdjustedAmount;
     const operationalEfficiencyPct =
-      realAmount !== null && realAmount > 0 && weatherExpected > 0
+      w !== null && realAmount !== null && weatherExpected > 0
         ? Math.round((realAmount / weatherExpected) * 100)
         : null;
 
@@ -617,6 +663,7 @@ export async function getWeatherSalesIntelligence(
       ...calc,
       realAmount,
       weatherExpected,
+      weatherStatus: w ? "available" as const : "unknown" as const,
       operationalEfficiencyPct,
       diagnosis,
     };
@@ -675,7 +722,7 @@ export async function getWeeklyTeamGoalsPlan(
   const db = await getDb();
   const [year, month] = params.month.split("-").map(Number);
   const lastDay = new Date(year, month, 0).getDate();
-  const todayStr = formatIsoDate(new Date());
+  const todayStr = businessDate();
 
   const settings = await resolveUserForecastSettings(userId);
   const [forecastMonth, realRevenues, savedGoals] = await Promise.all([
@@ -709,8 +756,8 @@ export async function getWeeklyTeamGoalsPlan(
   // Meta original de cada dia ponderada pelo clima/temperatura + dia da semana
   const dailyWithOriginalGoal = forecastMonth.days.map((d) => {
     const originalGoal = Math.round((d.thermalAdjustedAmount / totalThermalWeight) * targetMonthlyRevenue);
-    const real = realMap.get(d.date) ?? 0;
-    const isCompletedDay = d.date < todayStr || (d.date === todayStr && real > 0);
+    const real = d.date <= todayStr ? realMap.get(d.date) ?? 0 : 0;
+    const isCompletedDay = d.date < todayStr;
     return {
       ...d,
       originalGoal,
@@ -722,16 +769,22 @@ export async function getWeeklyTeamGoalsPlan(
   // Cálculo de Recuperação Dinâmica: quanto falta realizar no mês dividido pelos dias restantes
   const realizedSoFar = dailyWithOriginalGoal.reduce((s, d) => s + d.real, 0);
   const remainingTargetRevenue = Math.max(0, targetMonthlyRevenue - realizedSoFar);
-  const remainingDaysWeight = dailyWithOriginalGoal
-    .filter((d) => !d.isCompletedDay)
-    .reduce((s, d) => s + d.thermalAdjustedAmount, 0);
+  const openDays = dailyWithOriginalGoal.filter(d => !d.isCompletedDay);
+  const remainingDaysWeight = openDays.reduce((s, d) => s + d.thermalAdjustedAmount, 0);
+  const remainingCents = Math.round(remainingTargetRevenue * 100);
+  let allocatedCents = 0;
+  let openDayIndex = 0;
 
   const dailyPlans = dailyWithOriginalGoal.map((d) => {
-    const recoveryGoal = d.isCompletedDay
-      ? d.originalGoal
-      : remainingDaysWeight > 0
-        ? Math.round((d.thermalAdjustedAmount / remainingDaysWeight) * remainingTargetRevenue)
-        : d.originalGoal;
+    let recoveryGoal = d.real;
+    if (!d.isCompletedDay) {
+      const weight = remainingDaysWeight > 0 ? d.thermalAdjustedAmount / remainingDaysWeight : 1 / openDays.length;
+      const cents = ++openDayIndex === openDays.length ? remainingCents - allocatedCents
+        : Math.min(remainingCents - allocatedCents, Math.round(weight * remainingCents));
+      allocatedCents += cents;
+      // Dias passados ficam no realizado; hoje continua aberto e conserva suas vendas parciais.
+      recoveryGoal += cents / 100;
+    }
     return {
       ...d,
       recoveryGoal,

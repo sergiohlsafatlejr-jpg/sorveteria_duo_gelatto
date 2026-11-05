@@ -1006,6 +1006,12 @@ export const inoveRouter = router({
   syncStockFromInove: adminProcedure.mutation(async () => {
     const db = await getDb();
     if (!db) throw new Error("DB unavailable");
+    const { stockScheduledJobs } = await import("../../drizzle/schema");
+    const [baseline] = await db.select().from(stockScheduledJobs)
+      .where(eq(stockScheduledJobs.jobKey, "stock-deduction")).limit(1);
+    if (baseline) {
+      throw new Error("O estoque unificado já está inicializado. Use Atualizar Estoque por vendas; substituir o saldo pelo INOVE repetiria baixas. Diferenças exigem conciliação/contagem física.");
+    }
     const rows = await db.select().from(inoveConnectorConfig).limit(1);
     if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE não está ativo");
     const config = rows[0];
@@ -1411,52 +1417,11 @@ export const inoveRouter = router({
   syncStockFromSales: protectedProcedure
     .input(z.object({ hours: z.number().int().min(1).max(48).default(1) }))
     .mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("DB unavailable");
-      const rows = await db.select().from(inoveConnectorConfig).limit(1);
-      if (rows.length === 0 || !rows[0].active) throw new Error("Conector INOVE não ativo");
-      const config = rows[0];
-      try {
-        const pool = await createInovePool(config);
-        const itens = await pool.request().query(`
-          SELECT i.ITE_NOME as nome, p.PRO_CODIGO_BARRAS as barcode,
-            ISNULL(SUM(i.ITE_QUANTIDADE), 0) as qtdVendida
-          FROM ITENS_VENDAS i
-          JOIN VENDAS v ON v.VENDA = i.VENDA
-          LEFT JOIN PRODUTOS p ON p.PRODUTO = i.PRODUTO
-          WHERE v.VEN_SITUACAO = 2
-            AND v.VEN_DATA_FIM >= DATEADD(hour, -${input.hours}, GETDATE())
-          GROUP BY i.ITE_NOME, p.PRO_CODIGO_BARRAS
-        `);
-        await pool.close();
-        let baixados = 0; let naoEncontrados = 0;
-        const erros: string[] = [];
-        for (const item of itens.recordset as Array<{ nome: string; barcode: string | null; qtdVendida: number }>) {
-          try {
-            const qtd = Math.round(Number(item.qtdVendida));
-            if (qtd <= 0) continue;
-            const [local] = await db
-              .select({ id: products.id, currentStock: products.currentStock })
-              .from(products)
-              .where(item.barcode
-                ? sql`barcode = ${item.barcode} OR externalCode = ${item.barcode}`
-                : sql`name = ${item.nome}`)
-              .limit(1);
-            if (!local) { naoEncontrados++; continue; }
-            const novoSaldo = local.currentStock - qtd;
-            await db.update(products).set({ currentStock: novoSaldo, updatedAt: new Date() }).where(eq(products.id, local.id));
-            await db.insert(stockMovements).values({
-              productId: local.id, type: "sale", quantity: qtd,
-              previousStock: local.currentStock, newStock: novoSaldo,
-              reason: `Venda PDV INOVE (últimas ${input.hours}h)`,
-            });
-            baixados++;
-          } catch (e) { erros.push(`${item.nome}: ${String(e)}`); }
-        }
-        return { baixados, naoEncontrados, total: (itens.recordset as unknown[]).length, erros: erros.slice(0, 10) };
-      } catch (err) {
-        throw new Error(err instanceof Error ? err.message : String(err));
-      }
+      // Todas as entradas (inclusive bookmarks antigos) compartilham o mesmo
+      // log/claim transacional. Não manter um segundo caminho que repita baixas.
+      const { deductStockFromInoveSales } = await import("../stock-auto-deduction");
+      const result = await deductStockFromInoveSales({ hoursBack: input.hours });
+      return { baixados: result.itemsDeducted, naoEncontrados: result.unmatchedItems, total: result.salesChecked, erros: [] as string[] };
     }),
 
   // ── Relatório de Custo/Margem por Produto ─────────────────────────────────────

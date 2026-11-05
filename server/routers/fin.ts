@@ -991,6 +991,9 @@ export const finRouter = router({
         pixCashSharePct: z.number().min(0).max(100).optional(),
         debitSharePct: z.number().min(0).max(100).optional(),
         creditSharePct: z.number().min(0).max(100).optional(),
+      }).refine(input => Math.abs((input.pixCashSharePct ?? 42) +
+        (input.debitSharePct ?? 33) + (input.creditSharePct ?? 25) - 100) < 1e-8, {
+        message: "O mix de Pix/Dinheiro, Débito e Crédito deve somar 100%.",
       }).optional())
       .query(({ ctx, input }) => getReceivablesForecastAndLiquidity(ctx.user.id, input ?? {})),
 

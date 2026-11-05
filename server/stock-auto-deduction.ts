@@ -19,6 +19,7 @@ import {
   operationalStockMovements,
   products,
   stockMovements,
+  stockScheduledJobs,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { isTenLiterItem } from "./purchase-invoice-extraction";
@@ -31,7 +32,7 @@ type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
  * Ex: "CAJA 30 UND - FRUTA" -> 30, "PACK 4 UND NAPOLITANO 1,5 LITROS" -> 4
  */
 export function extractUnitsPerPackage(description: string): number {
-  const match = description.match(/\b(\d+)\s*(?:UND|UNID|UNIDADES|UN)\b/i);
+  const match = description.match(/(?<![\d.,])\b(\d+)\s*(?:UND|UNID|UNIDADES|UN)\b/i);
   if (match) {
     const val = Number(match[1]);
     if (val > 0) return val;
@@ -94,6 +95,15 @@ export type AutoDeductionResult = {
   message: string;
 };
 
+function fmtInoveDate(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: string) => parts.find((p) => p.type === type)!.value;
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")}.${String(date.getUTCMilliseconds()).padStart(3, "0")}`;
+}
+
 /**
  * Sincroniza vínculos de catálogo entre produtos do PDV INOVE e o estoque interno
  * (`products` e `operational_items`), preenchendo `inoveProductId` automaticamente.
@@ -155,14 +165,14 @@ export async function syncInoveCatalogLinks(opts?: { createMissingProducts?: boo
   let createdProducts = 0;
 
   // Mapas de busca do INOVE
-  const byExactNorm = new Map<string, typeof inoveRows[0]>();
-  const byCoreNorm = new Map<string, typeof inoveRows[0]>();
+  const byExactNorm = new Map<string, typeof inoveRows[0] | null>();
+  const byCoreNorm = new Map<string, typeof inoveRows[0] | null>();
   for (const row of inoveRows) {
-    if (isTenLiterItem(row.nome)) continue;
+    if (isBulkKgSaleItem(row.nome, row.unidade)) continue;
     const exact = normalizeStockName(row.nome);
     const core = normalizeCoreFlavorName(row.nome);
-    if (exact && !byExactNorm.has(exact)) byExactNorm.set(exact, row);
-    if (core && core.length >= 3 && !byCoreNorm.has(core)) byCoreNorm.set(core, row);
+    if (exact) byExactNorm.set(exact, byExactNorm.has(exact) ? null : row);
+    if (core && core.length >= 3) byCoreNorm.set(core, byCoreNorm.has(core) ? null : row);
   }
 
   // 1. Vincular products existentes sem inoveProductId
@@ -173,8 +183,9 @@ export async function syncInoveCatalogLinks(opts?: { createMissingProducts?: boo
       ? inoveRows.find((r) => r.id === extId || r.codigo === prod.externalCode)
       : undefined;
     if (!matched) {
-      matched = byExactNorm.get(normalizeStockName(prod.name))
-        ?? byCoreNorm.get(normalizeCoreFlavorName(prod.name));
+      const exact = byExactNorm.get(normalizeStockName(prod.name));
+      matched = exact === null ? undefined
+        : exact ?? byCoreNorm.get(normalizeCoreFlavorName(prod.name)) ?? undefined;
     }
     if (matched) {
       await db.update(products).set({
@@ -190,8 +201,9 @@ export async function syncInoveCatalogLinks(opts?: { createMissingProducts?: boo
   // 2. Vincular operational_items existentes sem inoveProductId
   for (const op of localOperational) {
     if (op.inoveProductId) continue;
-    const matched = byExactNorm.get(normalizeStockName(op.name))
-      ?? byCoreNorm.get(normalizeCoreFlavorName(op.name));
+    const exact = byExactNorm.get(normalizeStockName(op.name));
+    const matched = exact === null ? undefined
+      : exact ?? byCoreNorm.get(normalizeCoreFlavorName(op.name)) ?? undefined;
     if (matched) {
       await db.update(operationalItems).set({
         inoveProductId: matched.id,
@@ -247,6 +259,15 @@ export async function deductStockFromInoveSales(opts?: {
     return { salesChecked: 0, itemsDeducted: 0, unmatchedItems: 0, message: "Banco indisponível" };
   }
 
+  // Saldo já implantado/importado contém vendas anteriores; não reexecutar histórico.
+  // Ausência do marco deve falhar fechada, inclusive na execução manual.
+  const [baselineJob] = await db.select().from(stockScheduledJobs)
+    .where(eq(stockScheduledJobs.jobKey, "stock-deduction")).limit(1);
+  const baseline = baselineJob?.createdAt ? new Date(baselineJob.createdAt) : null;
+  if (!baseline || !Number.isFinite(baseline.getTime())) {
+    throw new Error("PRECONDITION_FAILED: marco inicial da baixa automática não configurado (stock-deduction).");
+  }
+
   const connRows = await db.select().from(inoveConnectorConfig).limit(1);
   if (!connRows.length || !connRows[0].active) {
     return { salesChecked: 0, itemsDeducted: 0, unmatchedItems: 0, message: "INOVE não conectado" };
@@ -279,6 +300,7 @@ export async function deductStockFromInoveSales(opts?: {
       WHERE v.VEN_SITUACAO = 2
         AND ISNULL(v.VEN_ESTORNADO, 'N') = 'N'
         AND v.VEN_DATA_FIM >= DATEADD(HOUR, -${Math.max(1, Math.min(720, Math.floor(hoursBack)))}, GETDATE())
+        AND v.VEN_DATA_FIM >= '${fmtInoveDate(baseline)}'
       ORDER BY v.VEN_DATA_FIM ASC, iv.ITEM_VENDA ASC
     `);
 
@@ -334,107 +356,98 @@ export async function deductStockFromInoveSales(opts?: {
   let unmatchedItems = 0;
 
   for (const saleItem of pendingItems) {
-    // Caixas 10L e vendas por kg têm controle próprio com confirmação em 1 clique (/stock/boxes)
     if (isBulkKgSaleItem(saleItem.productName, saleItem.unit)) {
       continue;
     }
 
     const normExact = normalizeStockName(saleItem.productName);
     const normCore = normalizeCoreFlavorName(saleItem.productName);
+    const unique = <T,>(rows: T[]): T | undefined => rows.length === 1 ? rows[0] : undefined;
+    const allowsLink = (row: { inoveProductId: number | null }) =>
+      row.inoveProductId == null || row.inoveProductId === saleItem.inoveProductId;
+    const productById = activeProducts.filter((p) => p.inoveProductId === saleItem.inoveProductId);
+    const operationalById = activeOperational.filter((op) => op.inoveProductId === saleItem.inoveProductId);
+    const eligibleProducts = activeProducts.filter(allowsLink);
+    const eligibleOperational = activeOperational.filter(allowsLink);
+    // Nunca escolher o primeiro de múltiplos candidatos, nem ignorar vínculo explícito.
+    const matchedProduct = productById.length ? unique(productById)
+      : unique(eligibleProducts.filter((p) => p.externalCode && Number(p.externalCode) === saleItem.inoveProductId))
+        ?? unique(eligibleProducts.filter((p) => normalizeStockName(p.name) === normExact))
+        ?? (normCore.length >= 3 ? unique(eligibleProducts.filter((p) => normalizeCoreFlavorName(p.name) === normCore)) : undefined);
+    const matchedOperational = operationalById.length ? unique(operationalById)
+      : unique(eligibleOperational.filter((op) => normalizeStockName(op.name) === normExact))
+        ?? (normCore.length >= 3 ? unique(eligibleOperational.filter((op) => normalizeCoreFlavorName(op.name) === normCore)) : undefined);
 
-    // Localizar em `products`
-    let matchedProduct = activeProducts.find(
-      (p) =>
-        p.inoveProductId === saleItem.inoveProductId ||
-        (p.externalCode && Number(p.externalCode) === saleItem.inoveProductId)
-    );
-    if (!matchedProduct) {
-      matchedProduct = activeProducts.find((p) => normalizeStockName(p.name) === normExact)
-        ?? (normCore.length >= 3
-          ? activeProducts.find((p) => normalizeCoreFlavorName(p.name) === normCore)
-          : undefined);
-    }
-
-    // Localizar em `operational_items` (itens vindos das Notas Fiscais)
-    let matchedOperational = activeOperational.find(
-      (op) => op.inoveProductId === saleItem.inoveProductId
-    );
-    if (!matchedOperational) {
-      matchedOperational = activeOperational.find((op) => normalizeStockName(op.name) === normExact)
-        ?? (normCore.length >= 3
-          ? activeOperational.find((op) => normalizeCoreFlavorName(op.name) === normCore)
-          : undefined);
-    }
-
-    if (!matchedProduct && !matchedOperational) {
+    if ((!matchedProduct && !matchedOperational) || !Number.isFinite(saleItem.quantity)
+      || !Number.isInteger(saleItem.inoveProductId) || saleItem.inoveProductId <= 0
+      || (matchedProduct && !Number.isInteger(saleItem.quantity))) {
       unmatchedItems++;
       continue;
     }
 
     const reasonText = `Baixa automática PDV INOVE • Venda #${saleItem.vendaId} (${saleItem.productName})`.slice(0, 250);
-    const intQty = Math.max(1, Math.round(saleItem.quantity));
-
-    // 1. Baixar em `products` se encontrado
-    if (matchedProduct) {
-      const prevStock = Number(matchedProduct.currentStock ?? 0);
-      const nextStock = Math.max(0, prevStock - intQty);
-      await db.insert(stockMovements).values({
-        productId: matchedProduct.id,
-        type: "sale",
-        quantity: intQty,
-        previousStock: prevStock,
-        newStock: nextStock,
-        reason: reasonText,
+    try {
+      const outcome = await db.transaction(async (tx) => {
+        // Mesma ordem de locks em todas as baixas; usar saldo atual, não snapshot do catálogo.
+        const [product] = matchedProduct ? await tx.select().from(products)
+          .where(eq(products.id, matchedProduct.id)).limit(1).for("update") : [];
+        const [operational] = matchedOperational ? await tx.select().from(operationalItems)
+          .where(eq(operationalItems.id, matchedOperational.id)).limit(1).for("update") : [];
+        const [processed] = await tx.select().from(inoveStockDeductionLog)
+          .where(eq(inoveStockDeductionLog.inoveItemVendaId, saleItem.itemVendaId)).limit(1).for("update");
+        if (processed) return "processed";
+        if ((matchedProduct && (!product?.active || !allowsLink(product)))
+          || (matchedOperational && (!operational?.active || !allowsLink(operational)))) return "unmatched";
+        const prevStock = Number(product?.currentStock ?? 0);
+        const prevOpStock = Number(operational?.currentStock ?? 0);
+        if (operational) {
+          const unitsPerPackage = extractUnitsPerPackage(operational.name);
+          if (!["un", "und", "unid", "unidade", "unidades"].includes(operational.unit.trim().toLowerCase())
+            || (unitsPerPackage > 1 && operational.unitsPerPackage !== unitsPerPackage)) return "unmatched";
+        }
+        // Não criar saída fictícia/clamp a zero: insuficiência fica pendente para conciliação.
+        if ((product && (!Number.isFinite(prevStock) || prevStock < saleItem.quantity))
+          || (operational && (!Number.isFinite(prevOpStock) || prevOpStock < saleItem.quantity))) return "unmatched";
+        // Claim único dentro da mesma transação; erro posterior desfaz log e todas as baixas.
+        await tx.insert(inoveStockDeductionLog).values({
+          inoveSaleId: saleItem.vendaId,
+          inoveItemVendaId: saleItem.itemVendaId,
+          inoveProductId: saleItem.inoveProductId,
+          productName: saleItem.productName.slice(0, 255),
+          quantitySold: saleItem.quantity.toFixed(3),
+          productId: product?.id ?? null,
+          operationalItemId: operational?.id ?? null,
+          soldAt: saleItem.soldAt,
+        });
+        if (product) {
+          const nextStock = prevStock - saleItem.quantity;
+          await tx.insert(stockMovements).values({
+            productId: product.id, type: "sale", quantity: saleItem.quantity,
+            previousStock: prevStock, newStock: nextStock, reason: reasonText,
+          });
+          await tx.update(products).set({ currentStock: nextStock,
+            inoveProductId: product.inoveProductId ?? saleItem.inoveProductId, updatedAt: new Date(),
+          }).where(eq(products.id, product.id));
+        }
+        if (operational) {
+          const nextStock = prevOpStock - saleItem.quantity;
+          await tx.insert(operationalStockMovements).values({
+            itemId: operational.id, type: "consumption", quantity: saleItem.quantity.toFixed(2),
+            previousStock: prevOpStock.toFixed(2), newStock: nextStock.toFixed(2), reason: reasonText,
+          });
+          await tx.update(operationalItems).set({ currentStock: nextStock.toFixed(2),
+            inoveProductId: operational.inoveProductId ?? saleItem.inoveProductId, updatedAt: new Date(),
+          }).where(eq(operationalItems.id, operational.id));
+        }
+        return "deducted";
       });
-      await db
-        .update(products)
-        .set({
-          currentStock: nextStock,
-          inoveProductId: matchedProduct.inoveProductId ?? saleItem.inoveProductId,
-          updatedAt: new Date(),
-        })
-        .where(eq(products.id, matchedProduct.id));
-      matchedProduct.currentStock = nextStock;
-      matchedProduct.inoveProductId = matchedProduct.inoveProductId ?? saleItem.inoveProductId;
+      if (outcome === "deducted") itemsDeducted++;
+      if (outcome === "unmatched") unmatchedItems++;
+    } catch (error) {
+      const dbError = error as { code?: string; cause?: { code?: string } };
+      if (dbError.code === "ER_DUP_ENTRY" || dbError.cause?.code === "ER_DUP_ENTRY") continue;
+      throw error;
     }
-
-    // 2. Baixar em `operational_items` (unificado com Notas Fiscais) se encontrado
-    if (matchedOperational) {
-      const prevOpStock = Number(matchedOperational.currentStock ?? 0);
-      const nextOpStock = Math.max(0, prevOpStock - saleItem.quantity);
-      await db.insert(operationalStockMovements).values({
-        itemId: matchedOperational.id,
-        type: "consumption",
-        quantity: saleItem.quantity.toFixed(2),
-        previousStock: prevOpStock.toFixed(2),
-        newStock: nextOpStock.toFixed(2),
-        reason: reasonText,
-      });
-      await db
-        .update(operationalItems)
-        .set({
-          currentStock: nextOpStock.toFixed(2),
-          inoveProductId: matchedOperational.inoveProductId ?? saleItem.inoveProductId,
-          updatedAt: new Date(),
-        })
-        .where(eq(operationalItems.id, matchedOperational.id));
-      matchedOperational.currentStock = nextOpStock.toFixed(2);
-      matchedOperational.inoveProductId = matchedOperational.inoveProductId ?? saleItem.inoveProductId;
-    }
-
-    // 3. Registrar no log idempotente
-    await db.insert(inoveStockDeductionLog).values({
-      inoveSaleId: saleItem.vendaId,
-      inoveItemVendaId: saleItem.itemVendaId,
-      inoveProductId: saleItem.inoveProductId,
-      productName: saleItem.productName.slice(0, 255),
-      quantitySold: saleItem.quantity.toFixed(3),
-      productId: matchedProduct?.id ?? null,
-      operationalItemId: matchedOperational?.id ?? null,
-      soldAt: saleItem.soldAt,
-    });
-
-    itemsDeducted++;
   }
 
   return {

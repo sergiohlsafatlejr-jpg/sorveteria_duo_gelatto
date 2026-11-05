@@ -81,11 +81,12 @@ export const boxStockRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
-      const [box] = await db.select().from(boxStock).where(eq(boxStock.id, input.boxId));
+      return db.transaction(async (tx) => {
+      const [box] = await tx.select().from(boxStock).where(eq(boxStock.id, input.boxId)).limit(1).for("update");
       if (!box) throw new Error("Caixa não encontrada");
       const previousStock = box.currentStock;
       const newStock = previousStock + input.quantity;
-      await db.insert(boxStockMovements).values({
+      await tx.insert(boxStockMovements).values({
         boxId: input.boxId,
         type: "entrada",
         quantity: input.quantity,
@@ -94,8 +95,9 @@ export const boxStockRouter = router({
         notes: input.notes ?? null,
         userId: ctx.user?.id ?? null,
       });
-      await db.update(boxStock).set({ currentStock: newStock }).where(eq(boxStock.id, input.boxId));
+      await tx.update(boxStock).set({ currentStock: newStock }).where(eq(boxStock.id, input.boxId));
       return { success: true, newStock };
+      });
     }),
 
   // Registrar saída de caixas
@@ -108,11 +110,13 @@ export const boxStockRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
-      const [box] = await db.select().from(boxStock).where(eq(boxStock.id, input.boxId));
+      return db.transaction(async (tx) => {
+      const [box] = await tx.select().from(boxStock).where(eq(boxStock.id, input.boxId)).limit(1).for("update");
       if (!box) throw new Error("Caixa não encontrada");
       const previousStock = box.currentStock;
-      const newStock = Math.max(0, previousStock - input.quantity);
-      await db.insert(boxStockMovements).values({
+      if (input.quantity > previousStock) throw new Error("Saldo insuficiente de caixas; confira o estoque físico.");
+      const newStock = previousStock - input.quantity;
+      await tx.insert(boxStockMovements).values({
         boxId: input.boxId,
         type: "saida",
         quantity: input.quantity,
@@ -121,8 +125,9 @@ export const boxStockRouter = router({
         notes: input.notes ?? null,
         userId: ctx.user?.id ?? null,
       });
-      await db.update(boxStock).set({ currentStock: newStock }).where(eq(boxStock.id, input.boxId));
+      await tx.update(boxStock).set({ currentStock: newStock }).where(eq(boxStock.id, input.boxId));
       return { success: true, newStock };
+      });
     }),
 
   // Histórico de movimentações
@@ -308,11 +313,12 @@ export const boxStockRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
-      const [box] = await db.select().from(boxStock).where(eq(boxStock.id, input.boxId));
+      return db.transaction(async (tx) => {
+      const [box] = await tx.select().from(boxStock).where(eq(boxStock.id, input.boxId)).limit(1).for("update");
       if (!box) throw new Error("Caixa não encontrada");
       const diff = input.realStock - box.currentStock;
       if (diff === 0) return { success: true, diff: 0, message: "Estoque já está correto" };
-      await db.insert(boxStockMovements).values({
+      await tx.insert(boxStockMovements).values({
         boxId: input.boxId,
         type: diff > 0 ? "entrada" : "saida",
         quantity: Math.abs(diff),
@@ -321,8 +327,9 @@ export const boxStockRouter = router({
         notes: input.notes || `Ajuste contagem física (${diff > 0 ? "+" : ""}${diff})`,
         userId: ctx.user?.id ?? null,
       });
-      await db.update(boxStock).set({ currentStock: input.realStock }).where(eq(boxStock.id, input.boxId));
+      await tx.update(boxStock).set({ currentStock: input.realStock }).where(eq(boxStock.id, input.boxId));
       return { success: true, diff, message: `Ajuste de ${diff > 0 ? "+" : ""}${diff} caixa(s)` };
+      });
     }),
 
   // ── Sugestões automáticas de abertura (vendas em kg) ──────────────────────

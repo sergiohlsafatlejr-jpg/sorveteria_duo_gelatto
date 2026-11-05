@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
+import { extractUnitsPerPackage, isTenLiterPurchaseItem } from "@/lib/purchase-warehouse";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -56,6 +57,7 @@ type ReviewItem = {
   unit: string;
   unitPrice: number;
   totalPrice: number;
+  stockConversionFactor: number | null;
 };
 
 function money(value: string | number | null | undefined) {
@@ -130,6 +132,12 @@ export default function PurchaseInvoices() {
       unit: item.unit,
       unitPrice: Number(item.unitPrice),
       totalPrice: Number(item.totalPrice),
+      stockConversionFactor: (() => {
+        const raw = item.rawData && typeof item.rawData === "object" ? item.rawData as Record<string, unknown> : {};
+        if (typeof raw.stockConversionFactor === "number") return raw.stockConversionFactor;
+        const factor = extractUnitsPerPackage(item.description);
+        return factor <= 1 ? 1 : ["CX", "CAIXA", "PACK", "PK", "PCT", "PACOTE"].includes(item.unit.toUpperCase()) ? factor : null;
+      })(),
     })));
     setEditing(false);
   }, [detail]);
@@ -159,6 +167,7 @@ export default function PurchaseInvoices() {
         utils.purchaseInvoices.invalidate(),
         utils.purchases.invalidate(),
         utils.boxStock.invalidate(),
+        utils.products.invalidate(),
       ]);
     },
     onError: (error) => toast.error(error.message),
@@ -356,6 +365,25 @@ export default function PurchaseInvoices() {
                 <CardContent className="p-0"><div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-y bg-muted/35 text-left text-xs uppercase tracking-wide text-muted-foreground"><th className="px-4 py-3">Produto</th><th className="px-3 py-3">Categoria</th><th className="px-3 py-3 text-right">Qtd.</th><th className="px-3 py-3">Un.</th><th className="px-3 py-3 text-right">Preço unit.</th><th className="px-4 py-3 text-right">Total</th></tr></thead><tbody>{reviewItems.map((item) => <tr key={item.id} className="border-b align-top"><td className="px-4 py-3">{editing ? <div className="space-y-1.5"><Input value={item.description} onChange={(event) => updateItem(item.id, { description: event.target.value })} /><Input className="h-8 text-xs" placeholder="Código do fornecedor" value={item.supplierCode ?? ""} onChange={(event) => updateItem(item.id, { supplierCode: event.target.value || null })} /></div> : <><p className="font-medium">{item.description}</p><p className="text-xs text-muted-foreground">Cód. {item.supplierCode || "—"}</p></>}</td><td className="px-3 py-3">{editing ? <Select value={item.category} onValueChange={(value) => updateItem(item.id, { category: value as ReviewItem["category"] })}><SelectTrigger className="w-44"><SelectValue /></SelectTrigger><SelectContent>{CATEGORIES.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select> : CATEGORIES.find(([value]) => value === item.category)?.[1] ?? item.category}</td><td className="px-3 py-3 text-right">{editing ? <Input type="number" min="0" step="0.001" className="ml-auto w-24 text-right" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Number(event.target.value) })} /> : item.quantity.toLocaleString("pt-BR")}</td><td className="px-3 py-3">{editing ? <Input className="w-20" value={item.unit} onChange={(event) => updateItem(item.id, { unit: event.target.value })} /> : item.unit}</td><td className="px-3 py-3 text-right">{editing ? <Input type="number" min="0" step="0.0001" className="ml-auto w-28 text-right" value={item.unitPrice} onChange={(event) => updateItem(item.id, { unitPrice: Number(event.target.value) })} /> : money(item.unitPrice)}</td><td className="px-4 py-3 text-right">{editing ? <Input type="number" min="0" step="0.01" className="ml-auto w-28 text-right" value={item.totalPrice} onChange={(event) => updateItem(item.id, { totalPrice: Number(event.target.value) })} /> : <span className="font-semibold">{money(item.totalPrice)}</span>}</td></tr>)}</tbody><tfoot><tr className="bg-muted/30 font-semibold"><td colSpan={5} className="px-4 py-3 text-right">Soma dos itens</td><td className="px-4 py-3 text-right">{money(reviewItems.reduce((sum, item) => sum + item.totalPrice, 0))}</td></tr></tfoot></table></div></CardContent>
               </Card>
 
+              {detail.invoice.status !== "confirmed" && (
+                <Card className="border-amber-200">
+                  <CardHeader><CardTitle className="text-base">Conversão para o estoque</CardTitle><p className="text-sm text-muted-foreground">Confira no PDF se a quantidade representa embalagens ou unidades. Use Editar revisão, escolha o fator e salve antes de confirmar. Notas antigas não representam automaticamente o saldo físico de hoje.</p></CardHeader>
+                  <CardContent className="space-y-3">
+                    {reviewItems.filter((item) => !isTenLiterPurchaseItem(item.description) && extractUnitsPerPackage(item.description) > 1).map((item) => {
+                      const factor = extractUnitsPerPackage(item.description);
+                      return <div key={`conversion-${item.id}`} className="grid gap-2 rounded-lg bg-muted/30 p-3 sm:grid-cols-[1fr_220px_140px] sm:items-center">
+                        <div className="min-w-0"><p className="break-words text-sm font-medium">{item.description}</p><p className="text-xs text-muted-foreground">NF: {item.quantity.toLocaleString("pt-BR")} {item.unit} • {money(item.unitPrice)} por quantidade fiscal</p></div>
+                        <Select disabled={!editing} value={item.stockConversionFactor == null ? "pending" : String(item.stockConversionFactor)} onValueChange={(value) => updateItem(item.id, { stockConversionFactor: value === "pending" ? null : Number(value) })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pending">Conferir conversão</SelectItem><SelectItem value="1">Já em unidades (×1)</SelectItem><SelectItem value={String(factor)}>Embalagens (×{factor})</SelectItem></SelectContent>
+                        </Select>
+                        <p className="text-sm font-semibold">{item.stockConversionFactor == null ? "Pendente" : `${(item.quantity * item.stockConversionFactor).toLocaleString("pt-BR")} un`}</p>
+                      </div>;
+                    })}
+                    {!detail.invoice.reviewedAt && <p className="text-sm font-medium text-amber-800">Revisão humana ainda não salva. Nenhuma entrada pode ser confirmada.</p>}
+                  </CardContent>
+                </Card>
+              )}
+
               <div className="flex flex-col justify-between gap-3 border-t pt-4 sm:flex-row sm:items-center"><div><p className="text-xs text-muted-foreground">Modelo: {detail.invoice.model || "—"} • duração: {detail.invoice.durationMs ? `${(detail.invoice.durationMs / 1000).toFixed(1)} s` : "—"}</p>{detail.invoice.status === "confirmed" && <p className="mt-1 text-xs font-medium text-emerald-700">Itens já incorporados ao estoque. Reprocessamento e edição foram bloqueados para evitar duplicidade.</p>}</div>{editing && <div className="flex gap-2"><Button variant="outline" onClick={() => { setEditing(false); void utils.purchaseInvoices.getById.invalidate(detailInput); }}>Cancelar</Button><Button onClick={saveReview} disabled={saveMutation.isPending}>{saveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar revisão</Button></div>}</div>
             </div>
           )}
@@ -373,7 +401,7 @@ export default function PurchaseInvoices() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={confirmMutation.isPending}>Voltar e revisar</AlertDialogCancel>
             <AlertDialogAction
-              disabled={!selectedId || confirmMutation.isPending}
+              disabled={!selectedId || !detail?.invoice.reviewedAt || confirmMutation.isPending}
               onClick={(event) => {
                 event.preventDefault();
                 if (selectedId) confirmMutation.mutate({ invoiceId: selectedId });

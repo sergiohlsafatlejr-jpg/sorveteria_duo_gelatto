@@ -23,8 +23,13 @@ import { createInovePool } from "./routers/inove";
 type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
 function fmtMssqlDate(d: Date): string {
-  // 'YYYY-MM-DD HH:MM:SS' — seguro para interpolar (gerado internamente)
-  return d.toISOString().slice(0, 19).replace("T", " ");
+  // VEN_DATA_FIM é datetime local do PDV; os cursores MySQL são instantes UTC.
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(d);
+  const part = (type: string) => parts.find((p) => p.type === type)!.value;
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")}.${String(d.getUTCMilliseconds()).padStart(3, "0")}`;
 }
 
 type DetectionResult = {
@@ -67,11 +72,17 @@ export async function detectBoxOpenings(opts?: {
 
   try {
     for (const box of trackable) {
-      const [tracking] = await db
+      // O mesmo bloqueio é usado pela confirmação; execuções concorrentes
+      // não podem consumir o mesmo intervalo nem sobrescrever o excedente.
+      await db.transaction(async (tx) => {
+      const [lockedBox] = await tx.select().from(boxStock)
+        .where(eq(boxStock.id, box.id)).limit(1).for("update");
+      if (!lockedBox?.active || !lockedBox.inoveProductId || Number(lockedBox.rendimentoKg) <= 0) return;
+      const [tracking] = await tx
         .select()
         .from(boxOpenTracking)
         .where(eq(boxOpenTracking.boxId, box.id))
-        .limit(1);
+        .limit(1).for("update");
 
       const now = new Date();
 
@@ -81,7 +92,7 @@ export async function detectBoxOpenings(opts?: {
       if (tracking?.lastComputedAt) {
         from = new Date(tracking.lastComputedAt);
       } else {
-        const [lastExit] = await db
+        const [lastExit] = await tx
           .select()
           .from(boxStockMovements)
           .where(
@@ -102,18 +113,23 @@ export async function detectBoxOpenings(opts?: {
         FROM ITENS_VENDAS iv
         JOIN VENDAS v ON v.VENDA = iv.VENDA
         WHERE v.VEN_SITUACAO = 2
-          AND iv.PRODUTO = ${box.inoveProductId}
-          AND v.VEN_DATA_FIM >= '${fmtMssqlDate(from)}'
+          AND ISNULL(v.VEN_ESTORNADO, 'N') = 'N'
+          AND iv.PRODUTO = ${lockedBox.inoveProductId}
+          AND v.VEN_DATA_FIM > '${fmtMssqlDate(from)}'
+          AND v.VEN_DATA_FIM <= '${fmtMssqlDate(now)}'
       `);
       const kgSold = Number((res.recordset[0] as Record<string, unknown> | undefined)?.kg ?? 0);
+      if (!Number.isFinite(kgSold) || kgSold < 0) {
+        throw new Error(`Quantidade em kg inválida no INOVE para ${box.name}.`);
+      }
 
       const accumulated = Number(tracking?.accumulatedKg ?? 0) + kgSold;
-      const rendimento = Number(box.rendimentoKg);
+      const rendimento = Number(lockedBox.rendimentoKg);
       const shouldSuggest = accumulated >= rendimento;
       const alreadyPending = tracking?.suggestionPending ?? false;
 
       if (tracking) {
-        await db
+        await tx
           .update(boxOpenTracking)
           .set({
             accumulatedKg: accumulated.toFixed(3),
@@ -122,7 +138,7 @@ export async function detectBoxOpenings(opts?: {
           })
           .where(eq(boxOpenTracking.boxId, box.id));
       } else {
-        await db.insert(boxOpenTracking).values({
+        await tx.insert(boxOpenTracking).values({
           boxId: box.id,
           accumulatedKg: accumulated.toFixed(3),
           lastOpeningAt: from,
@@ -137,6 +153,7 @@ export async function detectBoxOpenings(opts?: {
         );
       }
       checked++;
+      });
     }
   } finally {
     try { await pool.close(); } catch { /* ignora erro de close */ }
@@ -217,6 +234,12 @@ export async function confirmBoxOpening(boxId: number, userId: number | null) {
       .for("update");
 
     const accumulated = Number(tracking?.accumulatedKg ?? 0);
+    if (!box.active || rendimento <= 0 || !tracking?.suggestionPending || accumulated < rendimento) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Não há sugestão válida pendente para esta caixa. Atualize a tela." });
+    }
+    if (box.currentStock <= 0) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Sem caixa disponível no estoque. Registre a entrada ou a contagem física antes de confirmar." });
+    }
     const previousStock = box.currentStock;
     const newStock = Math.max(0, previousStock - 1);
 

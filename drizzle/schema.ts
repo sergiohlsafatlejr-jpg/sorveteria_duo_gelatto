@@ -1145,3 +1145,17 @@ export const inoveStockDeductionLog = mysqlTable("inove_stock_deduction_log", {
 });
 export type InoveStockDeductionLog = typeof inoveStockDeductionLog.$inferSelect;
 export type InsertInoveStockDeductionLog = typeof inoveStockDeductionLog.$inferInsert;
+
+// Registry de callbacks Heartbeat: identidade vinculada ao task_uid da plataforma.
+// Desabilitado por padrão; ativar somente após deploy e persistência do task_uid.
+export const stockScheduledJobs = mysqlTable("stock_scheduled_jobs", {
+  jobKey: mysqlEnum("jobKey", ["stock-deduction", "box-dia", "box-noite"]).primaryKey(),
+  scheduleCronTaskUid: varchar("schedule_cron_task_uid", { length: 65 }),
+  enabled: boolean("enabled").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+  uniqueIndex("stock_scheduled_jobs_task_uid_idx").on(table.scheduleCronTaskUid),
+]);
+export type StockScheduledJob = typeof stockScheduledJobs.$inferSelect;
+export type InsertStockScheduledJob = typeof stockScheduledJobs.$inferInsert;

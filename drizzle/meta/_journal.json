@@ -295,6 +295,13 @@
       "when": 1793819741725,
       "tag": "0041_pretty_radioactive_man",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "5",
+      "when": 1793890784841,
+      "tag": "0042_moaning_rockslide",
+      "breakpoints": true
     }
   ]
 }

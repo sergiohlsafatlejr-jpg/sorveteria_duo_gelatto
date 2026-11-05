@@ -143,7 +143,7 @@ export default function FinWeekdayReport() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
+    <div className="w-full min-w-0 p-4 sm:p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -188,27 +188,27 @@ export default function FinWeekdayReport() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="border-l-4 border-l-amber-500">
-          <CardContent className="pt-4 pb-3">
+          <CardContent className="px-3 sm:px-6 pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Pendente</p>
-            <p className="text-xl font-bold text-amber-600">{fmt(totalPending)}</p>
+            <p className="text-base sm:text-xl font-bold text-amber-600">{fmt(totalPending)}</p>
           </CardContent>
         </Card>
         <Card className="border-l-4 border-l-green-500">
-          <CardContent className="pt-4 pb-3">
+          <CardContent className="px-3 sm:px-6 pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Pago</p>
-            <p className="text-xl font-bold text-green-600">{fmt(totalPaid)}</p>
+            <p className="text-base sm:text-xl font-bold text-green-600">{fmt(totalPaid)}</p>
           </CardContent>
         </Card>
         <Card className="border-l-4 border-l-red-500">
-          <CardContent className="pt-4 pb-3">
+          <CardContent className="px-3 sm:px-6 pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Vencido</p>
-            <p className="text-xl font-bold text-red-600">{fmt(totalOverdue)}</p>
+            <p className="text-base sm:text-xl font-bold text-red-600">{fmt(totalOverdue)}</p>
           </CardContent>
         </Card>
         <Card className="border-l-4 border-l-blue-500">
-          <CardContent className="pt-4 pb-3">
+          <CardContent className="px-3 sm:px-6 pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Geral</p>
-            <p className="text-xl font-bold text-blue-600">{fmt(totalGeral)}</p>
+            <p className="text-base sm:text-xl font-bold text-blue-600">{fmt(totalGeral)}</p>
           </CardContent>
         </Card>
       </div>
@@ -327,7 +327,7 @@ export default function FinWeekdayReport() {
                             className="w-full text-left px-6 py-4 hover:bg-muted/50 transition-colors"
                             onClick={() => toggleExpand(key)}
                           >
-                            <div className="flex items-center justify-between">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-3">
                                 {expandedDay === key
                                   ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -343,7 +343,7 @@ export default function FinWeekdayReport() {
                                   </span>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-4 text-sm">
+                              <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm">
                                 {day.overdue > 0 && (
                                   <span className="flex items-center gap-1 text-red-600 font-medium">
                                     <AlertCircle className="h-3.5 w-3.5" />
@@ -365,7 +365,7 @@ export default function FinWeekdayReport() {
                           </button>
 
                           {expandedDay === key && day.items?.length > 0 && (
-                            <div className="bg-muted/20 border-t">
+                            <div className="bg-muted/20 border-t overflow-x-auto">
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
@@ -420,9 +420,9 @@ export default function FinWeekdayReport() {
 
                     {/* Total da semana */}
                     {currentWeek.days?.length > 0 && (
-                      <div className="px-6 py-4 bg-muted/30 flex items-center justify-between font-bold">
+                      <div className="px-4 sm:px-6 py-4 bg-muted/30 flex flex-wrap gap-2 items-center justify-between font-bold">
                         <span className="text-base">Total {WEEK_LABELS[selectedWeek]}</span>
-                        <div className="flex items-center gap-6 text-sm">
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-6 text-sm">
                           {currentWeek.pending > 0 && <span className="text-amber-600">{fmt(currentWeek.pending)} pendente</span>}
                           {currentWeek.paid > 0 && <span className="text-green-600">{fmt(currentWeek.paid)} pago</span>}
                           {currentWeek.overdue > 0 && <span className="text-red-600">{fmt(currentWeek.overdue)} vencido</span>}
@@ -501,7 +501,7 @@ export default function FinWeekdayReport() {
                           className="w-full text-left px-6 py-4 hover:bg-muted/50 transition-colors"
                           onClick={() => toggleExpand(key)}
                         >
-                          <div className="flex items-center justify-between">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-3">
                               {expandedDay === key
                                 ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -514,7 +514,7 @@ export default function FinWeekdayReport() {
                                 </span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-4 text-sm">
+                            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm">
                               {day.overdue > 0 && (
                                 <span className="flex items-center gap-1 text-red-600 font-medium">
                                   <AlertCircle className="h-3.5 w-3.5" />
@@ -536,7 +536,7 @@ export default function FinWeekdayReport() {
                         </button>
 
                         {expandedDay === key && day.items.length > 0 && (
-                          <div className="bg-muted/20 border-t">
+                          <div className="bg-muted/20 border-t overflow-x-auto">
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
@@ -590,9 +590,9 @@ export default function FinWeekdayReport() {
                   })}
 
                   {summaries.length > 0 && (
-                    <div className="px-6 py-4 bg-muted/30 flex items-center justify-between font-bold">
+                    <div className="px-4 sm:px-6 py-4 bg-muted/30 flex flex-wrap gap-2 items-center justify-between font-bold">
                       <span className="text-base">Total Geral (Seg–Sex)</span>
-                      <div className="flex items-center gap-6 text-sm">
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-6 text-sm">
                         <span className="text-amber-600">{fmt(totalPending)} pendente</span>
                         <span className="text-green-600">{fmt(totalPaid)} pago</span>
                         {totalOverdue > 0 && <span className="text-red-600">{fmt(totalOverdue)} vencido</span>}
@@ -623,27 +623,27 @@ export default function FinWeekdayReport() {
             <>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card className="border-l-4 border-l-rose-500">
-                  <CardContent className="pt-4 pb-3">
+                  <CardContent className="px-3 sm:px-6 pt-4 pb-3">
                     <p className="text-xs text-muted-foreground uppercase">Saídas Totais do Mês (Boletos + Extras)</p>
-                    <p className="text-xl font-bold text-rose-600">{fmt(breakEvenData.totalPayables)}</p>
+                    <p className="text-base sm:text-xl font-bold text-rose-600">{fmt(breakEvenData.totalPayables)}</p>
                     <p className="text-xs text-muted-foreground mt-1">
                       Margem de Contribuição considerada: {breakEvenData.contributionMarginPct}%
                     </p>
                   </CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-amber-500">
-                  <CardContent className="pt-4 pb-3">
+                  <CardContent className="px-3 sm:px-6 pt-4 pb-3">
                     <p className="text-xs text-muted-foreground uppercase">Faturamento Break-Even do Mês</p>
-                    <p className="text-xl font-bold text-amber-600">{fmt(breakEvenData.totalBreakEvenRevenue)}</p>
+                    <p className="text-base sm:text-xl font-bold text-amber-600">{fmt(breakEvenData.totalBreakEvenRevenue)}</p>
                     <p className="text-xs text-muted-foreground mt-1">
                       Venda necessária para cobrir 100% dos boletos + CMV
                     </p>
                   </CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-emerald-500">
-                  <CardContent className="pt-4 pb-3">
+                  <CardContent className="px-3 sm:px-6 pt-4 pb-3">
                     <p className="text-xs text-muted-foreground uppercase">Receita Projetada (Clima + Realizado)</p>
-                    <p className="text-xl font-bold text-emerald-600">{fmt(breakEvenData.totalProjectedRevenue)}</p>
+                    <p className="text-base sm:text-xl font-bold text-emerald-600">{fmt(breakEvenData.totalProjectedRevenue)}</p>
                     <p className="text-xs text-muted-foreground mt-1">
                       Realizado até hoje: {fmt(breakEvenData.totalRealRevenue)}
                     </p>
@@ -656,7 +656,7 @@ export default function FinWeekdayReport() {
                 {breakEvenData.weeks.map((w) => (
                   <Card key={w.weekIndex} className={w.hasCashCrunchAlert ? "border-amber-400/70" : ""}>
                     <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <CardTitle className="text-base">
                           {w.weekLabel} <span className="text-xs font-normal text-muted-foreground">({w.dateRange})</span>
                         </CardTitle>

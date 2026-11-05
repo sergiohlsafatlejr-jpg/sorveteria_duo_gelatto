@@ -60,6 +60,9 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
     if (invoice.status !== "extracted") {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Revise e concilie a nota antes de confirmar as entradas." });
     }
+    if (!invoice.reviewedBy || !invoice.reviewedAt) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Salve a revisão humana e confira a conversão de embalagens antes de confirmar as entradas." });
+    }
 
     const items = await tx
       .select()
@@ -74,9 +77,11 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
         id: operationalItems.id,
         name: operationalItems.name,
         currentStock: operationalItems.currentStock,
+        unit: operationalItems.unit,
+        unitsPerPackage: operationalItems.unitsPerPackage,
       })
       .from(operationalItems)
-      .where(eq(operationalItems.active, true)))
+      .where(eq(operationalItems.active, true)).for("update"))
       .map((item) => ({ ...item, normalizedName: normalizeCatalogName(item.name) }));
     const boxCatalog = (await tx
       .select({
@@ -85,7 +90,7 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
         currentStock: boxStock.currentStock,
       })
       .from(boxStock)
-      .where(eq(boxStock.active, true)))
+      .where(eq(boxStock.active, true)).for("update"))
       .map((item) => ({ ...item, normalizedName: normalizeCatalogName(item.name) }));
     const productCatalog = (await tx
       .select({
@@ -94,7 +99,7 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
         currentStock: products.currentStock,
       })
       .from(products)
-      .where(eq(products.active, true)))
+      .where(eq(products.active, true)).for("update"))
       .map((item) => ({
         ...item,
         normalizedName: normalizeCatalogName(item.name),
@@ -157,12 +162,28 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
       }
 
       const unitsPerPkg = extractUnitsPerPackage(item.description);
-      const entryQuantity = quantity * unitsPerPkg;
-      const entryUnitCost = unitsPerPkg > 1 ? unitPrice / unitsPerPkg : unitPrice;
-      const effectiveUnit = unitsPerPkg > 1 ? "un" : item.unit.toLowerCase();
+      const raw = item.rawData && typeof item.rawData === "object" ? item.rawData as Record<string, unknown> : {};
+      const approvedFactor = raw.stockConversionFactor;
+      const isClearlyPackage = ["CX", "CAIXA", "PACK", "PK", "PCT", "PACOTE"].includes(item.unit.trim().toUpperCase());
+      // UN pode significar unidade ou embalagem no fornecedor: nunca inferir
+      // multiplicação pela descrição sem aprovação explícita na revisão.
+      const factor = typeof approvedFactor === "number" ? approvedFactor : unitsPerPkg > 1 && isClearlyPackage ? unitsPerPkg : unitsPerPkg > 1 ? null : 1;
+      if (!factor || !Number.isInteger(factor) || factor < 1 || (factor !== 1 && factor !== unitsPerPkg)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Confira o fator de conversão de ${item.description}: quantidade já unitária (1) ou embalagem (${unitsPerPkg}).` });
+      }
+      const entryQuantity = quantity * factor;
+      const entryUnitCost = unitPrice / factor;
+      const effectiveUnit = factor > 1 || unitsPerPkg > 1 ? "un" : item.unit.toLowerCase();
+      if (unitsPerPkg > 1 && !Number.isInteger(entryQuantity)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `A conversão de ${item.description} deve resultar em unidades inteiras. Revise a quantidade da embalagem.` });
+      }
 
       const normalizedName = normalizeCatalogName(item.description);
       let operationalItem = operationalCatalog.find((candidate) => candidate.normalizedName === normalizedName);
+      if (operationalItem && Number(operationalItem.currentStock) > 0 && unitsPerPkg > 1 &&
+        (operationalItem.unitsPerPackage !== unitsPerPkg || !["un", "und", "unid", "unidade", "unidades"].includes(operationalItem.unit.toLowerCase()))) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `O saldo anterior de ${item.description} está em outra unidade/embalagem. Confira e converta o saldo físico para unidades antes de confirmar esta nota.` });
+      }
       if (!operationalItem) {
         const inserted = await tx.insert(operationalItems).values({
           name: item.description,
@@ -177,7 +198,7 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
         }).$returningId();
         const operationalItemId = inserted[0]?.id;
         if (!operationalItemId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao criar item operacional." });
-        operationalItem = { id: operationalItemId, name: item.description, currentStock: "0.00", normalizedName };
+        operationalItem = { id: operationalItemId, name: item.description, currentStock: "0.00", unit: effectiveUnit, unitsPerPackage: unitsPerPkg, normalizedName };
         operationalCatalog.push(operationalItem);
       }
       const previousStock = Number(operationalItem.currentStock);
@@ -206,11 +227,13 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
 
       // Sincronizar também na tabela de Produtos (/products) para itens de revenda/unidades
       const coreName = normalizeCoreFlavorName(item.description);
-      let matchedProduct = productCatalog.find(
-        (candidate) =>
-          candidate.normalizedName === normalizedName ||
-          (coreName.length >= 3 && candidate.coreName === coreName)
-      );
+      const exactMatches = productCatalog.filter((candidate) => candidate.normalizedName === normalizedName);
+      const coreMatches = coreName.length >= 3 ? productCatalog.filter((candidate) => candidate.coreName === coreName) : [];
+      const candidates = exactMatches.length > 0 ? exactMatches : coreMatches;
+      if (candidates.length > 1) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Há mais de um produto compatível com ${item.description}. Revise os vínculos antes de confirmar.` });
+      }
+      let matchedProduct = candidates[0];
       const isDuoGelatto = (invoice.supplierName ?? "").toUpperCase().includes("DUO GELATTO");
       if (!matchedProduct && (isDuoGelatto || unitsPerPkg > 1)) {
         const insertedProd = await tx.insert(products).values({
@@ -232,6 +255,9 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
       }
       if (matchedProduct) {
         const prevProdStock = Number(matchedProduct.currentStock ?? 0);
+        if (!Number.isInteger(entryQuantity)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `O estoque unitário de ${item.description} não aceita quantidade fracionada. Revise a nota.` });
+        }
         const addedUnits = Math.round(entryQuantity);
         const nextProdStock = prevProdStock + addedUnits;
         await tx.insert(stockMovements).values({
@@ -266,12 +292,12 @@ export async function confirmPurchaseInvoiceStock(db: Database, invoiceId: numbe
     await tx
       .update(purchaseInvoices)
       .set({
-        status: "confirmed",
-        confirmedAt: new Date(),
-        reviewedBy: invoice.reviewedBy ?? userId,
-        reviewedAt: invoice.reviewedAt ?? new Date(),
-      })
-      .where(eq(purchaseInvoices.id, invoiceId));
+          status: "confirmed",
+          confirmedAt: new Date(),
+          reviewedBy: invoice.reviewedBy,
+          reviewedAt: invoice.reviewedAt,
+        })
+        .where(eq(purchaseInvoices.id, invoiceId));
 
     return { success: true, operationalEntries, boxEntries, totalItems: items.length };
   });

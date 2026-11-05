@@ -27,6 +27,7 @@ import {
   splitPdfIntoBatches,
 } from "../purchase-invoice-pdf-batches";
 import { storageGet, storagePut } from "../storage";
+import { extractUnitsPerPackage } from "../stock-auto-deduction";
 
 const MAX_INLINE_PDF_BYTES = 15 * 1024 * 1024;
 export const MAX_PDF_BYTES = 80 * 1024 * 1024;
@@ -41,6 +42,7 @@ const itemReviewSchema = z.object({
   unit: z.string().min(1).max(20),
   unitPrice: z.number().nonnegative(),
   totalPrice: z.number().nonnegative(),
+  stockConversionFactor: z.number().int().min(1).max(10000).nullable().optional(),
 });
 
 function normalize(value: string | null | undefined): string {
@@ -98,10 +100,16 @@ async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
   if (!source) throw new TRPCError({ code: "NOT_FOUND", message: "Documento fiscal não encontrado." });
   const documentHash = source.documentHash ?? source.fileHash;
 
-  await db
-    .update(purchaseInvoices)
-    .set({ status: "processing", errorMessage: null, documentHash })
-    .where(or(eq(purchaseInvoices.documentHash, documentHash), eq(purchaseInvoices.id, invoiceId)));
+  await db.transaction(async (tx) => {
+    const locked = await tx.select({ status: purchaseInvoices.status }).from(purchaseInvoices)
+      .where(or(eq(purchaseInvoices.documentHash, documentHash), eq(purchaseInvoices.id, invoiceId))).for("update");
+    if (locked.some((invoice) => invoice.status === "confirmed" || invoice.status === "processing")) {
+      throw new TRPCError({ code: "CONFLICT", message: "O documento já está em processamento ou contém nota confirmada; não pode ser reaberto." });
+    }
+    await tx.update(purchaseInvoices)
+      .set({ status: "processing", errorMessage: null, documentHash, reviewedBy: null, reviewedAt: null })
+      .where(or(eq(purchaseInvoices.documentHash, documentHash), eq(purchaseInvoices.id, invoiceId)));
+  });
 
   const startedAt = Date.now();
   try {
@@ -137,6 +145,11 @@ async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
 
     const invoiceIds: number[] = [];
     await db.transaction(async (tx) => {
+      const locked = await tx.select({ id: purchaseInvoices.id, status: purchaseInvoices.status }).from(purchaseInvoices)
+        .where(or(eq(purchaseInvoices.documentHash, documentHash), eq(purchaseInvoices.id, invoiceId))).for("update");
+      if (locked.some((invoice) => invoice.status === "confirmed")) {
+        throw new TRPCError({ code: "CONFLICT", message: "Uma nota foi confirmada e não pode ser sobrescrita pela extração." });
+      }
       for (let position = 0; position < extraction.invoices.length; position += 1) {
         const invoice = extraction.invoices[position];
         const documentIndex = position + 1;
@@ -206,6 +219,8 @@ async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
             validationErrors: invoice.validationErrors,
             processedAt: new Date(),
             errorMessage: null,
+            reviewedBy: null,
+            reviewedAt: null,
           })
           .where(eq(purchaseInvoices.id, targetId));
       }
@@ -237,7 +252,7 @@ async function runExtraction(db: Database, invoiceId: number, fileKey: string) {
     await db
       .update(purchaseInvoices)
       .set({ status: "error", errorMessage: message, durationMs: Date.now() - startedAt, processedAt: new Date() })
-      .where(eq(purchaseInvoices.id, invoiceId));
+      .where(and(eq(purchaseInvoices.id, invoiceId), sql`${purchaseInvoices.status} != 'confirmed'`));
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Não foi possível extrair a nota: ${message}` });
   }
 }
@@ -397,22 +412,24 @@ export const purchaseInvoicesRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco de dados indisponível." });
 
-      const invoiceRows = await db
+      const supplierId = await resolveSupplierId(db, input.supplierName, input.supplierCnpj ?? "");
+      return db.transaction(async (tx) => {
+      const invoiceRows = await tx
         .select({ status: purchaseInvoices.status, operationNature: purchaseInvoices.operationNature })
         .from(purchaseInvoices)
         .where(eq(purchaseInvoices.id, input.invoiceId))
-        .limit(1);
+        .limit(1).for("update");
       if (!invoiceRows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada." });
-      if (invoiceRows[0].status === "confirmed") {
+      if (invoiceRows[0].status === "confirmed" || invoiceRows[0].status === "processing") {
         throw new TRPCError({ code: "CONFLICT", message: "Esta nota já foi confirmada e não pode mais ser editada." });
       }
 
-      const existingItems = await db
-        .select({ id: purchaseInvoiceItems.id })
+      const existingItems = await tx
+        .select({ id: purchaseInvoiceItems.id, rawData: purchaseInvoiceItems.rawData })
         .from(purchaseInvoiceItems)
         .where(eq(purchaseInvoiceItems.invoiceId, input.invoiceId));
       const allowedIds = new Set(existingItems.map((item) => item.id));
-      if (input.items.some((item) => !allowedIds.has(item.id))) {
+      if (input.items.length !== allowedIds.size || new Set(input.items.map((item) => item.id)).size !== allowedIds.size || input.items.some((item) => !allowedIds.has(item.id))) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Há um item que não pertence a esta nota." });
       }
 
@@ -420,6 +437,10 @@ export const purchaseInvoicesRouter = router({
       const tolerance = Math.max(2, input.totalAmount * 0.02);
       const validationErrors: string[] = [];
       for (const item of input.items) {
+        const packageFactor = extractUnitsPerPackage(item.description);
+        if (packageFactor > 1 && (item.stockConversionFactor == null || ![1, packageFactor].includes(item.stockConversionFactor))) {
+          validationErrors.push(`Item ${item.description}: confirme se a quantidade já está em unidades (fator 1) ou em embalagens (fator ${packageFactor}).`);
+        }
         const calculated = Math.round(item.quantity * item.unitPrice * 100) / 100;
         if (Math.abs(calculated - item.totalPrice) > Math.max(0.05, item.totalPrice * 0.01)) {
           validationErrors.push(`Item ${item.description}: quantidade × preço não fecha com o total.`);
@@ -433,7 +454,8 @@ export const purchaseInvoicesRouter = router({
       }
 
       for (const item of input.items) {
-        await db
+        const raw = existingItems.find((existing) => existing.id === item.id)?.rawData;
+        await tx
           .update(purchaseInvoiceItems)
           .set({
             supplierCode: item.supplierCode?.trim() || null,
@@ -443,12 +465,12 @@ export const purchaseInvoicesRouter = router({
             unit: item.unit.trim().toUpperCase(),
             unitPrice: item.unitPrice.toFixed(4),
             totalPrice: item.totalPrice.toFixed(2),
+            rawData: { ...(raw && typeof raw === "object" ? raw as Record<string, unknown> : {}), stockConversionFactor: item.stockConversionFactor ?? 1 },
           })
           .where(and(eq(purchaseInvoiceItems.id, item.id), eq(purchaseInvoiceItems.invoiceId, input.invoiceId)));
       }
 
-      const supplierId = await resolveSupplierId(db, input.supplierName, input.supplierCnpj ?? "");
-      await db
+      await tx
         .update(purchaseInvoices)
         .set({
           supplierName: input.supplierName.trim(),
@@ -471,6 +493,7 @@ export const purchaseInvoicesRouter = router({
         itemSubtotal,
         validationErrors,
       };
+      });
     }),
 
   confirm: protectedProcedure
