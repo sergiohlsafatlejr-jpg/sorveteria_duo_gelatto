@@ -546,10 +546,10 @@ function Products() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="w-full min-w-0 space-y-6">
         <BackButton to="/dashboard" />
 
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Package className="h-6 w-6 text-primary" />
@@ -725,7 +725,7 @@ function Products() {
         })()}
 
         <Tabs defaultValue="products">
-          <TabsList>
+          <TabsList className="grid h-auto w-full grid-cols-1 gap-1 sm:grid-cols-3">
             <TabsTrigger value="inove" className="gap-2">
               <Database className="h-4 w-4" />
               Estoque PDV INOVE

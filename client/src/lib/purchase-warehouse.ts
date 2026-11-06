@@ -67,7 +67,17 @@ export function normalizePurchaseWarehouseName(value: string | null | undefined)
 }
 
 export function isTenLiterPurchaseItem(description: string): boolean {
-  return /\b10\s*(L|LT|LITRO|LITROS)\b/i.test(description);
+  return /\b10\s*(?:LITROS?|LT|L)\b/i.test(description);
+}
+
+export function getPurchaseWarehouseInoveProductId(
+  formData: Pick<FormData, "has" | "get">,
+  currentId?: number | null,
+): number | null | undefined {
+  if (!formData.has("inoveProductId")) return undefined;
+  const raw = String(formData.get("inoveProductId") ?? "").trim();
+  const nextId = raw ? Number(raw) : null;
+  return nextId === (currentId ?? null) ? undefined : nextId;
 }
 
 /**
@@ -95,7 +105,7 @@ export function categorizeSorveteItem(description: string): string {
   if (/LINHA\s*ESPECIAL/i.test(upper)) return "linha_especial";
   if (/\bMEGA\b/i.test(upper) || /OURO\s*PRETO/i.test(upper)) return "mega";
   if (/\bDUOBLITO/i.test(upper)) return "duoblito";
-  if (/\bCAIXA\s*10\s*(L|LT|LITRO|LITROS)\b/i.test(upper) || /\b10\s*LITROS?\b/i.test(upper)) return "caixas_10l";
+  if (/\bCAIXA\s*10\s*(?:LITROS?|LT|L)\b/i.test(upper) || /\b10\s*LITROS?\b/i.test(upper)) return "caixas_10l";
   if (/PACK\s*4\s*UND.*1[,.]5\s*LITRO/i.test(upper)) return "potes_1_5l";
   if (/PACK\s*(6|9)\s*UND.*1\s*(LITRO|LT)/i.test(upper) || /PACK\s*(6|9)\s*UND.*500\s*ML/i.test(upper)) return "potes_1l_500ml";
   if (/CAIXA\s*5\s*LITRO/i.test(upper) || /5\s*LITROS/i.test(upper)) return "caixas_5l";
@@ -207,7 +217,7 @@ export function buildPurchaseWarehouseCatalog(
   if (boxStockItems.length > 0 && filter !== "almoxarifado") {
     const stripBoxPrefix = (str: string) =>
       normalizePurchaseWarehouseName(
-        str.replace(/^CAIXA\s*10\s*(L|LT|LITRO|LITROS)\s*[-–—:]?\s*/i, "").trim(),
+        str.replace(/^CAIXA\s*10\s*(?:LITROS?|LT|L)\b\s*[-–—:]?\s*/i, "").trim(),
       );
     for (const [normKey, entry] of Array.from(catalog.entries())) {
       if (entry.category !== "caixas_10l" && !isTenLiterPurchaseItem(entry.name)) continue;

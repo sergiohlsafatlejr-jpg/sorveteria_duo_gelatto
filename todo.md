@@ -197,3 +197,13 @@
 - [ ] Validar a nova versão em produção após publicação.
 - [ ] Conferir saldo físico/unidades legadas e configurar vínculos reais e rendimento das caixas antes de ativar automação.
 - [ ] Ativar e verificar os novos agendamentos persistentes após a publicação dos callbacks.
+
+## Sincronização main — commit 8042003 — 06/11/2026
+- [x] Integrar por fast-forward o commit 8042003 do repositório Duo Gelatto, preservando origin interno.
+- [x] Confirmar zero alterações de schema/dependências e não executar migrações.
+- [x] Revisar diferenças novas de estoque e financeiro sem modificar dados reais.
+- [x] Executar testes isolados, pnpm check e pnpm build.
+- [x] Reiniciar e validar a prévia autenticada das telas afetadas.
+- [x] Salvar checkpoint para publicação.
+- [ ] Publicar/confirmar a versão efetivamente servida em produção.
+- [x] Corrigir regressões novas: preservar vínculo INOVE de caixas, tornar ajuste transacional, impedir inicialização sobre saldo configurado e normalizar nomes 10L sem truncamento.

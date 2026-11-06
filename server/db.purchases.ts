@@ -185,7 +185,7 @@ const VALID_OP_CATEGORIES = new Set([
   "insumos",
 ]);
 
-export async function upsertWarehouseItemStock(data: {
+type WarehouseStockInput = {
   operationalItemId?: number | null;
   boxStockId?: number | null;
   name: string;
@@ -197,19 +197,51 @@ export async function upsertWarehouseItemStock(data: {
   inoveProductId?: number | null;
   reason?: string;
   userId?: number;
-}) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
+};
 
-  const isTenLiterBox =
+type WarehouseDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+type WarehouseTransaction = Parameters<Parameters<WarehouseDb["transaction"]>[0]>[0];
+
+async function warehouseStockTransaction<T>(
+  db: WarehouseDb,
+  work: (tx: WarehouseTransaction) => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      // Next-key locks também serializam a criação de nomes ainda inexistentes.
+      return await db.transaction(work, { isolationLevel: "repeatable read" });
+    } catch (error) {
+      let cause: unknown = error;
+      let deadlock = false;
+      while (cause && typeof cause === "object") {
+        const details = cause as { code?: string; errno?: number; cause?: unknown };
+        if (details.code === "ER_LOCK_DEADLOCK" || details.errno === 1213) {
+          deadlock = true;
+          break;
+        }
+        cause = details.cause;
+      }
+      if (!deadlock || attempt >= 2) throw error;
+    }
+  }
+}
+
+function isWarehouseTenLiterBox(data: WarehouseStockInput): boolean {
+  return (
     data.boxStockId != null ||
     data.category === "caixas_10l" ||
-    /\b10\s*(L|LT|LITRO|LITROS)\b/i.test(data.name);
+    /\b10\s*(?:LITROS?|LT|L)\b/i.test(data.name)
+  );
+}
 
-  if (isTenLiterBox) {
-    const allBoxes = await db.select().from(boxStock).where(eq(boxStock.active, true));
+async function upsertWarehouseBoxStock(
+  tx: WarehouseTransaction,
+  data: WarehouseStockInput,
+  initializeOnly = false,
+) {
+    const allBoxes = await tx.select().from(boxStock).where(eq(boxStock.active, true)).for("update");
     const cleanFlavorName = data.name
-      .replace(/^CAIXA\s*10\s*(L|LT|LITRO|LITROS)\s*[-–—:]?\s*/i, "")
+      .replace(/^CAIXA\s*10\s*(?:LITROS?|LT|L)\b\s*[-–—:]?\s*/i, "")
       .trim();
     const fullKey = normalizeWarehouseNameKey(data.name);
     const flavorKey = normalizeWarehouseNameKey(cleanFlavorName);
@@ -219,17 +251,20 @@ export async function upsertWarehouseItemStock(data: {
       allBoxes.find((b) => {
         const bKey = normalizeWarehouseNameKey(b.name);
         const bFlavor = normalizeWarehouseNameKey(
-          b.name.replace(/^CAIXA\s*10\s*(L|LT|LITRO|LITROS)\s*[-–—:]?\s*/i, "").trim(),
+          b.name.replace(/^CAIXA\s*10\s*(?:LITROS?|LT|L)\b\s*[-–—:]?\s*/i, "").trim(),
         );
         return bKey === fullKey || (flavorKey.length > 0 && (bKey === flavorKey || bFlavor === flavorKey));
       });
+
+    // A existência do cadastro significa saldo configurado, mesmo se estiver zerado.
+    if (initializeOnly && existingBox) return undefined;
 
     const newStockInt = Math.max(0, Math.round(data.quantity));
     const minStockInt = data.minStock != null ? Math.max(0, Math.round(data.minStock)) : (existingBox?.minStock ?? 2);
 
     if (existingBox) {
       const diff = newStockInt - existingBox.currentStock;
-      await db
+      await tx
         .update(boxStock)
         .set({
           currentStock: newStockInt,
@@ -241,7 +276,7 @@ export async function upsertWarehouseItemStock(data: {
         .where(eq(boxStock.id, existingBox.id));
 
       if (diff !== 0) {
-        await db.insert(boxStockMovements).values({
+        await tx.insert(boxStockMovements).values({
           boxId: existingBox.id,
           type: diff > 0 ? "entrada" : "saida",
           quantity: Math.abs(diff),
@@ -253,7 +288,7 @@ export async function upsertWarehouseItemStock(data: {
       }
       return { target: "box_stock" as const, id: existingBox.id, newStock: newStockInt };
     } else {
-      const [inserted] = await db
+      const [inserted] = await tx
         .insert(boxStock)
         .values({
           name: data.name,
@@ -266,7 +301,7 @@ export async function upsertWarehouseItemStock(data: {
         .$returningId();
 
       if (newStockInt > 0) {
-        await db.insert(boxStockMovements).values({
+        await tx.insert(boxStockMovements).values({
           boxId: inserted.id,
           type: "entrada",
           quantity: newStockInt,
@@ -278,6 +313,14 @@ export async function upsertWarehouseItemStock(data: {
       }
       return { target: "box_stock" as const, id: inserted.id, newStock: newStockInt };
     }
+}
+
+export async function upsertWarehouseItemStock(data: WarehouseStockInput) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  if (isWarehouseTenLiterBox(data)) {
+    return warehouseStockTransaction(db, (tx) => upsertWarehouseBoxStock(tx, data));
   }
 
   // Item operacional / unidade (Picolés, Potes, Açaí, Insumos, Almoxarifado)
@@ -319,6 +362,13 @@ export async function upsertWarehouseItemStock(data: {
     return { target: "operational_items" as const, id: targetItem.id, newStock: data.quantity };
   }
 
+  return createWarehouseOperationalStock(db, data);
+}
+
+async function createWarehouseOperationalStock(
+  db: WarehouseDb | WarehouseTransaction,
+  data: WarehouseStockInput,
+) {
   // Criar novo item operacional já configurado em unidades
   const opCategory = (data.category && VALID_OP_CATEGORIES.has(data.category) ? data.category : "insumos") as any;
   const unitsPerPkg = extractUnitsFromDescription(data.name);
@@ -368,21 +418,30 @@ export async function initializeBatchWarehouseStock(
   }>,
   userId?: number,
 ) {
-  let initialized = 0;
-  for (const item of items) {
-    await upsertWarehouseItemStock({
-      name: item.name,
-      category: item.category,
-      unit: item.unit,
-      quantity: item.quantity,
-      minStock: item.minStock,
-      referencePrice: item.referencePrice,
-      reason: "Inicialização em lote pelas Notas Fiscais do mês",
-      userId,
-    });
-    initialized++;
-  }
-  return { initialized };
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return warehouseStockTransaction(db, async (tx) => {
+    // Mesma ordem da confirmação fiscal; o lock de faixa cobre catálogo vazio.
+    const allItems = await tx.select().from(operationalItems)
+      .where(eq(operationalItems.active, true)).for("update");
+    await tx.select().from(boxStock).where(eq(boxStock.active, true)).for("update");
+    const configuredNames = new Set(allItems.map((item) => normalizeWarehouseNameKey(item.name)));
+    let initialized = 0;
+    for (const item of items) {
+      const data = { ...item, reason: "Inicialização em lote pelas Notas Fiscais do mês", userId };
+      if (isWarehouseTenLiterBox(data)) {
+        if (await upsertWarehouseBoxStock(tx, data, true)) initialized++;
+      } else {
+        const nameKey = normalizeWarehouseNameKey(item.name);
+        if (configuredNames.has(nameKey)) continue;
+        await createWarehouseOperationalStock(tx, data);
+        configuredNames.add(nameKey);
+        initialized++;
+      }
+    }
+    return { initialized };
+  });
 }
 
 // ─── Purchase Orders ──────────────────────────────────────────────────────

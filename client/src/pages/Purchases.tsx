@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
-import { buildPurchaseWarehouseCatalog, SORVETE_CATEGORY_LABELS } from "@/lib/purchase-warehouse";
+import { buildPurchaseWarehouseCatalog, getPurchaseWarehouseInoveProductId, SORVETE_CATEGORY_LABELS } from "@/lib/purchase-warehouse";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -1430,8 +1430,7 @@ export default function Purchases() {
                                         const fd = new FormData(e.currentTarget);
                                         const qty = Number(fd.get("qty"));
                                         const min = Number(fd.get("minStock") || 0);
-                                        const pdvRaw = (fd.get("inoveProductId") as string)?.trim();
-                                        const inoveProductId = pdvRaw ? Number(pdvRaw) : null;
+                                        const inoveProductId = getPurchaseWarehouseInoveProductId(fd, item.inoveProductId);
                                         upsertWarehouseStockMutation.mutate({
                                           operationalItemId: item.operationalItemId,
                                           boxStockId: (item as any).boxStockId ?? null,
